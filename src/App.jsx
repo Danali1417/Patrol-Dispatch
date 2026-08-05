@@ -363,13 +363,10 @@ function Shell({ children }) {
 "--info": "#4DA3FF",
         "--mono": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
         "--sans": "'Segoe UI', system-ui, -apple-system, sans-serif",
-        background: "var(--bg)",
+      background: "var(--bg)",
         color: "var(--text)",
         fontFamily: "var(--sans)",
-        minHeight: "600px",
-        borderRadius: 10,
-        overflow: "hidden",
-        border: "1px solid var(--border)",
+        minHeight: "100vh",
       }}
     >
       {children}
