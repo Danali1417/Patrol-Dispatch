@@ -380,7 +380,6 @@ function Logo() {
       <div style={{ width: 26, height: 26, borderRadius: 6, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <Radio size={15} color="#0B0E11" strokeWidth={2.5} />
       </div>
-      <div style={{ fontFamily: "var(--mono)", fontWeight: 700, letterSpacing: 1, fontSize: 15 }}>SENTRYLINE</div>
     </div>
   );
 }
