@@ -349,18 +349,18 @@ function Shell({ children }) {
   return (
     <div
       style={{
-        "--bg": "#12161C",
-"--panel": "#1B212B",
-"--panel-alt": "#212836",
-"--border": "#333D4D",
-"--text": "#F5F8FA",
-"--text-dim": "#A6B3C2",
+        "--bg": "#FFFFFF",
+"--panel": "#FFFFFF",
+"--panel-alt": "#F1F3F5",
+"--border": "#D6DBE1",
+"--text": "#000000",
+"--text-dim": "#4B5563",
 "--accent": "#FFB020",
-"--accent-dim": "#6B4A14",
-"--ok": "#3DDC84",
-"--warn": "#FFB020",
-"--breach": "#FF5C5C",
-"--info": "#4DA3FF",
+"--accent-dim": "#FFF1D6",
+"--ok": "#15803D",
+"--warn": "#B45309",
+"--breach": "#DC2626",
+"--info": "#2563EB",
         "--mono": "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
         "--sans": "'Segoe UI', system-ui, -apple-system, sans-serif",
       background: "var(--bg)",
@@ -380,7 +380,6 @@ function Logo() {
       <div style={{ width: 26, height: 26, borderRadius: 6, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <Radio size={15} color="#0B0E11" strokeWidth={2.5} />
       </div>
-      <div style={{ fontFamily: "var(--mono)", fontWeight: 700, letterSpacing: 1, fontSize: 15 }}>SENTRYLINE</div>
     </div>
   );
 }
@@ -562,7 +561,7 @@ function TopBar({ session, onSignOut, onOpenSettings, now }) {
 function NotifBanner({ banner, onDismiss }) {
   const isBreach = banner.type === "breach";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", background: isBreach ? "#3A1414" : "#1E2A17", borderBottom: `1px solid ${isBreach ? "var(--breach)" : "var(--ok)"}`, color: isBreach ? "#FCA5A5" : "#86EFAC", fontSize: 12.5 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", background: isBreach ? "#FEF2F2" : "#F0FDF4", borderBottom: `1px solid ${isBreach ? "var(--breach)" : "var(--ok)"}`, color: isBreach ? "#B91C1C" : "#166534", fontSize: 12.5 }}>
       {isBreach ? <AlertTriangle size={15} /> : <Bell size={15} />}
       <span style={{ flex: 1 }}>{banner.text}</span>
       <button onClick={onDismiss} style={{ background: "none", border: "none", color: "inherit", cursor: "pointer" }}><X size={14} /></button>
@@ -620,7 +619,7 @@ function SettingsModal({ session, accounts, persistAccounts, onClose }) {
 const STATUS_META = {
   dispatched: { label: "Dispatched", color: "var(--info)" },
   submitted: { label: "Awaiting review", color: "var(--warn)" },
-  reviewed: { label: "Reviewed", color: "#A78BFA" },
+  reviewed: { label: "Reviewed", color: "#7C3AED" },
   emailed: { label: "Sent to client", color: "var(--ok)" },
 };
 
@@ -860,8 +859,8 @@ function JobDetailOperator({ job, jobs, patrolmen, persist, now, onBack }) {
       </div>
 
       {job.status === "dispatched" && t.level === "breach" && !job.delayReason && (
-        <div style={{ marginTop: 16, padding: 14, borderRadius: 8, border: "1px solid var(--breach)", background: "#2A1212" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#FCA5A5", fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>
+        <div style={{ marginTop: 16, padding: 14, borderRadius: 8, border: "1px solid var(--breach)", background: "#FEF2F2" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#B91C1C", fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>
             <AlertTriangle size={14} /> Response time exceeded — log a reason and advise the client
           </div>
           <textarea rows={2} value={delayText} onChange={(e) => setDelayText(e.target.value)} placeholder="e.g. Traffic incident on route, ETA 15 min — client notified by phone at 21:42" style={{ ...selectStyle, resize: "vertical" }} />
@@ -872,7 +871,7 @@ function JobDetailOperator({ job, jobs, patrolmen, persist, now, onBack }) {
       )}
 
       {job.delayReason && (
-        <div style={{ marginTop: 16, padding: 12, borderRadius: 8, border: "1px solid var(--warn)55", background: "#241C0C", fontSize: 12.5 }}>
+        <div style={{ marginTop: 16, padding: 12, borderRadius: 8, border: "1px solid var(--warn)55", background: "#FFFBEB", fontSize: 12.5 }}>
           <b style={{ color: "var(--warn)" }}>Delay logged</b> · {fmtTime(job.delayLoggedAt)} — {job.delayReason}
         </div>
       )}
