@@ -530,6 +530,7 @@ function Login({ accounts, accountsLoaded, onLogin }) {
 const roleCardStyle = {
   display: "flex", alignItems: "center", gap: 12, padding: "14px 14px", borderRadius: 9,
   border: "1px solid var(--border)", background: "var(--panel)", cursor: "pointer", textAlign: "left",
+  color: "var(--text)", font: "inherit",
 };
 
 /* ---------------------------------------------------------------
