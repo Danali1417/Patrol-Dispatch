@@ -756,14 +756,30 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, persi
   const [addingSite, setAddingSite] = useState(false);
 
   const site = sites.find((s) => s.id === siteId);
-  const todaysRoster = site ? roster.filter((r) => r.date === todayISO() && r.run === site.run) : [];
-  const rosteredPatrolmen = todaysRoster
-    .map((r) => patrolmen.find((p) => p.loginName === r.patrolmanLoginName))
-    .filter(Boolean);
-  const recommended = site
-    ? (rosteredPatrolmen.length ? rosteredPatrolmen : patrolmen.filter((r) => r.run === site.run))
-    : [];
-  const recommendedLabel = rosteredPatrolmen.length ? "Rostered on this run today" : "On this run";
+
+  const todaysEntries = roster.filter((r) => r.date === todayISO());
+  function rosteredPatrolmenFor(run) {
+    const seen = new Set();
+    return todaysEntries
+      .filter((r) => r.run === run)
+      .map((r) => patrolmen.find((p) => p.loginName === r.patrolmanLoginName))
+      .filter((p) => p && !seen.has(p.loginName) && seen.add(p.loginName));
+  }
+
+  const rosteredOnThisRun = site ? rosteredPatrolmenFor(site.run) : [];
+  const fallbackOnThisRun = site && rosteredOnThisRun.length === 0 ? patrolmen.filter((p) => p.run === site.run) : [];
+  const rosteredElsewhereToday = (() => {
+    const seen = new Set(rosteredOnThisRun.map((p) => p.loginName));
+    return todaysEntries
+      .filter((r) => !site || r.run !== site.run)
+      .map((r) => {
+        const p = patrolmen.find((p) => p.loginName === r.patrolmanLoginName);
+        return p ? { ...p, run: r.run } : null;
+      })
+      .filter((p) => p && !seen.has(p.loginName) && seen.add(p.loginName));
+  })();
+
+  const recommended = rosteredOnThisRun.length ? rosteredOnThisRun : fallbackOnThisRun;
 
   const siteLabel = (s) => `${s.name} — ${s.address}`;
 
@@ -881,7 +897,9 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, persi
       <Field label="Dispatch to">
         <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} style={selectStyle}>
           <option value="">Select patrolman…</option>
-          {recommended.length > 0 && <optgroup label={recommendedLabel}>{recommended.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName} · {r.loginName}</option>)}</optgroup>}
+          {rosteredOnThisRun.length > 0 && <optgroup label="Rostered on this run today">{rosteredOnThisRun.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName} · {r.loginName}</option>)}</optgroup>}
+          {fallbackOnThisRun.length > 0 && <optgroup label="On this run">{fallbackOnThisRun.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName} · {r.loginName}</option>)}</optgroup>}
+          {rosteredElsewhereToday.length > 0 && <optgroup label="Rostered today (other runs)">{rosteredElsewhereToday.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName} · {r.run} · {r.loginName}</option>)}</optgroup>}
           <optgroup label="All patrolmen">{patrolmen.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName} · {r.run} · {r.loginName}</option>)}</optgroup>
         </select>
       </Field>
