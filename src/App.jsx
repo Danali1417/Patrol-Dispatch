@@ -739,11 +739,11 @@ function Login({ accounts, accountsLoaded, autoLoggedOut, logoUrl, companyName, 
         Forgotten your password? Ask your Manager to look it up or reset it from Manage logins. Use the settings icon (top right) after signing in to change it yourself.
       </div>
 
-      <div style={{ marginTop: 10, fontSize: 10.5, color: "var(--text-dim)", fontFamily: "var(--mono)", textAlign: "center" }}>
-        {accountsLoaded
-          ? `${accounts.length} account(s) loaded · ${accounts.filter((a) => a.role === "manager").length} manager, ${accounts.filter((a) => a.role === "operator").length} control room, ${accounts.filter((a) => a.role === "patrolman").length} patrolman`
-          : "Loading accounts…"}
-      </div>
+      {!accountsLoaded && (
+        <div style={{ marginTop: 10, fontSize: 10.5, color: "var(--text-dim)", fontFamily: "var(--mono)", textAlign: "center" }}>
+          Loading accounts…
+        </div>
+      )}
     </div>
   );
 }
