@@ -1152,12 +1152,14 @@ ${job.photos?.length ? `${job.photos.length} time-stamped photo(s) attached.` : 
 function Logs({ jobs, now }) {
   const attended = jobs.filter((j) => j.onsiteTime);
   const avgResp = attended.length ? Math.round(attended.reduce((s, j) => s + jobTiming(j, now).elapsed, 0) / attended.length) : 0;
-  const breaches = jobs.filter((j) => (j.onsiteTime ? jobTiming(j, now).elapsed > jobTiming(j, now).slaMin : jobTiming(j, now).level === "breach")).length;
+  const cancelled = jobs.filter((j) => j.status === "cancelled");
+  const breaches = jobs.filter((j) => j.status !== "cancelled" && (j.onsiteTime ? jobTiming(j, now).elapsed > jobTiming(j, now).slaMin : jobTiming(j, now).level === "breach")).length;
 
   const byCompany = {};
   jobs.forEach((j) => {
-    byCompany[j.monitoringCo] = byCompany[j.monitoringCo] || { count: 0, respSum: 0, respN: 0 };
+    byCompany[j.monitoringCo] = byCompany[j.monitoringCo] || { count: 0, respSum: 0, respN: 0, cancelled: 0 };
     byCompany[j.monitoringCo].count++;
+    if (j.status === "cancelled") byCompany[j.monitoringCo].cancelled++;
     if (j.onsiteTime) { byCompany[j.monitoringCo].respSum += jobTiming(j, now).elapsed; byCompany[j.monitoringCo].respN++; }
   });
 
@@ -1169,17 +1171,35 @@ function Logs({ jobs, now }) {
         <Stat label="Attended" value={attended.length} />
         <Stat label="Avg. response time" value={`${avgResp}m`} />
         <Stat label="SLA breaches" value={breaches} accent={breaches > 0 ? "var(--breach)" : "var(--ok)"} />
+        <Stat label="Cancelled / stood down" value={cancelled.length} />
       </div>
       <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text-dim)", marginBottom: 8 }}>By monitoring company</div>
       <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
         {Object.entries(byCompany).sort((a, b) => b[1].count - a[1].count).map(([name, d], i) => (
           <div key={name} style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", fontSize: 12.5, borderTop: i ? "1px solid var(--border)" : "none", background: "var(--panel)" }}>
             <span>{name}</span>
-            <span style={{ color: "var(--text-dim)", fontFamily: "var(--mono)" }}>{d.count} job{d.count !== 1 ? "s" : ""} · avg {d.respN ? Math.round(d.respSum / d.respN) : "—"}m</span>
+            <span style={{ color: "var(--text-dim)", fontFamily: "var(--mono)" }}>{d.count} job{d.count !== 1 ? "s" : ""} · avg {d.respN ? Math.round(d.respSum / d.respN) : "—"}m{d.cancelled ? ` · ${d.cancelled} cancelled` : ""}</span>
           </div>
         ))}
         {Object.keys(byCompany).length === 0 && <div style={{ padding: 20, textAlign: "center", color: "var(--text-dim)", fontSize: 12.5 }}>No jobs logged yet.</div>}
       </div>
+
+      {cancelled.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text-dim)", margin: "22px 0 8px" }}>Cancelled / stood down</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {cancelled.sort((a, b) => new Date(b.cancelledAt || b.dispatchTime) - new Date(a.cancelledAt || a.dispatchTime)).map((j) => (
+              <div key={j.id} style={{ padding: "10px 14px", borderRadius: 8, background: "var(--panel)", border: "1px solid var(--border)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5 }}>
+                  <span><b>{j.jobNumber}</b> — {j.siteName}</span>
+                  <span style={{ color: "var(--text-dim)", fontFamily: "var(--mono)" }}>{fmtDateTime(j.cancelledAt)}</span>
+                </div>
+                {j.cancelReason && <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 4 }}>{j.cancelReason}</div>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
