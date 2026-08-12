@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useContext, createContext } from "react";
 import {
   Bell, Camera, CheckCircle2, AlertTriangle, Clock, LogOut, Mail,
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
@@ -203,8 +203,18 @@ export default function SentrylinePrototype() {
   const [banner, setBanner] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
   const [autoLoggedOut, setAutoLoggedOut] = useState(false);
+  const [toast, setToast] = useState(null);
   const prevJobsRef = useRef([]);
   const lastActivityRef = useRef(Date.now());
+  const toastTimerRef = useRef(null);
+
+  const showToast = useCallback((text, type = "success") => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast({ text, type });
+    toastTimerRef.current = setTimeout(() => setToast(null), 2200);
+  }, []);
+
+  useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 15000);
@@ -420,36 +430,75 @@ export default function SentrylinePrototype() {
 
   if (!session) {
     return (
-      <Shell>
-        <Login
-          accounts={accounts}
-          accountsLoaded={accountsLoaded}
-          autoLoggedOut={autoLoggedOut}
-          logoUrl={logoUrl}
-          companyName={companyName}
-          onLogin={(s) => { setSession(s); setAutoLoggedOut(false); }}
-        />
-      </Shell>
+      <ToastContext.Provider value={showToast}>
+        <Shell>
+          <Login
+            accounts={accounts}
+            accountsLoaded={accountsLoaded}
+            autoLoggedOut={autoLoggedOut}
+            logoUrl={logoUrl}
+            companyName={companyName}
+            onLogin={(s) => { setSession(s); setAutoLoggedOut(false); }}
+          />
+          <ToastOverlay toast={toast} />
+        </Shell>
+      </ToastContext.Provider>
     );
   }
 
   return (
-    <Shell>
-      <TopBar session={session} onSignOut={() => setSession(null)} onOpenSettings={() => setShowSettings(true)} now={now} logoUrl={logoUrl} companyName={companyName} />
-      {banner && <NotifBanner banner={banner} onDismiss={() => setBanner(null)} />}
-      {showSettings && (
-        <SettingsModal session={session} accounts={accounts} persistAccounts={persistAccounts} onClose={() => setShowSettings(false)} />
-      )}
-      {!accountsLoaded || !sitesLoaded ? (
-        <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
-      ) : session.role === "manager" ? (
-        <ManagerView session={session} accounts={accounts} persistAccounts={persistAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} now={now} />
-      ) : session.role === "operator" ? (
-        <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} />
-      ) : (
-        <PatrolmanView session={session} jobs={jobs} persist={persistJobs} now={now} />
-      )}
-    </Shell>
+    <ToastContext.Provider value={showToast}>
+      <Shell>
+        <TopBar session={session} onSignOut={() => setSession(null)} onOpenSettings={() => setShowSettings(true)} now={now} logoUrl={logoUrl} companyName={companyName} />
+        {banner && <NotifBanner banner={banner} onDismiss={() => setBanner(null)} />}
+        {showSettings && (
+          <SettingsModal session={session} accounts={accounts} persistAccounts={persistAccounts} onClose={() => setShowSettings(false)} />
+        )}
+        {!accountsLoaded || !sitesLoaded ? (
+          <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
+        ) : session.role === "manager" ? (
+          <ManagerView session={session} accounts={accounts} persistAccounts={persistAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} now={now} />
+        ) : session.role === "operator" ? (
+          <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} />
+        ) : (
+          <PatrolmanView session={session} jobs={jobs} persist={persistJobs} now={now} />
+        )}
+        <ToastOverlay toast={toast} />
+      </Shell>
+    </ToastContext.Provider>
+  );
+}
+
+/* ---------------------------------------------------------------
+   TOAST — a brief confirmation popup, centered in the window, for
+   "saved / removed / created" style actions across the app.
+---------------------------------------------------------------- */
+
+const ToastContext = createContext(() => {});
+function useToast() {
+  return useContext(ToastContext);
+}
+
+function ToastOverlay({ toast }) {
+  if (!toast) return null;
+  const isError = toast.type === "error";
+  return (
+    <div style={{ position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999, pointerEvents: "none" }}>
+      <div
+        style={{
+          display: "flex", alignItems: "center", gap: 10, padding: "14px 24px", borderRadius: 10,
+          background: isError ? "#FEF2F2" : "#FFFFFF",
+          border: `1px solid ${isError ? "var(--breach)" : "var(--ok)"}`,
+          boxShadow: "0 12px 32px rgba(0,0,0,0.22)",
+          fontSize: 13.5, fontWeight: 600,
+          color: isError ? "#B91C1C" : "var(--text)",
+          maxWidth: 360, textAlign: "center",
+        }}
+      >
+        {isError ? <AlertTriangle size={17} color="var(--breach)" /> : <CheckCircle2 size={17} color="var(--ok)" />}
+        {toast.text}
+      </div>
+    </div>
   );
 }
 
@@ -694,7 +743,7 @@ function SettingsModal({ session, accounts, persistAccounts, onClose }) {
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
-  const [done, setDone] = useState(false);
+  const showToast = useToast();
 
   function submit() {
     setError("");
@@ -704,7 +753,8 @@ function SettingsModal({ session, accounts, persistAccounts, onClose }) {
     if (next !== confirm) { setError("New passwords don't match."); return; }
     const updated = accounts.map((a) => (a.loginName === session.loginName && a.role === session.role ? { ...a, password: next } : a));
     persistAccounts(updated);
-    setDone(true);
+    onClose();
+    showToast("Password updated.");
   }
 
   return (
@@ -714,19 +764,13 @@ function SettingsModal({ session, accounts, persistAccounts, onClose }) {
           <SectionTitle icon={Lock} title="Change password" small />
           <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer" }}><X size={16} /></button>
         </div>
-        {done ? (
-          <div style={{ color: "var(--ok)", fontSize: 13, display: "flex", alignItems: "center", gap: 7 }}>
-            <CheckCircle2 size={15} /> Password updated.
-          </div>
-        ) : (
-          <div>
-            <Field label="Current password"><input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} style={selectStyle} /></Field>
-            <Field label="New password"><input type="password" value={next} onChange={(e) => setNext(e.target.value)} style={selectStyle} /></Field>
-            <Field label="Confirm new password"><input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} style={selectStyle} /></Field>
-            {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
-            <button type="button" onClick={submit} style={{ ...primaryBtn, width: "100%", justifyContent: "center" }}>Update password</button>
-          </div>
-        )}
+        <div>
+          <Field label="Current password"><input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} style={selectStyle} /></Field>
+          <Field label="New password"><input type="password" value={next} onChange={(e) => setNext(e.target.value)} style={selectStyle} /></Field>
+          <Field label="Confirm new password"><input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} style={selectStyle} /></Field>
+          {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
+          <button type="button" onClick={submit} style={{ ...primaryBtn, width: "100%", justifyContent: "center" }}>Update password</button>
+        </div>
       </div>
     </div>
   );
@@ -1088,6 +1132,7 @@ function JobDetailOperator({ job, jobs, patrolmen, session, persist, now, onBack
   const [showEmail, setShowEmail] = useState(false);
   const [showCancelForm, setShowCancelForm] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
+  const showToast = useToast();
 
   useEffect(() => setNotes(job.reviewNotes || job.outcomeNotes), [job.id]);
 
@@ -1107,10 +1152,12 @@ function JobDetailOperator({ job, jobs, patrolmen, session, persist, now, onBack
   function confirmCancel() {
     update({ status: "cancelled", cancelReason: cancelReason.trim(), cancelledAt: new Date().toISOString() });
     setShowCancelForm(false);
+    showToast("Job cancelled.");
   }
 
   function takeJob() {
     update({ handlingLoginName: session.loginName, handlingName: session.displayName });
+    showToast("You're now handling this job.");
   }
 
   const isHandling = job.handlingLoginName === session.loginName;
@@ -1634,6 +1681,7 @@ function LogoUploader({ logoUrl, persistLogo, companyName, persistCompanyName })
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [nameInput, setNameInput] = useState(companyName || "");
+  const showToast = useToast();
 
   useEffect(() => { setNameInput(companyName || ""); }, [companyName]);
 
@@ -1646,6 +1694,7 @@ function LogoUploader({ logoUrl, persistLogo, companyName, persistCompanyName })
     try {
       const dataUrl = await resizeLogo(file);
       await persistLogo(dataUrl);
+      showToast("Logo updated.");
     } catch (err) {
       setError("Couldn't read that image — try a different file.");
     }
@@ -1654,7 +1703,7 @@ function LogoUploader({ logoUrl, persistLogo, companyName, persistCompanyName })
 
   function saveName() {
     const trimmed = nameInput.trim();
-    if (trimmed && trimmed !== companyName) persistCompanyName(trimmed);
+    if (trimmed && trimmed !== companyName) { persistCompanyName(trimmed); showToast("Company name saved."); }
   }
 
   return (
@@ -1670,7 +1719,7 @@ function LogoUploader({ logoUrl, persistLogo, companyName, persistCompanyName })
         <button onClick={() => fileRef.current?.click()} disabled={busy} style={secondaryBtn}>
           <Upload size={13} /> {busy ? "Uploading…" : logoUrl ? "Replace" : "Upload"}
         </button>
-        {logoUrl && <button onClick={() => persistLogo("")} title="Remove logo" style={iconBtn}><X size={13} /></button>}
+        {logoUrl && <button onClick={() => { persistLogo(""); showToast("Logo removed."); }} title="Remove logo" style={iconBtn}><X size={13} /></button>}
         <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFile} />
       </div>
       {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 8 }}>{error}</div>}
@@ -1702,17 +1751,17 @@ function AccountsManager({ accounts, persistAccounts, zones, session, logoUrl, p
   const [run, setRun] = useState("Unassigned");
   const [contactNumber, setContactNumber] = useState("");
   const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const showToast = useToast();
 
   function createAccount() {
-    setError(""); setSuccess("");
+    setError("");
     const name = loginName.trim();
     if (!name || !password) { setError("Login name and password are required."); return; }
     if (accounts.some((a) => a.loginName.toLowerCase() === name.toLowerCase())) { setError("That login name is already in use — pick a unique one."); return; }
     const acct = { loginName: name, password, role, displayName: displayName.trim() || name, active: true, contactNumber: contactNumber.trim() };
     if (role === "patrolman") { acct.shift = shift.trim(); acct.run = run; }
     persistAccounts([...accounts, acct]);
-    setSuccess(`Login "${name}" created.`);
+    showToast(`Login "${name}" created.`);
     setLoginName(""); setPassword(""); setDisplayName(""); setShift(""); setRun("Unassigned"); setContactNumber("");
   }
 
@@ -1768,7 +1817,6 @@ function AccountsManager({ accounts, persistAccounts, zones, session, logoUrl, p
         </Field>
 
         {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
-        {success && <div style={{ color: "var(--ok)", fontSize: 12, marginBottom: 10 }}>{success}</div>}
 
         <button onClick={createAccount} style={primaryBtn}><UserPlus size={14} /> Create login</button>
       </div>
@@ -1802,6 +1850,7 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
   const [newContact, setNewContact] = useState(account.contactNumber || "");
   const [showSendLogin, setShowSendLogin] = useState(false);
   const [copied, setCopied] = useState(false);
+  const showToast = useToast();
 
   function update(patch) {
     persistAccounts(accounts.map((a) => (a.loginName === account.loginName && a.role === account.role ? { ...a, ...patch } : a)));
@@ -1811,6 +1860,7 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
     if (isSelf) { window.alert("You can't delete the login you're currently signed in with."); return; }
     if (window.confirm(`Delete login "${account.loginName}"? This can't be undone.`)) {
       persistAccounts(accounts.filter((a) => !(a.loginName === account.loginName && a.role === account.role)));
+      showToast(`Login "${account.loginName}" removed.`);
     }
   }
 
@@ -1838,7 +1888,7 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
         )}
         <button onClick={() => { setCopied(false); setShowSendLogin((v) => !v); }} title="Send login details" style={iconBtn}><Send size={13} /></button>
         <button onClick={() => { setNewContact(account.contactNumber || ""); setEditingContact((v) => !v); }} title="Edit contact number" style={iconBtn}><Phone size={13} /></button>
-        <button onClick={() => update({ active: inactive ? true : false })} title={inactive ? "Reactivate login" : "Deactivate login"} style={iconBtn}>
+        <button onClick={() => { update({ active: inactive ? true : false }); showToast(inactive ? "Login reactivated." : "Login deactivated."); }} title={inactive ? "Reactivate login" : "Deactivate login"} style={iconBtn}>
           <Power size={13} color={inactive ? "var(--ok)" : "var(--text-dim)"} />
         </button>
         <button onClick={() => { setNewPw(account.password || ""); setShowPw(false); setEditingPw((v) => !v); }} title="View / change password" style={iconBtn}><RotateCcw size={13} /></button>
@@ -1868,7 +1918,7 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           <input value={newContact} onChange={(e) => setNewContact(e.target.value)} placeholder="Contact number" style={{ ...selectStyle, fontSize: 12 }} />
           <button
-            onClick={() => { update({ contactNumber: newContact.trim() }); setEditingContact(false); }}
+            onClick={() => { update({ contactNumber: newContact.trim() }); setEditingContact(false); showToast("Contact number saved."); }}
             style={secondaryBtn}
           >
             Save
@@ -1890,7 +1940,7 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
             </button>
           </div>
           <button
-            onClick={() => { if (newPw.length >= 4) { update({ password: newPw }); setEditingPw(false); } }}
+            onClick={() => { if (newPw.length >= 4) { update({ password: newPw }); setEditingPw(false); showToast("Password saved."); } }}
             style={secondaryBtn}
           >
             Save
@@ -1920,6 +1970,7 @@ function ZonesEditor({ zones, persistZones, sites, persistSites, accounts, persi
   const [error, setError] = useState("");
   const [renaming, setRenaming] = useState(null); // zone name currently being renamed
   const [renameValue, setRenameValue] = useState("");
+  const showToast = useToast();
 
   function addZone() {
     setError("");
@@ -1928,6 +1979,7 @@ function ZonesEditor({ zones, persistZones, sites, persistSites, accounts, persi
     if (zones.some((z) => z.toLowerCase() === name.toLowerCase())) { setError("That run name already exists."); return; }
     persistZones([...zones, name]);
     setNewZone("");
+    showToast(`Run "${name}" added.`);
   }
 
   function startRename(z) { setRenaming(z); setRenameValue(z); }
@@ -1942,6 +1994,7 @@ function ZonesEditor({ zones, persistZones, sites, persistSites, accounts, persi
     persistAccounts(accounts.map((a) => (a.role === "patrolman" && a.run === oldName ? { ...a, run: newName } : a)));
     setRenaming(null);
     setError("");
+    showToast(`Run renamed to "${newName}".`);
   }
 
   function removeZone(z) {
@@ -1954,6 +2007,7 @@ function ZonesEditor({ zones, persistZones, sites, persistSites, accounts, persi
     persistZones(zones.filter((r) => r !== z));
     if (siteCount) persistSites(sites.map((s) => (s.run === z ? { ...s, run: "Unassigned" } : s)));
     if (patrolCount) persistAccounts(accounts.map((a) => (a.role === "patrolman" && a.run === z ? { ...a, run: "Unassigned" } : a)));
+    showToast(`Run "${z}" removed.`);
   }
 
   return (
@@ -2108,6 +2162,7 @@ function SitesEditor({ zones, sites, persistSites }) {
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("");
+  const showToast = useToast();
 
   function set(field, value) { setForm((f) => ({ ...f, [field]: value })); }
 
@@ -2119,8 +2174,10 @@ function SitesEditor({ zones, sites, persistSites }) {
     if (!form.name.trim() || !form.address.trim()) { setError("Site name and address are required."); return; }
     if (editingId) {
       persistSites(sites.map((s) => (s.id === editingId ? { ...form, id: editingId } : s)));
+      showToast("Site changes saved.");
     } else {
       persistSites([...sites, { ...form, id: `site_${Date.now()}` }]);
+      showToast(`Site "${form.name.trim()}" added.`);
     }
     cancelEdit();
   }
@@ -2129,6 +2186,7 @@ function SitesEditor({ zones, sites, persistSites }) {
     if (window.confirm("Delete this site? Past jobs already dispatched to it keep their own record.")) {
       persistSites(sites.filter((s) => s.id !== id));
       if (editingId === id) cancelEdit();
+      showToast("Site removed.");
     }
   }
 
@@ -2136,6 +2194,7 @@ function SitesEditor({ zones, sites, persistSites }) {
     if (window.confirm(`Delete all ${sites.length} site(s)? This can't be undone — past jobs already dispatched keep their own record, but the site list will be empty.`)) {
       persistSites([]);
       cancelEdit();
+      showToast("All sites removed.");
     }
   }
 
@@ -2353,6 +2412,7 @@ function RosterView({ zones, accounts, roster, persistRoster }) {
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState("");
+  const showToast = useToast();
 
   const patrolmen = accounts.filter((a) => a.role === "patrolman");
 
@@ -2380,8 +2440,10 @@ function RosterView({ zones, accounts, roster, persistRoster }) {
     const entry = { ...form, patrolmanName: form.patrolmanName.trim() };
     if (editingId) {
       persistRoster(roster.map((r) => (r.id === editingId ? { ...entry, id: editingId } : r)));
+      showToast("Roster entry updated.");
     } else {
       persistRoster([...roster, { ...entry, id: `roster_${Date.now()}` }]);
+      showToast("Roster entry added.");
     }
     cancelEdit();
   }
@@ -2390,6 +2452,7 @@ function RosterView({ zones, accounts, roster, persistRoster }) {
     if (window.confirm("Remove this roster entry?")) {
       persistRoster(roster.filter((r) => r.id !== id));
       if (editingId === id) cancelEdit();
+      showToast("Roster entry removed.");
     }
   }
 
