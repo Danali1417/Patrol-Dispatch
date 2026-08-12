@@ -10,18 +10,10 @@ import {
    SEED / REFERENCE DATA
 ---------------------------------------------------------------- */
 
-const DEFAULT_SITES = [
-  { id: "s1", name: "Northgate Logistics Warehouse", address: "14 Dockside Rd, Coburg VIC", run: "North Run", monitoringCo: "Argus Monitoring", keyInfo: "Key box #4471, code 8821", alarmCode: "3492" },
-  { id: "s2", name: "Meadowvale Shopping Centre", address: "220 High St, Preston VIC", run: "North Run", monitoringCo: "Argus Monitoring", keyInfo: "Centre mgmt holds keys — after hours contact 0412 555 019", alarmCode: "6610" },
-  { id: "s3", name: "Southbank Executive Offices L1-9", address: "88 Riverside Ave, Southbank VIC", run: "South Run", monitoringCo: "Vantage Security Services", keyInfo: "Master key #12, lobby cabinet A", alarmCode: "1178" },
-  { id: "s4", name: "Portside Container Yard", address: "5 Wharf Rd, Port Melbourne VIC", run: "South Run", monitoringCo: "Vantage Security Services", keyInfo: "No keys held — gate guard on-site", alarmCode: "N/A" },
-  { id: "s5", name: "CBD Data Centre — Tower 3", address: "500 Collins St, Melbourne VIC", run: "CBD Run", monitoringCo: "Praetorian Alarms", keyInfo: "Biometric access — building security escorts", alarmCode: "5527" },
-  { id: "s6", name: "Queen Street Retail Strip (Units 1–14)", address: "1–14 Queen St, Melbourne VIC", run: "CBD Run", monitoringCo: "Praetorian Alarms", keyInfo: "Key run #2 — see key register", alarmCode: "9034" },
-  { id: "s7", name: "Eastfield Business Park B4", address: "77 Enterprise Dr, Box Hill VIC", run: "East Run", monitoringCo: "Argus Monitoring", keyInfo: "Key box #4472, code 3305", alarmCode: "4471" },
-  { id: "s8", name: "Ringwood Self-Storage Facility", address: "9 Depot Ln, Ringwood VIC", run: "East Run", monitoringCo: "Vantage Security Services", keyInfo: "Duty manager holds master — on-call 0433 220 771", alarmCode: "7702" },
-  { id: "s9", name: "Westgate Industrial Estate — Unit 12", address: "31 Fairbank Cres, Altona VIC", run: "West Run", monitoringCo: "Praetorian Alarms", keyInfo: "Key box #4473, code 1190", alarmCode: "2265" },
-  { id: "s10", name: "Sunshine Automotive Precinct", address: "160 Hampshire Rd, Sunshine VIC", run: "West Run", monitoringCo: "Argus Monitoring", keyInfo: "No keys held — attend perimeter only", alarmCode: "N/A" },
-];
+// Sites are no longer seeded with sample data — the board starts with an
+// empty site list. Add sites as jobs come in (Control Room, from the New
+// Job screen) or in bulk via Manager > Sites & runs > Import from Excel.
+const DEFAULT_SITES = [];
 
 // Zones/runs are named by you — this is only the starting list a fresh
 // board is seeded with. Rename, add, or delete these from the Manager
@@ -732,6 +724,7 @@ function Empty({ text }) {
 
 function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, persist, onCreated }) {
   const [siteId, setSiteId] = useState("");
+  const [siteQuery, setSiteQuery] = useState("");
   const [description, setDescription] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
   const [keyInfo, setKeyInfo] = useState("");
@@ -740,6 +733,8 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, persist, onCr
 
   const site = sites.find((s) => s.id === siteId);
   const recommended = site ? patrolmen.filter((r) => r.run === site.run) : [];
+
+  const siteLabel = (s) => `${s.name} — ${s.address}`;
 
   useEffect(() => {
     if (site) {
@@ -750,9 +745,17 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, persist, onCr
     // eslint-disable-next-line
   }, [siteId]);
 
+  function handleSiteQueryChange(value) {
+    setSiteQuery(value);
+    const match = sites.find((s) => siteLabel(s) === value);
+    setSiteId(match ? match.id : "");
+    if (match) setAddingSite(false);
+  }
+
   function handleSiteAdded(newSite) {
     persistSites([...sites, newSite]);
     setSiteId(newSite.id);
+    setSiteQuery(siteLabel(newSite));
     setAddingSite(false);
   }
 
@@ -786,7 +789,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, persist, onCr
       emailedAt: null,
     };
     await persist([...jobs, job]);
-    setSiteId(""); setDescription(""); setAssigneeId(""); setKeyInfo(""); setAlarmCode("");
+    setSiteId(""); setSiteQuery(""); setDescription(""); setAssigneeId(""); setKeyInfo(""); setAlarmCode("");
     onCreated(job.id);
   }
 
@@ -794,23 +797,34 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, persist, onCr
     <div style={{ maxWidth: 560 }}>
       <SectionTitle icon={Send} title="Dispatch a new alarm response" />
       <Field label="Site">
-        <select
-          value={addingSite ? "__new__" : siteId}
-          onChange={(e) => {
-            if (e.target.value === "__new__") { setAddingSite(true); return; }
-            setAddingSite(false);
-            setSiteId(e.target.value);
-          }}
-          style={selectStyle}
-        >
-          <option value="">Select site…</option>
-          {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          <option value="__new__">+ Add a new site…</option>
-        </select>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            list="new-job-site-options"
+            value={siteQuery}
+            onChange={(e) => handleSiteQueryChange(e.target.value)}
+            placeholder="Start typing a site name…"
+            style={{ ...selectStyle, flex: 1 }}
+          />
+          <datalist id="new-job-site-options">
+            {sites.map((s) => <option key={s.id} value={siteLabel(s)} />)}
+          </datalist>
+          <button
+            type="button"
+            onClick={() => { setAddingSite(true); setSiteId(""); }}
+            style={{ ...secondaryBtn, whiteSpace: "nowrap" }}
+          >
+            <MapPin size={13} /> New site
+          </button>
+        </div>
+        {siteQuery && !site && !addingSite && (
+          <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 6 }}>
+            No matching site yet — click "New site" to add "{siteQuery}".
+          </div>
+        )}
       </Field>
 
       {addingSite && (
-        <AddSiteInline zones={zones} onCancel={() => setAddingSite(false)} onAdded={handleSiteAdded} />
+        <AddSiteInline zones={zones} initialName={site ? "" : siteQuery} onCancel={() => setAddingSite(false)} onAdded={handleSiteAdded} />
       )}
 
       {site && !addingSite && (
@@ -850,8 +864,8 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, persist, onCr
 
 /* ---------------------- Inline "add a new site" (Control Room) ---------------------- */
 
-function AddSiteInline({ zones, onCancel, onAdded }) {
-  const blank = { name: "", address: "", poNumber: "", monitoringCo: "", bureau: "", run: zones[0] || "Unassigned" };
+function AddSiteInline({ zones, initialName = "", onCancel, onAdded }) {
+  const blank = { name: initialName, address: "", poNumber: "", monitoringCo: "", bureau: "", run: zones[0] || "Unassigned" };
   const [form, setForm] = useState(blank);
   const [error, setError] = useState("");
 
@@ -1769,6 +1783,13 @@ function SitesEditor({ zones, sites, persistSites }) {
     }
   }
 
+  function clearAll() {
+    if (window.confirm(`Delete all ${sites.length} site(s)? This can't be undone — past jobs already dispatched keep their own record, but the site list will be empty.`)) {
+      persistSites([]);
+      cancelEdit();
+    }
+  }
+
   const q = filter.trim().toLowerCase();
   const filteredSites = q
     ? sites.filter((s) => [s.name, s.address, s.monitoringCo, s.bureau, s.poNumber].some((v) => (v || "").toLowerCase().includes(q)))
@@ -1809,7 +1830,14 @@ function SitesEditor({ zones, sites, persistSites }) {
 
       <SitesImport zones={zones} sites={sites} persistSites={persistSites} />
 
-      <SectionTitle icon={MapPin} title={`Sites (${sites.length})`} small />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <SectionTitle icon={MapPin} title={`Sites (${sites.length})`} small />
+        {sites.length > 0 && (
+          <button onClick={clearAll} style={{ ...iconBtn, width: "auto", padding: "6px 10px", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--breach)" }}>
+            <Trash2 size={13} /> Clear all sites
+          </button>
+        )}
+      </div>
       <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search by name, address, monitoring, bureau, PO number…" style={{ ...selectStyle, marginBottom: 10 }} />
       <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 480, overflowY: "auto" }}>
         {filteredSites.map((s) => (
