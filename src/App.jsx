@@ -3,7 +3,7 @@ import {
   Bell, Camera, CheckCircle2, AlertTriangle, Clock, LogOut, Mail,
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
   ShieldAlert, ArrowLeft, Building2, Settings, Lock, Eye, EyeOff,
-  Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone, CalendarDays
+  Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone, CalendarDays, Ban
 } from "lucide-react";
 
 /* ---------------------------------------------------------------
@@ -301,6 +301,16 @@ export default function SentrylinePrototype() {
             beep([1046, 1046, 1046]);
             setBanner({ type: "job", text: `New job dispatched: ${newlyAssigned[0].jobNumber} — ${newlyAssigned[0].siteName}` });
           }
+
+          const newlyCancelled = fresh.filter((j) => {
+            if (j.assigneeId !== session.id || j.status !== "cancelled") return false;
+            const wasPrev = prev.find((p) => p.id === j.id);
+            return wasPrev && wasPrev.status !== "cancelled";
+          });
+          if (newlyCancelled.length) {
+            beep([440, 330]);
+            setBanner({ type: "cancel", text: `Job cancelled — stand down: ${newlyCancelled[0].jobNumber} — ${newlyCancelled[0].siteName}` });
+          }
         }
         if (session.role === "operator") {
           const nowBreaching = fresh.filter((j) => {
@@ -573,10 +583,14 @@ function TopBar({ session, onSignOut, onOpenSettings, now }) {
 }
 
 function NotifBanner({ banner, onDismiss }) {
-  const isBreach = banner.type === "breach";
+  const style = banner.type === "breach"
+    ? { background: "#FEF2F2", border: "var(--breach)", color: "#B91C1C", Icon: AlertTriangle }
+    : banner.type === "cancel"
+    ? { background: "#FFFBEB", border: "var(--warn)", color: "#92400E", Icon: Ban }
+    : { background: "#F0FDF4", border: "var(--ok)", color: "#166534", Icon: Bell };
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", background: isBreach ? "#FEF2F2" : "#F0FDF4", borderBottom: `1px solid ${isBreach ? "var(--breach)" : "var(--ok)"}`, color: isBreach ? "#B91C1C" : "#166534", fontSize: 12.5 }}>
-      {isBreach ? <AlertTriangle size={15} /> : <Bell size={15} />}
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", background: style.background, borderBottom: `1px solid ${style.border}`, color: style.color, fontSize: 12.5 }}>
+      <style.Icon size={15} />
       <span style={{ flex: 1 }}>{banner.text}</span>
       <button onClick={onDismiss} style={{ background: "none", border: "none", color: "inherit", cursor: "pointer" }}><X size={14} /></button>
     </div>
@@ -635,6 +649,7 @@ const STATUS_META = {
   submitted: { label: "Awaiting review", color: "var(--warn)" },
   reviewed: { label: "Reviewed", color: "#7C3AED" },
   emailed: { label: "Sent to client", color: "var(--ok)" },
+  cancelled: { label: "Cancelled", color: "var(--text-dim)" },
 };
 
 function StatusBadge({ status }) {
@@ -702,6 +717,7 @@ function Board({ jobs, now, onSelect }) {
     { key: "submitted", title: "Awaiting your review" },
     { key: "reviewed", title: "Reviewed — ready to send" },
     { key: "emailed", title: "Closed out" },
+    { key: "cancelled", title: "Cancelled / stood down" },
   ];
   if (jobs.length === 0) return <Empty text="No jobs dispatched yet. Use “New job” to send the first alarm response." />;
   return (
@@ -968,6 +984,8 @@ function JobDetailOperator({ job, jobs, patrolmen, persist, now, onBack }) {
   const [notes, setNotes] = useState(job.reviewNotes || job.outcomeNotes);
   const [delayText, setDelayText] = useState("");
   const [showEmail, setShowEmail] = useState(false);
+  const [showCancelForm, setShowCancelForm] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
 
   useEffect(() => setNotes(job.reviewNotes || job.outcomeNotes), [job.id]);
 
@@ -984,17 +1002,46 @@ function JobDetailOperator({ job, jobs, patrolmen, persist, now, onBack }) {
     update({ assigneeId: p.loginName, assigneeName: p.displayName });
   }
 
+  function confirmCancel() {
+    update({ status: "cancelled", cancelReason: cancelReason.trim(), cancelledAt: new Date().toISOString() });
+    setShowCancelForm(false);
+  }
+
   return (
     <div style={{ maxWidth: 640 }}>
       <button onClick={onBack} style={backBtn}><ArrowLeft size={13} /> Back to board</button>
       <JobHeader job={job} />
 
-      <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <span style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.4 }}>Attending patrolman</span>
         <select value={job.assigneeId} onChange={(e) => reassign(e.target.value)} style={{ ...selectStyle, width: "auto", padding: "6px 10px", fontSize: 12.5 }}>
           {patrolmen.map((p) => <option key={p.loginName} value={p.loginName}>{p.displayName} · {p.loginName}</option>)}
         </select>
+        {job.status === "dispatched" && (
+          <button onClick={() => setShowCancelForm((v) => !v)} style={{ ...iconBtn, width: "auto", padding: "6px 10px", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--breach)", marginLeft: "auto" }}>
+            <Ban size={13} /> Cancel job
+          </button>
+        )}
       </div>
+
+      {showCancelForm && (
+        <div style={{ marginTop: 12, padding: 14, borderRadius: 8, border: "1px solid var(--breach)", background: "#FEF2F2" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#B91C1C", fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>
+            <Ban size={14} /> Cancel this job — the patrolman will be notified to stand down
+          </div>
+          <textarea rows={2} value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="e.g. Monitoring advised stand down — client cancelled the alarm" style={{ ...selectStyle, resize: "vertical" }} />
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button onClick={confirmCancel} style={{ ...primaryBtn, background: "var(--breach)" }}><Ban size={14} /> Confirm cancel</button>
+            <button onClick={() => setShowCancelForm(false)} style={secondaryBtn}>Never mind</button>
+          </div>
+        </div>
+      )}
+
+      {job.status === "cancelled" && (
+        <div style={{ marginTop: 16, padding: 12, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel)", fontSize: 12.5 }}>
+          <b style={{ color: "var(--text-dim)" }}>Cancelled</b> · {fmtDateTime(job.cancelledAt)}{job.cancelReason ? ` — ${job.cancelReason}` : ""}
+        </div>
+      )}
 
       {job.status === "dispatched" && t.level === "breach" && !job.delayReason && (
         <div style={{ marginTop: 16, padding: 14, borderRadius: 8, border: "1px solid var(--breach)", background: "#FEF2F2" }}>
@@ -1017,7 +1064,7 @@ function JobDetailOperator({ job, jobs, patrolmen, persist, now, onBack }) {
       {job.status === "dispatched" && !job.onsiteTime && <div style={{ marginTop: 18, color: "var(--text-dim)", fontSize: 13 }}>Waiting on patrolman to arrive onsite.</div>}
       {job.status === "dispatched" && job.onsiteTime && <div style={{ marginTop: 18, color: "var(--text-dim)", fontSize: 13 }}>Patrolman marked onsite at {fmtTime(job.onsiteTime)} — awaiting outcome submission.</div>}
 
-      {job.status !== "dispatched" && (
+      {job.status !== "dispatched" && job.status !== "cancelled" && (
         <div style={{ marginTop: 18 }}>
           <SectionTitle icon={CheckCircle2} title="Outcome" small />
           <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 6 }}>
@@ -1172,7 +1219,8 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
   const [photos, setPhotos] = useState(job.photos || []);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
-  const submitted = job.status !== "dispatched";
+  const isCancelled = job.status === "cancelled";
+  const submitted = job.status !== "dispatched" && !isCancelled;
   const isOnsite = !!job.onsiteTime;
 
   async function handleFiles(e) {
@@ -1211,7 +1259,14 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
         <DetailRow icon={KeyRound} label="Alarm code" value={job.alarmCode} />
       </div>
 
-      {!submitted && !isOnsite && (
+      {isCancelled && (
+        <div style={{ marginTop: 20, padding: 14, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, color: "var(--breach)", fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}><Ban size={14} /> Job cancelled — stand down</div>
+          {job.cancelReason && <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>{job.cancelReason}</div>}
+        </div>
+      )}
+
+      {!submitted && !isOnsite && !isCancelled && (
         <div style={{ marginTop: 20 }}>
           <SectionTitle icon={MapPin} title="Arrived at site?" small />
           <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 12 }}>
@@ -1223,7 +1278,7 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
         </div>
       )}
 
-      {!submitted && isOnsite && (
+      {!submitted && isOnsite && !isCancelled && (
         <div style={{ marginTop: 20 }}>
           <div style={{ fontSize: 11.5, color: "var(--ok)", marginBottom: 10 }}>Onsite at {fmtTime(job.onsiteTime)}</div>
           <SectionTitle icon={CheckCircle2} title="Submit outcome" small />
