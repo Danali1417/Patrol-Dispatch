@@ -1919,9 +1919,9 @@ function fmtRosterDate(iso) {
 
 const ROSTER_IMPORT_FIELDS = [
   { key: "date", match: (h) => h === "date" || h.includes("date") },
-  { key: "run", match: (h) => h === "run" || h === "zone" || h.includes("run") || h.includes("zone") },
+  { key: "run", match: (h) => h === "run" || h === "zone" || h === "site" || h.includes("run") || h.includes("zone") },
   { key: "name", match: (h) => h.includes("name") },
-  { key: "shift", match: (h) => h.includes("shift") || h.includes("time") },
+  { key: "shift", match: (h) => h.includes("shift") || h.includes("time") || h.includes("schedul") },
   { key: "contactNumber", match: (h) => h.includes("contact") || h.includes("phone") || h.includes("mobile") },
 ];
 
@@ -2009,7 +2009,7 @@ function RosterImport({ zones, accounts, roster, persistRoster }) {
         <div>
           <div style={{ fontSize: 12.5, fontWeight: 700 }}>Import roster from Excel</div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>
-            Columns: Date, Run/Zone, Patrolman Name, Shift, Contact number (optional). One row per patrolman per date — a whole fortnight is just every date/run/name combination in one sheet. Names matching an existing login pick up that login's contact/shift as a fallback. Run must match a run you've already added, or it's kept as typed and flagged.
+            Columns: Date, Run/Zone (or "Site"), Full Name, Shift (or "Scheduled"), Contact/Mobile number (optional). One row per patrolman per date — a whole fortnight is just every date/run/name combination in one sheet. Names matching an existing login pick up that login's contact/shift as a fallback. Run must match a run you've already added, or it's kept as typed and flagged.
           </div>
         </div>
         <button onClick={() => fileRef.current?.click()} disabled={busy} style={secondaryBtn}>
