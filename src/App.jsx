@@ -3,7 +3,8 @@ import {
   Bell, Camera, CheckCircle2, AlertTriangle, Clock, LogOut, Mail,
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
   ShieldAlert, ArrowLeft, Building2, Settings, Lock, Eye, EyeOff,
-  Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone, CalendarDays, Ban
+  Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone, CalendarDays, Ban,
+  FileText, Download
 } from "lucide-react";
 
 /* ---------------------------------------------------------------
@@ -893,7 +894,7 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
         )}
         {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} roster={roster} session={session} persist={persist} onCreated={(id) => { setTab("board"); setSelectedId(id); }} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
-        {tab === "logs" && <Logs jobs={jobs} now={now} />}
+        {tab === "logs" && <Logs jobs={jobs} now={now} role="operator" />}
       </div>
     </div>
   );
@@ -1408,7 +1409,38 @@ ${job.photos?.length ? `${job.photos.length} time-stamped photo(s) attached.` : 
 
 /* ---------------------- Logs ---------------------- */
 
-function Logs({ jobs, now }) {
+function Logs({ jobs, now, role, companyName }) {
+  const [subTab, setSubTab] = useState("overview");
+  const showReports = role === "manager";
+
+  if (!showReports) return <LogsOverview jobs={jobs} now={now} />;
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 20, borderBottom: "1px solid var(--border)" }}>
+        {[
+          { id: "overview", label: "Overview", icon: BarChart3 },
+          { id: "reports", label: "Reports", icon: FileText },
+        ].map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setSubTab(t.id)}
+            style={{
+              display: "flex", alignItems: "center", gap: 6, padding: "9px 14px", border: "none", borderBottom: `2px solid ${subTab === t.id ? "var(--accent)" : "transparent"}`,
+              background: "none", cursor: "pointer", fontSize: 12.5, fontWeight: 600, color: subTab === t.id ? "var(--accent)" : "var(--text-dim)",
+            }}
+          >
+            <t.icon size={14} /> {t.label}
+          </button>
+        ))}
+      </div>
+      {subTab === "overview" && <LogsOverview jobs={jobs} now={now} />}
+      {subTab === "reports" && <Reports jobs={jobs} companyName={companyName} />}
+    </div>
+  );
+}
+
+function LogsOverview({ jobs, now }) {
   const attended = jobs.filter((j) => j.onsiteTime);
   const avgResp = attended.length ? Math.round(attended.reduce((s, j) => s + jobTiming(j, now).elapsed, 0) / attended.length) : 0;
   const cancelled = jobs.filter((j) => j.status === "cancelled");
@@ -1458,6 +1490,159 @@ function Logs({ jobs, now }) {
             ))}
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+function reportStatusLabel(status) {
+  if (status === "cancelled") return "Cancelled";
+  if (status === "emailed") return "Completed";
+  return STATUS_META[status]?.label || status;
+}
+
+const REPORT_COLUMNS_BRIEF = ["Job #", "Date", "Time", "Site", "Patrolman attended", "Operator (dispatched)", "Finalized by", "Status"];
+const REPORT_COLUMNS_DETAILED = [...REPORT_COLUMNS_BRIEF, "Onsite time", "Offsite time", "Results", "Alarm description"];
+
+function reportRow(job, reportType) {
+  const base = [
+    job.jobNumber,
+    isoDateOnly(job.dispatchTime),
+    isoTimeOnly(job.dispatchTime),
+    job.siteName,
+    job.assigneeName || "—",
+    job.dispatchedByName || "—",
+    job.handlingName || "—",
+    reportStatusLabel(job.status),
+  ];
+  if (reportType === "brief") return base;
+  return [
+    ...base,
+    job.onsiteTime ? fmtDateTime(job.onsiteTime) : "—",
+    job.offsiteTime ? fmtDateTime(job.offsiteTime) : "—",
+    job.reviewNotes || job.outcomeNotes || "—",
+    job.description || "—",
+  ];
+}
+
+function Reports({ jobs, companyName }) {
+  const [reportType, setReportType] = useState("brief");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [timeFrom, setTimeFrom] = useState("");
+  const [timeTo, setTimeTo] = useState("");
+  const [busy, setBusy] = useState(false);
+  const showToast = useToast();
+
+  const filtered = jobs
+    .filter((j) => {
+      const d = isoDateOnly(j.dispatchTime);
+      if (dateFrom && d < dateFrom) return false;
+      if (dateTo && d > dateTo) return false;
+      if (timeFrom || timeTo) {
+        const t = isoTimeOnly(j.dispatchTime);
+        if (timeFrom && t < timeFrom) return false;
+        if (timeTo && t > timeTo) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => new Date(a.dispatchTime) - new Date(b.dispatchTime));
+
+  const columns = reportType === "brief" ? REPORT_COLUMNS_BRIEF : REPORT_COLUMNS_DETAILED;
+  const rows = filtered.map((j) => reportRow(j, reportType));
+  const hasFilter = dateFrom || dateTo || timeFrom || timeTo;
+
+  function clearFilters() { setDateFrom(""); setDateTo(""); setTimeFrom(""); setTimeTo(""); }
+
+  async function downloadPdf() {
+    setBusy(true);
+    try {
+      const [{ jsPDF }, autoTableModule] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+      const autoTable = autoTableModule.default;
+      const doc = new jsPDF({ orientation: reportType === "detailed" ? "landscape" : "portrait", unit: "pt" });
+      const name = companyName || "Ausgroup";
+      doc.setFontSize(14);
+      doc.text(`${name} Alarm Response Dispatch — ${reportType === "brief" ? "Brief" : "Detailed"} Report`, 40, 40);
+      doc.setFontSize(9);
+      doc.setTextColor(90);
+      doc.text(`Date range: ${dateFrom || "any"} to ${dateTo || "any"}${timeFrom || timeTo ? `  ·  Time: ${timeFrom || "any"} to ${timeTo || "any"}` : ""}`, 40, 58);
+      doc.text(`Generated ${fmtDateTime(new Date().toISOString())}`, 40, 72);
+      autoTable(doc, {
+        startY: 86,
+        head: [columns],
+        body: rows,
+        styles: { fontSize: 8, cellPadding: 4, overflow: "linebreak" },
+        headStyles: { fillColor: [255, 176, 32], textColor: [20, 20, 20] },
+        columnStyles: reportType === "detailed" ? { 10: { cellWidth: 160 }, 11: { cellWidth: 160 } } : undefined,
+      });
+      doc.save(`${reportType}-report-${todayISO()}.pdf`);
+      showToast("Report downloaded.");
+    } catch (e) {
+      showToast("Couldn't generate the PDF — try again.", "error");
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div>
+      <SectionTitle icon={FileText} title="Reports" small />
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        {["brief", "detailed"].map((t) => (
+          <button
+            key={t}
+            onClick={() => setReportType(t)}
+            style={{ padding: "8px 16px", borderRadius: 7, cursor: "pointer", border: `1px solid ${reportType === t ? "var(--accent)" : "var(--border)"}`, background: reportType === t ? "var(--accent-dim)" : "var(--panel)", color: reportType === t ? "var(--accent)" : "var(--text-dim)", fontWeight: 600, fontSize: 12.5, textTransform: "capitalize" }}
+          >
+            {t} report
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap", marginBottom: 18, padding: 12, borderRadius: 8, background: "var(--panel-alt)", border: "1px solid var(--border)" }}>
+        <Field label="Date from" style={{ marginBottom: 0 }}>
+          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
+        </Field>
+        <Field label="Date to" style={{ marginBottom: 0 }}>
+          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
+        </Field>
+        <Field label="From time" style={{ marginBottom: 0 }}>
+          <input type="time" value={timeFrom} onChange={(e) => setTimeFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
+        </Field>
+        <Field label="To time" style={{ marginBottom: 0 }}>
+          <input type="time" value={timeTo} onChange={(e) => setTimeTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
+        </Field>
+        {hasFilter && <button onClick={clearFilters} style={{ ...secondaryBtn, marginBottom: 0 }}><X size={13} /> Clear filters</button>}
+        <button
+          onClick={downloadPdf}
+          disabled={busy || rows.length === 0}
+          style={{ ...primaryBtn, marginBottom: 0, marginLeft: "auto", opacity: rows.length === 0 || busy ? 0.5 : 1, cursor: rows.length === 0 || busy ? "not-allowed" : "pointer" }}
+        >
+          <Download size={14} /> {busy ? "Generating…" : "Download PDF"}
+        </button>
+      </div>
+
+      <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 8 }}>{rows.length} job{rows.length !== 1 ? "s" : ""} in this report</div>
+
+      {rows.length === 0 ? (
+        <Empty text="No jobs match this date/time range." />
+      ) : (
+        <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 8 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+            <thead>
+              <tr style={{ background: "var(--panel-alt)" }}>
+                {columns.map((c) => <th key={c} style={{ textAlign: "left", padding: "8px 10px", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>{c}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={i} style={{ background: "var(--panel)" }}>
+                  {r.map((cell, ci) => <td key={ci} style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>{cell}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
@@ -1649,7 +1834,7 @@ function ManagerView({ session, accounts, persistAccounts, zones, persistZones, 
         {tab === "accounts" && <AccountsManager accounts={accounts} persistAccounts={persistAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />}
         {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} persistAccounts={persistAccounts} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
-        {tab === "logs" && <Logs jobs={jobs} now={now} />}
+        {tab === "logs" && <Logs jobs={jobs} now={now} role="manager" companyName={companyName} />}
       </div>
     </div>
   );
