@@ -605,8 +605,8 @@ function TopBar({ session, onSignOut, onOpenSettings, now }) {
         <button onClick={onOpenSettings} title="Change password" style={{ background: "none", border: "1px solid var(--border)", borderRadius: 6, padding: 7, cursor: "pointer", color: "var(--text-dim)" }}>
           <Settings size={14} />
         </button>
-        <button onClick={onSignOut} title="Sign out" style={{ background: "none", border: "1px solid var(--border)", borderRadius: 6, padding: 7, cursor: "pointer", color: "var(--text-dim)" }}>
-          <LogOut size={14} />
+        <button onClick={onSignOut} title="Sign out" style={{ background: "none", border: "1px solid var(--border)", borderRadius: 6, padding: "7px 10px", cursor: "pointer", color: "var(--text-dim)", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600 }}>
+          <LogOut size={14} /> Sign out
         </button>
       </div>
     </div>
