@@ -430,6 +430,16 @@ export default function SentrylinePrototype() {
             beep([440, 440]);
             setBanner({ type: "breach", text: `SLA exceeded on ${nowBreaching[0].jobNumber} — ${nowBreaching[0].siteName}. Log a delay reason.` });
           }
+
+          const newlyAcknowledged = fresh.filter((j) => {
+            if (!j.acknowledgedAt) return false;
+            const wasPrev = prev.find((p) => p.id === j.id);
+            return wasPrev && !wasPrev.acknowledgedAt;
+          });
+          if (newlyAcknowledged.length) {
+            beep([880]);
+            setBanner({ type: "ack", text: `${newlyAcknowledged[0].assigneeName} acknowledged ${newlyAcknowledged[0].jobNumber} — ${newlyAcknowledged[0].siteName}` });
+          }
         }
         setJobs(fresh);
         prevJobsRef.current = fresh;
@@ -985,6 +995,11 @@ function JobCard({ job, now, onClick }) {
         <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{job.run} · {job.monitoringCo} · assigned {job.assigneeName}{job.handlingName ? ` · handled by ${job.handlingName}` : ""}</div>
       </div>
       {job.delayReason && <span title={job.delayReason}><AlertTriangle size={14} color="var(--warn)" /></span>}
+      {job.status === "dispatched" && !job.onsiteTime && (
+        job.acknowledgedAt
+          ? <span title={`Acknowledged by ${job.assigneeName} at ${fmtTime(job.acknowledgedAt)}`}><CheckCircle2 size={14} color="var(--ok)" /></span>
+          : <span title="Not yet acknowledged by the patrolman"><Bell size={14} color="var(--warn)" /></span>
+      )}
       <SlaChip job={job} now={now} />
       <StatusBadge status={job.status} />
       <ChevronRight size={15} color="var(--text-dim)" />
@@ -1274,6 +1289,20 @@ function JobDetailOperator({ job, jobs, patrolmen, session, persist, now, onBack
           <span>Handling: <b style={{ color: isHandling ? "var(--ok)" : "var(--text)" }}>{job.handlingName}</b>{isHandling ? " (you)" : ""}</span>
           {!isHandling && (
             <button onClick={takeJob} style={{ ...secondaryBtn, padding: "4px 10px", fontSize: 11.5 }}>Take this job</button>
+          )}
+        </div>
+      )}
+
+      {!job.onsiteTime && job.status !== "cancelled" && (
+        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+          {job.acknowledgedAt ? (
+            <span style={{ color: "var(--ok)", display: "flex", alignItems: "center", gap: 6 }}>
+              <CheckCircle2 size={13} /> Acknowledged by {job.assigneeName} at {fmtTime(job.acknowledgedAt)}
+            </span>
+          ) : (
+            <span style={{ color: "var(--warn)", display: "flex", alignItems: "center", gap: 6 }}>
+              <Bell size={13} /> Not yet acknowledged by {job.assigneeName}
+            </span>
           )}
         </div>
       )}
@@ -1733,6 +1762,7 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
   const [photos, setPhotos] = useState(job.photos || []);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
+  const showToast = useToast();
   const isCancelled = job.status === "cancelled";
   const submitted = job.status !== "dispatched" && !isCancelled;
   const isOnsite = !!job.onsiteTime;
@@ -1749,8 +1779,14 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
     e.target.value = "";
   }
 
+  async function acknowledgeJob() {
+    const updated = jobs.map((j) => (j.id === job.id ? { ...j, acknowledgedAt: new Date().toISOString() } : j));
+    await persist(updated);
+    showToast("Job acknowledged — control room can see you've received it.");
+  }
+
   async function markOnsite() {
-    const updated = jobs.map((j) => (j.id === job.id ? { ...j, onsiteTime: new Date().toISOString() } : j));
+    const updated = jobs.map((j) => (j.id === job.id ? { ...j, acknowledgedAt: j.acknowledgedAt || new Date().toISOString(), onsiteTime: new Date().toISOString() } : j));
     await persist(updated);
   }
 
@@ -1777,6 +1813,24 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
         <div style={{ marginTop: 20, padding: 14, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 7, color: "var(--breach)", fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}><Ban size={14} /> Job cancelled — stand down</div>
           {job.cancelReason && <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>{job.cancelReason}</div>}
+        </div>
+      )}
+
+      {!submitted && !isOnsite && !isCancelled && !job.acknowledgedAt && (
+        <div style={{ marginTop: 20 }}>
+          <SectionTitle icon={Bell} title="Acknowledge this job" small />
+          <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 12 }}>
+            Let control room know you've received this job and are on your way.
+          </div>
+          <button onClick={acknowledgeJob} style={{ ...primaryBtn, width: "100%", justifyContent: "center" }}>
+            <CheckCircle2 size={14} /> Acknowledge — I've received this job
+          </button>
+        </div>
+      )}
+
+      {!submitted && !isOnsite && !isCancelled && job.acknowledgedAt && (
+        <div style={{ fontSize: 11.5, color: "var(--ok)", marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>
+          <CheckCircle2 size={13} /> Acknowledged at {fmtTime(job.acknowledgedAt)}
         </div>
       )}
 
