@@ -193,10 +193,10 @@ export default function SentrylinePrototype() {
     })();
   }, []);
 
-  // Load or seed accounts — also merges in any DEFAULT_ACCOUNTS not yet
-  // present (e.g. Manager1), so a shared storage bucket saved by an earlier
-  // version of this prototype gets the new logins added automatically
-  // rather than silently missing them.
+  // Load accounts, seeding DEFAULT_ACCOUNTS only on a genuinely empty store
+  // (first-ever run). Once real data exists, it's authoritative — a login
+  // a Manager deletes must stay deleted, even if it happens to share a name
+  // with one of the built-in demo accounts.
   useEffect(() => {
     (async () => {
       let existing = [];
@@ -205,15 +205,12 @@ export default function SentrylinePrototype() {
         if (res && res.value) existing = JSON.parse(res.value);
       } catch (e) { /* nothing stored yet */ }
 
-      const missing = DEFAULT_ACCOUNTS.filter(
-        (d) => !existing.some((a) => a.loginName === d.loginName && a.role === d.role)
-      );
-      const merged = missing.length ? [...existing, ...missing] : existing.length ? existing : DEFAULT_ACCOUNTS;
-
-      setAccounts(merged);
-      if (missing.length || existing.length === 0) {
-        try { await window.storage.set(ACCOUNTS_KEY, JSON.stringify(merged), true); } catch (e) { /* ignore */ }
+      if (existing.length === 0) {
+        existing = DEFAULT_ACCOUNTS;
+        try { await window.storage.set(ACCOUNTS_KEY, JSON.stringify(existing), true); } catch (e) { /* ignore */ }
       }
+
+      setAccounts(existing);
       setAccountsLoaded(true);
     })();
   }, []);
