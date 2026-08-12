@@ -1501,7 +1501,7 @@ function reportStatusLabel(status) {
   return STATUS_META[status]?.label || status;
 }
 
-const REPORT_COLUMNS_BRIEF = ["Job #", "Date", "Time", "Site", "Patrolman attended", "Operator (dispatched)", "Finalized by", "Status"];
+const REPORT_COLUMNS_BRIEF = ["Job #", "Date", "Time", "Site", "Run", "Patrolman attended", "Operator (dispatched)", "Finalized by", "Status"];
 const REPORT_COLUMNS_DETAILED = [...REPORT_COLUMNS_BRIEF, "Onsite time", "Offsite time", "Results", "Alarm description"];
 
 function reportRow(job, reportType) {
@@ -1510,6 +1510,7 @@ function reportRow(job, reportType) {
     isoDateOnly(job.dispatchTime),
     isoTimeOnly(job.dispatchTime),
     job.siteName,
+    job.run || "—",
     job.assigneeName || "—",
     job.dispatchedByName || "—",
     job.handlingName || "—",
@@ -1523,6 +1524,18 @@ function reportRow(job, reportType) {
     job.reviewNotes || job.outcomeNotes || "—",
     job.description || "—",
   ];
+}
+
+function patrolmanRunSummary(filteredJobs) {
+  const byKey = {};
+  filteredJobs.forEach((j) => {
+    const patrolman = j.assigneeName || "Unassigned";
+    const run = j.run || "Unassigned";
+    const key = `${patrolman}||${run}`;
+    byKey[key] = byKey[key] || { patrolman, run, count: 0 };
+    byKey[key].count++;
+  });
+  return Object.values(byKey).sort((a, b) => b.count - a.count || a.patrolman.localeCompare(b.patrolman));
 }
 
 function Reports({ jobs, companyName }) {
@@ -1550,6 +1563,7 @@ function Reports({ jobs, companyName }) {
 
   const columns = reportType === "brief" ? REPORT_COLUMNS_BRIEF : REPORT_COLUMNS_DETAILED;
   const rows = filtered.map((j) => reportRow(j, reportType));
+  const summary = patrolmanRunSummary(filtered);
   const hasFilter = dateFrom || dateTo || timeFrom || timeTo;
 
   function clearFilters() { setDateFrom(""); setDateTo(""); setTimeFrom(""); setTimeTo(""); }
@@ -1573,8 +1587,22 @@ function Reports({ jobs, companyName }) {
         body: rows,
         styles: { fontSize: 8, cellPadding: 4, overflow: "linebreak" },
         headStyles: { fillColor: [255, 176, 32], textColor: [20, 20, 20] },
-        columnStyles: reportType === "detailed" ? { 10: { cellWidth: 160 }, 11: { cellWidth: 160 } } : undefined,
+        columnStyles: reportType === "detailed" ? { 11: { cellWidth: 160 }, 12: { cellWidth: 160 } } : undefined,
       });
+
+      const summaryStartY = (doc.lastAutoTable?.finalY || 86) + 26;
+      doc.setFontSize(11);
+      doc.setTextColor(20);
+      doc.text("Patrolman response summary", 40, summaryStartY);
+      autoTable(doc, {
+        startY: summaryStartY + 8,
+        head: [["Patrolman", "Run", "Responses"]],
+        body: summary.map((s) => [s.patrolman, s.run, String(s.count)]),
+        styles: { fontSize: 8, cellPadding: 4 },
+        headStyles: { fillColor: [255, 176, 32], textColor: [20, 20, 20] },
+        tableWidth: 300,
+      });
+
       doc.save(`${reportType}-report-${todayISO()}.pdf`);
       showToast("Report downloaded.");
     } catch (e) {
@@ -1621,6 +1649,22 @@ function Reports({ jobs, companyName }) {
           <Download size={14} /> {busy ? "Generating…" : "Download PDF"}
         </button>
       </div>
+
+      {summary.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text-dim)", marginBottom: 8 }}>Patrolman response summary</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {summary.map((s) => (
+              <div key={`${s.patrolman}||${s.run}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12.5 }}>
+                <span><b>{s.patrolman}</b> on <b>{s.run}</b></span>
+                <span style={{ color: "var(--text-dim)" }}>—</span>
+                <span style={{ fontFamily: "var(--mono)", fontWeight: 700, color: "var(--accent)" }}>{s.count}</span>
+                <span style={{ color: "var(--text-dim)" }}>response{s.count !== 1 ? "s" : ""}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 8 }}>{rows.length} job{rows.length !== 1 ? "s" : ""} in this report</div>
 
