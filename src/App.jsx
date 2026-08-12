@@ -204,6 +204,7 @@ export default function SentrylinePrototype() {
   const [showSettings, setShowSettings] = useState(false);
   const [autoLoggedOut, setAutoLoggedOut] = useState(false);
   const [toast, setToast] = useState(null);
+  const [confirmState, setConfirmState] = useState(null);
   const prevJobsRef = useRef([]);
   const lastActivityRef = useRef(Date.now());
   const toastTimerRef = useRef(null);
@@ -215,6 +216,10 @@ export default function SentrylinePrototype() {
   }, []);
 
   useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
+
+  const showConfirm = useCallback((message, onConfirm, opts = {}) => {
+    setConfirmState({ message, onConfirm, ...opts });
+  }, []);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 15000);
@@ -431,40 +436,46 @@ export default function SentrylinePrototype() {
   if (!session) {
     return (
       <ToastContext.Provider value={showToast}>
-        <Shell>
-          <Login
-            accounts={accounts}
-            accountsLoaded={accountsLoaded}
-            autoLoggedOut={autoLoggedOut}
-            logoUrl={logoUrl}
-            companyName={companyName}
-            onLogin={(s) => { setSession(s); setAutoLoggedOut(false); }}
-          />
-          <ToastOverlay toast={toast} />
-        </Shell>
+        <ConfirmContext.Provider value={showConfirm}>
+          <Shell>
+            <Login
+              accounts={accounts}
+              accountsLoaded={accountsLoaded}
+              autoLoggedOut={autoLoggedOut}
+              logoUrl={logoUrl}
+              companyName={companyName}
+              onLogin={(s) => { setSession(s); setAutoLoggedOut(false); }}
+            />
+            <ToastOverlay toast={toast} />
+            <ConfirmDialog confirmState={confirmState} onClose={() => setConfirmState(null)} />
+          </Shell>
+        </ConfirmContext.Provider>
       </ToastContext.Provider>
     );
   }
 
   return (
     <ToastContext.Provider value={showToast}>
-      <Shell>
-        <TopBar session={session} onSignOut={() => setSession(null)} onOpenSettings={() => setShowSettings(true)} now={now} logoUrl={logoUrl} companyName={companyName} />
-        {banner && <NotifBanner banner={banner} onDismiss={() => setBanner(null)} />}
-        {showSettings && (
-          <SettingsModal session={session} accounts={accounts} persistAccounts={persistAccounts} onClose={() => setShowSettings(false)} />
-        )}
-        {!accountsLoaded || !sitesLoaded ? (
-          <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
-        ) : session.role === "manager" ? (
-          <ManagerView session={session} accounts={accounts} persistAccounts={persistAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} now={now} />
-        ) : session.role === "operator" ? (
-          <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} />
-        ) : (
-          <PatrolmanView session={session} jobs={jobs} persist={persistJobs} now={now} />
-        )}
-        <ToastOverlay toast={toast} />
-      </Shell>
+      <ConfirmContext.Provider value={showConfirm}>
+        <Shell>
+          <TopBar session={session} onSignOut={() => setSession(null)} onOpenSettings={() => setShowSettings(true)} now={now} logoUrl={logoUrl} companyName={companyName} />
+          {banner && <NotifBanner banner={banner} onDismiss={() => setBanner(null)} />}
+          {showSettings && (
+            <SettingsModal session={session} accounts={accounts} persistAccounts={persistAccounts} onClose={() => setShowSettings(false)} />
+          )}
+          {!accountsLoaded || !sitesLoaded ? (
+            <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
+          ) : session.role === "manager" ? (
+            <ManagerView session={session} accounts={accounts} persistAccounts={persistAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} now={now} />
+          ) : session.role === "operator" ? (
+            <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} />
+          ) : (
+            <PatrolmanView session={session} jobs={jobs} persist={persistJobs} now={now} />
+          )}
+          <ToastOverlay toast={toast} />
+          <ConfirmDialog confirmState={confirmState} onClose={() => setConfirmState(null)} />
+        </Shell>
+      </ConfirmContext.Provider>
     </ToastContext.Provider>
   );
 }
@@ -497,6 +508,37 @@ function ToastOverlay({ toast }) {
       >
         {isError ? <AlertTriangle size={17} color="var(--breach)" /> : <CheckCircle2 size={17} color="var(--ok)" />}
         {toast.text}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------
+   CONFIRM — an in-app "Delete this?" popup, centered in the window,
+   replacing the browser's native window.confirm() dialog.
+---------------------------------------------------------------- */
+
+const ConfirmContext = createContext(() => {});
+function useConfirm() {
+  return useContext(ConfirmContext);
+}
+
+function ConfirmDialog({ confirmState, onClose }) {
+  if (!confirmState) return null;
+  const { message, onConfirm, confirmLabel = "Delete", danger = true } = confirmState;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#000000aa", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+      <div style={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10, width: 360, maxWidth: "90vw", padding: 20, boxShadow: "0 12px 32px rgba(0,0,0,0.28)" }}>
+        <div style={{ fontSize: 13.5, lineHeight: 1.5, marginBottom: 18 }}>{message}</div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button onClick={onClose} style={secondaryBtn}>Cancel</button>
+          <button
+            onClick={() => { const cb = onConfirm; onClose(); cb(); }}
+            style={{ ...primaryBtn, background: danger ? "var(--breach)" : "var(--accent)" }}
+          >
+            {confirmLabel}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1851,17 +1893,18 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
   const [showSendLogin, setShowSendLogin] = useState(false);
   const [copied, setCopied] = useState(false);
   const showToast = useToast();
+  const showConfirm = useConfirm();
 
   function update(patch) {
     persistAccounts(accounts.map((a) => (a.loginName === account.loginName && a.role === account.role ? { ...a, ...patch } : a)));
   }
 
   function remove() {
-    if (isSelf) { window.alert("You can't delete the login you're currently signed in with."); return; }
-    if (window.confirm(`Delete login "${account.loginName}"? This can't be undone.`)) {
+    if (isSelf) { showToast("You can't delete the login you're currently signed in with.", "error"); return; }
+    showConfirm(`Delete login "${account.loginName}"? This can't be undone.`, () => {
       persistAccounts(accounts.filter((a) => !(a.loginName === account.loginName && a.role === account.role)));
       showToast(`Login "${account.loginName}" removed.`);
-    }
+    });
   }
 
   const inactive = account.active === false;
@@ -1971,6 +2014,7 @@ function ZonesEditor({ zones, persistZones, sites, persistSites, accounts, persi
   const [renaming, setRenaming] = useState(null); // zone name currently being renamed
   const [renameValue, setRenameValue] = useState("");
   const showToast = useToast();
+  const showConfirm = useConfirm();
 
   function addZone() {
     setError("");
@@ -2003,11 +2047,12 @@ function ZonesEditor({ zones, persistZones, sites, persistSites, accounts, persi
     const msg = siteCount || patrolCount
       ? `"${z}" is used by ${siteCount} site(s) and ${patrolCount} patrolman login(s). Delete anyway? They'll be set to Unassigned.`
       : `Delete run "${z}"?`;
-    if (!window.confirm(msg)) return;
-    persistZones(zones.filter((r) => r !== z));
-    if (siteCount) persistSites(sites.map((s) => (s.run === z ? { ...s, run: "Unassigned" } : s)));
-    if (patrolCount) persistAccounts(accounts.map((a) => (a.role === "patrolman" && a.run === z ? { ...a, run: "Unassigned" } : a)));
-    showToast(`Run "${z}" removed.`);
+    showConfirm(msg, () => {
+      persistZones(zones.filter((r) => r !== z));
+      if (siteCount) persistSites(sites.map((s) => (s.run === z ? { ...s, run: "Unassigned" } : s)));
+      if (patrolCount) persistAccounts(accounts.map((a) => (a.role === "patrolman" && a.run === z ? { ...a, run: "Unassigned" } : a)));
+      showToast(`Run "${z}" removed.`);
+    });
   }
 
   return (
@@ -2163,6 +2208,7 @@ function SitesEditor({ zones, sites, persistSites }) {
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("");
   const showToast = useToast();
+  const showConfirm = useConfirm();
 
   function set(field, value) { setForm((f) => ({ ...f, [field]: value })); }
 
@@ -2183,19 +2229,23 @@ function SitesEditor({ zones, sites, persistSites }) {
   }
 
   function remove(id) {
-    if (window.confirm("Delete this site? Past jobs already dispatched to it keep their own record.")) {
+    showConfirm("Delete this site? Past jobs already dispatched to it keep their own record.", () => {
       persistSites(sites.filter((s) => s.id !== id));
       if (editingId === id) cancelEdit();
       showToast("Site removed.");
-    }
+    });
   }
 
   function clearAll() {
-    if (window.confirm(`Delete all ${sites.length} site(s)? This can't be undone — past jobs already dispatched keep their own record, but the site list will be empty.`)) {
-      persistSites([]);
-      cancelEdit();
-      showToast("All sites removed.");
-    }
+    showConfirm(
+      `Delete all ${sites.length} site(s)? This can't be undone — past jobs already dispatched keep their own record, but the site list will be empty.`,
+      () => {
+        persistSites([]);
+        cancelEdit();
+        showToast("All sites removed.");
+      },
+      { confirmLabel: "Delete all" }
+    );
   }
 
   const q = filter.trim().toLowerCase();
@@ -2413,6 +2463,7 @@ function RosterView({ zones, accounts, roster, persistRoster }) {
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState("");
   const showToast = useToast();
+  const showConfirm = useConfirm();
 
   const patrolmen = accounts.filter((a) => a.role === "patrolman");
 
@@ -2449,11 +2500,11 @@ function RosterView({ zones, accounts, roster, persistRoster }) {
   }
 
   function remove(id) {
-    if (window.confirm("Remove this roster entry?")) {
+    showConfirm("Remove this roster entry?", () => {
       persistRoster(roster.filter((r) => r.id !== id));
       if (editingId === id) cancelEdit();
       showToast("Roster entry removed.");
-    }
+    });
   }
 
   const forDate = roster.filter((r) => r.date === selectedDate);
