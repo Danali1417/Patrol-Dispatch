@@ -1101,8 +1101,8 @@ function JobHeader({ job }) {
   return (
     <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginTop: 14 }}>
       <div>
-        <div style={{ fontFamily: "var(--mono)", fontSize: 11.5, color: "var(--text-dim)" }}>{job.jobNumber}</div>
-        <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>{job.siteName}</div>
+        <div style={{ fontFamily: "var(--mono)", fontSize: 19, fontWeight: 700 }}>{job.jobNumber}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-dim)", marginTop: 2 }}>{job.siteName}</div>
         <a href={mapsUrl(job.address)} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12.5, color: "var(--info)", marginTop: 3, display: "inline-block", textDecoration: "none" }}>
           {job.address} ↗
         </a>
