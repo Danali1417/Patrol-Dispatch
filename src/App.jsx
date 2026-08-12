@@ -3,7 +3,7 @@ import {
   Bell, Camera, CheckCircle2, AlertTriangle, Clock, LogOut, Mail,
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
   ShieldAlert, ArrowLeft, Building2, Settings, Lock, Eye, EyeOff,
-  Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone
+  Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone, CalendarDays
 } from "lucide-react";
 
 /* ---------------------------------------------------------------
@@ -53,6 +53,12 @@ const JOBS_KEY = "ops:jobs";
 const ACCOUNTS_KEY = "ops:accounts";
 const ZONES_KEY = "ops:zones";
 const SITES_KEY = "ops:sites";
+const ROSTER_KEY = "ops:roster";
+
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
 
 /* ---------------------------------------------------------------
    HELPERS
@@ -162,6 +168,7 @@ export default function SentrylinePrototype() {
   const [zones, setZones] = useState([]);
   const [sites, setSites] = useState([]);
   const [sitesLoaded, setSitesLoaded] = useState(false);
+  const [roster, setRoster] = useState([]);
   const [now, setNow] = useState(Date.now());
   const [banner, setBanner] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -240,6 +247,16 @@ export default function SentrylinePrototype() {
     })();
   }, []);
 
+  // Load roster (dated run assignments — separate from a login's "current" run)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.storage.get(ROSTER_KEY, true);
+        if (res && res.value) setRoster(JSON.parse(res.value));
+      } catch (e) { /* nothing stored yet */ }
+    })();
+  }, []);
+
   const persistJobs = useCallback(async (updated) => {
     setJobs(updated);
     prevJobsRef.current = updated;
@@ -259,6 +276,11 @@ export default function SentrylinePrototype() {
   const persistSites = useCallback(async (updated) => {
     setSites(updated);
     try { await window.storage.set(SITES_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
+  }, []);
+
+  const persistRoster = useCallback(async (updated) => {
+    setRoster(updated);
+    try { await window.storage.set(ROSTER_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
   }, []);
 
   // Poll shared storage + fire notifications
@@ -323,9 +345,9 @@ export default function SentrylinePrototype() {
       {!accountsLoaded || !sitesLoaded ? (
         <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
       ) : session.role === "manager" ? (
-        <ManagerView session={session} accounts={accounts} persistAccounts={persistAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} jobs={jobs} now={now} />
+        <ManagerView session={session} accounts={accounts} persistAccounts={persistAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} jobs={jobs} now={now} />
       ) : session.role === "operator" ? (
-        <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} persist={persistJobs} now={now} />
+        <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} />
       ) : (
         <PatrolmanView session={session} jobs={jobs} persist={persistJobs} now={now} />
       )}
@@ -640,7 +662,7 @@ function SlaChip({ job, now }) {
    OPERATOR VIEW
 ---------------------------------------------------------------- */
 
-function OperatorView({ session, jobs, accounts, sites, persistSites, zones, persist, now }) {
+function OperatorView({ session, jobs, accounts, sites, persistSites, zones, roster, persistRoster, persist, now }) {
   const [tab, setTab] = useState("board");
   const [selectedId, setSelectedId] = useState(null);
   const selected = jobs.find((j) => j.id === selectedId);
@@ -652,6 +674,7 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, per
         {[
           { id: "board", label: "Dispatch board", icon: ShieldAlert },
           { id: "new", label: "New job", icon: Send },
+          { id: "roster", label: "Roster", icon: CalendarDays },
           { id: "logs", label: "Logs & analysis", icon: BarChart3 },
         ].map((t) => (
           <button key={t.id} onClick={() => { setTab(t.id); setSelectedId(null); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", marginBottom: 4, borderRadius: 7, border: "none", cursor: "pointer", textAlign: "left", fontSize: 12.5, fontWeight: 600, background: tab === t.id ? "var(--accent-dim)" : "transparent", color: tab === t.id ? "var(--accent)" : "var(--text-dim)" }}>
@@ -665,7 +688,8 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, per
         {tab === "board" && selected && (
           <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} persist={persist} now={now} session={session} onBack={() => setSelectedId(null)} />
         )}
-        {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} persist={persist} onCreated={(id) => { setTab("board"); setSelectedId(id); }} />}
+        {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} roster={roster} persist={persist} onCreated={(id) => { setTab("board"); setSelectedId(id); }} />}
+        {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
         {tab === "logs" && <Logs jobs={jobs} now={now} />}
       </div>
     </div>
@@ -722,7 +746,7 @@ function Empty({ text }) {
 
 /* ---------------------- New job form ---------------------- */
 
-function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, persist, onCreated }) {
+function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, persist, onCreated }) {
   const [siteId, setSiteId] = useState("");
   const [siteQuery, setSiteQuery] = useState("");
   const [description, setDescription] = useState("");
@@ -732,7 +756,14 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, persist, onCr
   const [addingSite, setAddingSite] = useState(false);
 
   const site = sites.find((s) => s.id === siteId);
-  const recommended = site ? patrolmen.filter((r) => r.run === site.run) : [];
+  const todaysRoster = site ? roster.filter((r) => r.date === todayISO() && r.run === site.run) : [];
+  const rosteredPatrolmen = todaysRoster
+    .map((r) => patrolmen.find((p) => p.loginName === r.patrolmanLoginName))
+    .filter(Boolean);
+  const recommended = site
+    ? (rosteredPatrolmen.length ? rosteredPatrolmen : patrolmen.filter((r) => r.run === site.run))
+    : [];
+  const recommendedLabel = rosteredPatrolmen.length ? "Rostered on this run today" : "On this run";
 
   const siteLabel = (s) => `${s.name} — ${s.address}`;
 
@@ -850,7 +881,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, persist, onCr
       <Field label="Dispatch to">
         <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} style={selectStyle}>
           <option value="">Select patrolman…</option>
-          {recommended.length > 0 && <optgroup label="On this run">{recommended.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName} · {r.loginName}</option>)}</optgroup>}
+          {recommended.length > 0 && <optgroup label={recommendedLabel}>{recommended.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName} · {r.loginName}</option>)}</optgroup>}
           <optgroup label="All patrolmen">{patrolmen.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName} · {r.run} · {r.loginName}</option>)}</optgroup>
         </select>
       </Field>
@@ -1240,7 +1271,7 @@ function DetailRow({ icon: Icon, label, value }) {
    MANAGER VIEW — create & manage logins
 ---------------------------------------------------------------- */
 
-function ManagerView({ session, accounts, persistAccounts, zones, persistZones, sites, persistSites, jobs, now }) {
+function ManagerView({ session, accounts, persistAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, jobs, now }) {
   const [tab, setTab] = useState("accounts");
   return (
     <div style={{ display: "flex", minHeight: 560 }}>
@@ -1248,6 +1279,7 @@ function ManagerView({ session, accounts, persistAccounts, zones, persistZones, 
         {[
           { id: "accounts", label: "Manage logins", icon: Users },
           { id: "sites", label: "Sites & runs", icon: MapPin },
+          { id: "roster", label: "Roster", icon: CalendarDays },
           { id: "logs", label: "Logs & analysis", icon: BarChart3 },
         ].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", marginBottom: 4, borderRadius: 7, border: "none", cursor: "pointer", textAlign: "left", fontSize: 12.5, fontWeight: 600, background: tab === t.id ? "var(--accent-dim)" : "transparent", color: tab === t.id ? "var(--accent)" : "var(--text-dim)" }}>
@@ -1258,6 +1290,7 @@ function ManagerView({ session, accounts, persistAccounts, zones, persistZones, 
       <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
         {tab === "accounts" && <AccountsManager accounts={accounts} persistAccounts={persistAccounts} zones={zones} session={session} />}
         {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} persistAccounts={persistAccounts} />}
+        {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
         {tab === "logs" && <Logs jobs={jobs} now={now} />}
       </div>
     </div>
@@ -1855,6 +1888,278 @@ function SitesEditor({ zones, sites, persistSites }) {
         {sites.length === 0 && <Empty text="No sites yet — add your first one above, or import from Excel." />}
         {sites.length > 0 && filteredSites.length === 0 && <Empty text="No sites match that search." />}
       </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------
+   ROSTER — date-wise / shift-wise who's working which run
+---------------------------------------------------------------- */
+
+function parseRosterDate(value) {
+  if (value instanceof Date && !isNaN(value)) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+  }
+  const s = String(value || "").trim();
+  if (!s) return "";
+  const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
+  const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  const parsed = new Date(s);
+  if (!isNaN(parsed)) return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, "0")}-${String(parsed.getDate()).padStart(2, "0")}`;
+  return "";
+}
+
+function fmtRosterDate(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-AU", { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
+}
+
+const ROSTER_IMPORT_FIELDS = [
+  { key: "date", match: (h) => h === "date" || h.includes("date") },
+  { key: "run", match: (h) => h === "run" || h === "zone" || h.includes("run") || h.includes("zone") },
+  { key: "name", match: (h) => h.includes("name") },
+  { key: "shift", match: (h) => h.includes("shift") || h.includes("time") },
+  { key: "contactNumber", match: (h) => h.includes("contact") || h.includes("phone") || h.includes("mobile") },
+];
+
+function RosterImport({ zones, accounts, roster, persistRoster }) {
+  const fileRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy(true);
+    setError("");
+    setResult(null);
+    try {
+      const XLSX = await import("xlsx");
+      const buf = await file.arrayBuffer();
+      const workbook = XLSX.read(buf, { type: "array", cellDates: true });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      if (!rows.length) { setError("That file has no rows to import."); setBusy(false); return; }
+
+      const headers = Object.keys(rows[0]);
+      const fieldToHeader = {};
+      ROSTER_IMPORT_FIELDS.forEach(({ key, match }) => {
+        const h = headers.find((h) => match(normalizeHeader(h)));
+        if (h) fieldToHeader[key] = h;
+      });
+
+      const working = roster.slice();
+      const existingKeys = new Set(working.map((r) => `${r.date}|${r.run.toLowerCase()}|${r.patrolmanName.toLowerCase()}`));
+
+      let created = 0;
+      let skippedMissing = 0;
+      let skippedDupe = 0;
+      let runNotRecognized = 0;
+      let badDate = 0;
+
+      rows.forEach((row, i) => {
+        const get = (key) => (fieldToHeader[key] ? row[fieldToHeader[key]] : "");
+        const date = parseRosterDate(get("date"));
+        const name = String(get("name") ?? "").trim();
+        const rawRun = String(get("run") ?? "").trim();
+        const shift = String(get("shift") ?? "").trim();
+        const contactNumber = String(get("contactNumber") ?? "").trim();
+
+        if (!name || !rawRun) { skippedMissing++; return; }
+        if (!date) { badDate++; return; }
+
+        const zoneMatch = zones.find((z) => z.toLowerCase() === rawRun.toLowerCase());
+        if (!zoneMatch) runNotRecognized++;
+        const run = zoneMatch || rawRun;
+
+        const dedupeKey = `${date}|${run.toLowerCase()}|${name.toLowerCase()}`;
+        if (existingKeys.has(dedupeKey)) { skippedDupe++; return; }
+        existingKeys.add(dedupeKey);
+
+        const account = accounts.find((a) => a.role === "patrolman" && (a.displayName.toLowerCase() === name.toLowerCase() || a.loginName.toLowerCase() === name.toLowerCase()));
+
+        working.push({
+          id: `roster_${Date.now()}_${i}`,
+          date,
+          run,
+          patrolmanLoginName: account ? account.loginName : "",
+          patrolmanName: name,
+          shift: shift || (account?.shift || ""),
+          contactNumber: contactNumber || (account?.contactNumber || ""),
+        });
+        created++;
+      });
+
+      if (created) persistRoster(working);
+      setResult({ created, skippedMissing, skippedDupe, runNotRecognized, badDate, total: rows.length });
+    } catch (err) {
+      setError("Couldn't read that file — make sure it's a valid .xlsx, .xls, or .csv export.");
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div style={{ padding: 14, borderRadius: 8, border: "1px dashed var(--border)", background: "var(--panel-alt)", marginBottom: 24, maxWidth: 620 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>Import roster from Excel</div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>
+            Columns: Date, Run/Zone, Patrolman Name, Shift, Contact number (optional). One row per patrolman per date — a whole fortnight is just every date/run/name combination in one sheet. Names matching an existing login pick up that login's contact/shift as a fallback. Run must match a run you've already added, or it's kept as typed and flagged.
+          </div>
+        </div>
+        <button onClick={() => fileRef.current?.click()} disabled={busy} style={secondaryBtn}>
+          <Upload size={13} /> {busy ? "Importing…" : "Choose file"}
+        </button>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={handleFile} />
+      </div>
+      {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 10 }}>{error}</div>}
+      {result && (
+        <div style={{ color: "var(--ok)", fontSize: 12, marginTop: 10 }}>
+          {result.created} entr{result.created !== 1 ? "ies" : "y"} added.
+          {result.skippedDupe > 0 && ` ${result.skippedDupe} skipped as duplicates.`}
+          {result.runNotRecognized > 0 && ` ${result.runNotRecognized} row(s) had a run/zone that doesn't match any existing run — kept as typed.`}
+          {result.badDate > 0 && ` ${result.badDate} row(s) skipped (date couldn't be read).`}
+          {result.skippedMissing > 0 && ` ${result.skippedMissing} row(s) skipped (missing name or run).`}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RosterView({ zones, accounts, roster, persistRoster }) {
+  const [selectedDate, setSelectedDate] = useState(todayISO());
+  const blank = { date: selectedDate, run: zones[0] || "Unassigned", patrolmanLoginName: "", patrolmanName: "", shift: "", contactNumber: "" };
+  const [form, setForm] = useState(blank);
+  const [editingId, setEditingId] = useState(null);
+  const [error, setError] = useState("");
+
+  const patrolmen = accounts.filter((a) => a.role === "patrolman");
+
+  function set(field, value) { setForm((f) => ({ ...f, [field]: value })); }
+
+  function pickPatrolman(loginName) {
+    if (loginName === "__custom__") { set("patrolmanLoginName", ""); return; }
+    const a = patrolmen.find((p) => p.loginName === loginName);
+    setForm((f) => ({
+      ...f,
+      patrolmanLoginName: loginName,
+      patrolmanName: a?.displayName || "",
+      shift: a?.shift || f.shift,
+      contactNumber: a?.contactNumber || f.contactNumber,
+    }));
+  }
+
+  function startAdd() { setEditingId(null); setForm({ ...blank, date: selectedDate }); setError(""); }
+  function startEdit(entry) { setEditingId(entry.id); setForm({ ...entry }); setError(""); }
+  function cancelEdit() { setEditingId(null); setForm({ ...blank, date: selectedDate }); setError(""); }
+
+  function save() {
+    setError("");
+    if (!form.date || !form.run || !form.patrolmanName.trim()) { setError("Date, run, and patrolman name are required."); return; }
+    const entry = { ...form, patrolmanName: form.patrolmanName.trim() };
+    if (editingId) {
+      persistRoster(roster.map((r) => (r.id === editingId ? { ...entry, id: editingId } : r)));
+    } else {
+      persistRoster([...roster, { ...entry, id: `roster_${Date.now()}` }]);
+    }
+    cancelEdit();
+  }
+
+  function remove(id) {
+    if (window.confirm("Remove this roster entry?")) {
+      persistRoster(roster.filter((r) => r.id !== id));
+      if (editingId === id) cancelEdit();
+    }
+  }
+
+  const forDate = roster.filter((r) => r.date === selectedDate);
+  const runsToShow = Array.from(new Set([...zones, ...forDate.map((r) => r.run)]));
+
+  return (
+    <div>
+      <SectionTitle icon={CalendarDays} title="Roster" />
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+        <Field label="Date" style={{ marginBottom: 0 }}>
+          <input type="date" value={selectedDate} onChange={(e) => { setSelectedDate(e.target.value); if (!editingId) setForm((f) => ({ ...f, date: e.target.value })); }} style={{ ...selectStyle, width: 180 }} />
+        </Field>
+        <button onClick={() => setSelectedDate(todayISO())} style={{ ...secondaryBtn, marginTop: 19 }}>Today</button>
+      </div>
+
+      <SectionTitle icon={UserPlus} title={editingId ? "Edit roster entry" : "Add roster entry"} small />
+      <div style={{ maxWidth: 620, marginBottom: 24 }}>
+        <div style={{ display: "flex", gap: 12 }}>
+          <Field label="Date" style={{ width: 160 }}>
+            <input type="date" value={form.date} onChange={(e) => set("date", e.target.value)} style={selectStyle} />
+          </Field>
+          <Field label="Run / zone" style={{ flex: 1 }}>
+            <select value={form.run} onChange={(e) => set("run", e.target.value)} style={selectStyle}>
+              {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+              {!zones.includes(form.run) && form.run && <option value={form.run}>{form.run}</option>}
+            </select>
+          </Field>
+        </div>
+        <Field label="Patrolman">
+          <select value={form.patrolmanLoginName || "__custom__"} onChange={(e) => pickPatrolman(e.target.value)} style={selectStyle}>
+            <option value="__custom__">Type a name not on this list…</option>
+            {patrolmen.map((p) => <option key={p.loginName} value={p.loginName}>{p.displayName} · {p.loginName}</option>)}
+          </select>
+        </Field>
+        {!form.patrolmanLoginName && (
+          <Field label="Patrolman name">
+            <input value={form.patrolmanName} onChange={(e) => set("patrolmanName", e.target.value)} placeholder="e.g. relief patrolman name" style={selectStyle} />
+          </Field>
+        )}
+        <div style={{ display: "flex", gap: 12 }}>
+          <Field label="Shift" style={{ flex: 1 }}>
+            <input value={form.shift} onChange={(e) => set("shift", e.target.value)} placeholder="e.g. 1800-0600" style={selectStyle} />
+          </Field>
+          <Field label="Contact number" style={{ flex: 1 }}>
+            <input value={form.contactNumber} onChange={(e) => set("contactNumber", e.target.value)} style={selectStyle} />
+          </Field>
+        </div>
+        {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={save} style={primaryBtn}><UserPlus size={14} /> {editingId ? "Save changes" : "Add to roster"}</button>
+          {editingId && <button onClick={cancelEdit} style={secondaryBtn}>Cancel</button>}
+        </div>
+      </div>
+
+      <RosterImport zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />
+
+      <SectionTitle icon={CalendarDays} title={fmtRosterDate(selectedDate)} small />
+      {forDate.length === 0 ? (
+        <Empty text="No one rostered for this date yet — add an entry above, or import a sheet." />
+      ) : (
+        runsToShow.map((run) => {
+          const entries = forDate.filter((r) => r.run === run);
+          if (!entries.length) return null;
+          return (
+            <div key={run} style={{ marginBottom: 18 }}>
+              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text-dim)", marginBottom: 8 }}>{run} ({entries.length})</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {entries.map((r) => (
+                  <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: "var(--panel)", border: "1px solid var(--border)" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{r.patrolmanName}</div>
+                      <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
+                        {r.shift || "No shift set"}{r.contactNumber ? ` · ${r.contactNumber}` : ""}
+                      </div>
+                    </div>
+                    <button onClick={() => startEdit(r)} title="Edit" style={iconBtn}><RotateCcw size={13} /></button>
+                    <button onClick={() => remove(r.id)} title="Delete" style={iconBtn}><Trash2 size={13} color="var(--breach)" /></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })
+      )}
     </div>
   );
 }
