@@ -82,6 +82,16 @@ function fmtDateTime(iso) {
   return new Date(iso).toLocaleString("en-AU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
+function isoDateOnly(iso) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function isoTimeOnly(iso) {
+  const d = new Date(iso);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
 function minutesSince(iso, now) {
   return Math.floor((now - new Date(iso).getTime()) / 60000);
 }
@@ -890,6 +900,11 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
 }
 
 function Board({ jobs, now, onSelect }) {
+  const [search, setSearch] = useState("");
+  const [dateFilter, setDateFilter] = useState("");
+  const [timeFrom, setTimeFrom] = useState("");
+  const [timeTo, setTimeTo] = useState("");
+
   const groups = [
     { key: "dispatched", title: "Out with patrolmen" },
     { key: "submitted", title: "Awaiting your review" },
@@ -897,15 +912,54 @@ function Board({ jobs, now, onSelect }) {
     { key: "emailed", title: "Closed out" },
     { key: "cancelled", title: "Cancelled / stood down" },
   ];
+
   if (jobs.length === 0) return <Empty text="No jobs dispatched yet. Use “New job” to send the first alarm response." />;
+
+  const q = search.trim().toLowerCase();
+  const hasFilter = q || dateFilter || timeFrom || timeTo;
+  const filtered = jobs.filter((j) => {
+    if (q && !j.jobNumber.toLowerCase().includes(q) && !j.siteName.toLowerCase().includes(q)) return false;
+    if (dateFilter && isoDateOnly(j.dispatchTime) !== dateFilter) return false;
+    if (timeFrom || timeTo) {
+      const t = isoTimeOnly(j.dispatchTime);
+      if (timeFrom && t < timeFrom) return false;
+      if (timeTo && t > timeTo) return false;
+    }
+    return true;
+  });
+
+  function clearFilters() { setSearch(""); setDateFilter(""); setTimeFrom(""); setTimeTo(""); }
+
   return (
     <div>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap", marginBottom: 20, padding: 12, borderRadius: 8, background: "var(--panel-alt)", border: "1px solid var(--border)" }}>
+        <Field label="Job number or site" style={{ marginBottom: 0, flex: "1 1 200px" }}>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="e.g. JB-0002 or Northgate" style={{ ...selectStyle, background: "var(--panel)" }} />
+        </Field>
+        <Field label="Date" style={{ marginBottom: 0 }}>
+          <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
+        </Field>
+        <Field label="From time" style={{ marginBottom: 0 }}>
+          <input type="time" value={timeFrom} onChange={(e) => setTimeFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
+        </Field>
+        <Field label="To time" style={{ marginBottom: 0 }}>
+          <input type="time" value={timeTo} onChange={(e) => setTimeTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
+        </Field>
+        {hasFilter && <button onClick={clearFilters} style={{ ...secondaryBtn, marginBottom: 0 }}><X size={13} /> Clear filters</button>}
+      </div>
+
+      {hasFilter && filtered.length === 0 && <Empty text="No jobs match these filters." />}
+
       {groups.map((g) => {
-        const list = jobs.filter((j) => j.status === g.key).sort((a, b) => new Date(b.dispatchTime) - new Date(a.dispatchTime));
+        const meta = STATUS_META[g.key];
+        const list = filtered.filter((j) => j.status === g.key).sort((a, b) => new Date(b.dispatchTime) - new Date(a.dispatchTime));
         if (!list.length) return null;
         return (
           <div key={g.key} style={{ marginBottom: 22 }}>
-            <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text-dim)", marginBottom: 8 }}>{g.title} ({list.length})</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.6, color: meta.color, marginBottom: 8 }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: meta.color }} />
+              {g.title} ({list.length})
+            </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {list.map((j) => <JobCard key={j.id} job={j} now={now} onClick={() => onSelect(j.id)} />)}
             </div>
@@ -921,7 +975,10 @@ function JobCard({ job, now, onClick }) {
   const borderColor = job.status === "dispatched" ? (t.level === "breach" ? "var(--breach)" : t.level === "warn" ? "var(--warn)" : "var(--border)") : "var(--border)";
   return (
     <div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 14px", borderRadius: 8, background: "var(--panel)", border: `1px solid ${borderColor}`, cursor: "pointer" }}>
-      <div style={{ fontFamily: "var(--mono)", fontSize: 11.5, color: "var(--text-dim)", width: 76 }}>{job.jobNumber}</div>
+      <div style={{ fontFamily: "var(--mono)", fontSize: 11.5, color: "var(--text-dim)", width: 96 }}>
+        <div>{job.jobNumber}</div>
+        <div style={{ fontSize: 10, marginTop: 2 }}>{fmtDateTime(job.dispatchTime)}</div>
+      </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.siteName}</div>
         <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{job.run} · {job.monitoringCo} · assigned {job.assigneeName}{job.handlingName ? ` · handled by ${job.handlingName}` : ""}</div>
