@@ -172,12 +172,36 @@ export default function SentrylinePrototype() {
   const [now, setNow] = useState(Date.now());
   const [banner, setBanner] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [autoLoggedOut, setAutoLoggedOut] = useState(false);
   const prevJobsRef = useRef([]);
+  const lastActivityRef = useRef(Date.now());
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 15000);
     return () => clearInterval(t);
   }, []);
+
+  // Auto sign out Control Room after 30 minutes with no activity in the window
+  useEffect(() => {
+    if (!session || session.role !== "operator") return;
+    const markActivity = () => { lastActivityRef.current = Date.now(); };
+    const events = ["mousemove", "mousedown", "keydown", "touchstart", "scroll"];
+    events.forEach((e) => window.addEventListener(e, markActivity));
+    markActivity();
+
+    const INACTIVITY_LIMIT_MS = 30 * 60 * 1000;
+    const check = setInterval(() => {
+      if (Date.now() - lastActivityRef.current >= INACTIVITY_LIMIT_MS) {
+        setSession(null);
+        setAutoLoggedOut(true);
+      }
+    }, 30000);
+
+    return () => {
+      events.forEach((e) => window.removeEventListener(e, markActivity));
+      clearInterval(check);
+    };
+  }, [session]);
 
   // Load jobs
   useEffect(() => {
@@ -337,7 +361,12 @@ export default function SentrylinePrototype() {
   if (!session) {
     return (
       <Shell>
-        <Login accounts={accounts} accountsLoaded={accountsLoaded} onLogin={setSession} />
+        <Login
+          accounts={accounts}
+          accountsLoaded={accountsLoaded}
+          autoLoggedOut={autoLoggedOut}
+          onLogin={(s) => { setSession(s); setAutoLoggedOut(false); }}
+        />
       </Shell>
     );
   }
@@ -409,7 +438,7 @@ function Logo() {
    LOGIN — role select, then Login Name / Password only
 ---------------------------------------------------------------- */
 
-function Login({ accounts, accountsLoaded, onLogin }) {
+function Login({ accounts, accountsLoaded, autoLoggedOut, onLogin }) {
   const [role, setRole] = useState(null);
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
@@ -443,6 +472,11 @@ function Login({ accounts, accountsLoaded, onLogin }) {
         <div style={{ fontSize: 13, color: "var(--text-dim)", textAlign: "center", marginBottom: 32 }}>
           Alarm response dispatch — choose your sign-in
         </div>
+        {autoLoggedOut && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 12, borderRadius: 7, background: "#FFFBEB", border: "1px solid var(--warn)", color: "#92400E", fontSize: 12.5, marginBottom: 20 }}>
+            <Clock size={14} /> Signed out after 30 minutes of inactivity — please sign in again.
+          </div>
+        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <button onClick={() => setRole("manager")} style={roleCardStyle}>
             <Users size={18} color="var(--accent)" />
@@ -571,7 +605,7 @@ function TopBar({ session, onSignOut, onOpenSettings, now }) {
         <button onClick={onOpenSettings} title="Change password" style={{ background: "none", border: "1px solid var(--border)", borderRadius: 6, padding: 7, cursor: "pointer", color: "var(--text-dim)" }}>
           <Settings size={14} />
         </button>
-        <button onClick={onSignOut} style={{ background: "none", border: "1px solid var(--border)", borderRadius: 6, padding: 7, cursor: "pointer", color: "var(--text-dim)" }}>
+        <button onClick={onSignOut} title="Sign out" style={{ background: "none", border: "1px solid var(--border)", borderRadius: 6, padding: 7, cursor: "pointer", color: "var(--text-dim)" }}>
           <LogOut size={14} />
         </button>
       </div>
