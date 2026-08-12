@@ -1084,7 +1084,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       siteId: site.id,
       siteName: site.name,
       address: site.address,
-      run: site.run,
+      run: assignee.run || site.run,
       monitoringCo: site.monitoringCo,
       bureau: site.bureau || "",
       poNumber: site.poNumber || "",
@@ -1261,7 +1261,7 @@ function JobDetailOperator({ job, jobs, patrolmen, session, persist, now, onBack
   function reassign(loginName) {
     const p = patrolmen.find((a) => a.loginName === loginName);
     if (!p) return;
-    update({ assigneeId: p.loginName, assigneeName: p.displayName });
+    update({ assigneeId: p.loginName, assigneeName: p.displayName, run: p.run || job.run });
   }
 
   function confirmCancel() {
