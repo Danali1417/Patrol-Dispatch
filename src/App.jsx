@@ -471,7 +471,7 @@ function Logo({ src }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
       {src ? (
-        <img src={src} alt="Company logo" style={{ width: 32, height: 32, borderRadius: 6, objectFit: "contain" }} />
+        <img src={src} alt="Company logo" style={{ width: 48, height: 48, borderRadius: 6, objectFit: "contain" }} />
       ) : (
         <div style={{ width: 26, height: 26, borderRadius: 6, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <Radio size={15} color="#0B0E11" strokeWidth={2.5} />
