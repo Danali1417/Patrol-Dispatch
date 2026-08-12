@@ -54,6 +54,7 @@ const ACCOUNTS_KEY = "ops:accounts";
 const ZONES_KEY = "ops:zones";
 const SITES_KEY = "ops:sites";
 const ROSTER_KEY = "ops:roster";
+const LOGO_KEY = "ops:logo";
 
 function todayISO() {
   const d = new Date();
@@ -156,6 +157,31 @@ function watermarkPhoto(file, label) {
   });
 }
 
+function resizeLogo(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 240;
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 /* ---------------------------------------------------------------
    ROOT COMPONENT
 ---------------------------------------------------------------- */
@@ -169,6 +195,7 @@ export default function SentrylinePrototype() {
   const [sites, setSites] = useState([]);
   const [sitesLoaded, setSitesLoaded] = useState(false);
   const [roster, setRoster] = useState([]);
+  const [logoUrl, setLogoUrl] = useState("");
   const [now, setNow] = useState(Date.now());
   const [banner, setBanner] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -278,6 +305,16 @@ export default function SentrylinePrototype() {
     })();
   }, []);
 
+  // Load company logo (uploaded by a Manager, shown on every login type)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.storage.get(LOGO_KEY, true);
+        if (res && res.value) setLogoUrl(res.value);
+      } catch (e) { /* nothing stored yet */ }
+    })();
+  }, []);
+
   const persistJobs = useCallback(async (updated) => {
     setJobs(updated);
     prevJobsRef.current = updated;
@@ -302,6 +339,11 @@ export default function SentrylinePrototype() {
   const persistRoster = useCallback(async (updated) => {
     setRoster(updated);
     try { await window.storage.set(ROSTER_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
+  }, []);
+
+  const persistLogo = useCallback(async (dataUrl) => {
+    setLogoUrl(dataUrl);
+    try { await window.storage.set(LOGO_KEY, dataUrl, true); } catch (e) { console.error(e); }
   }, []);
 
   // Poll shared storage + fire notifications
@@ -365,6 +407,7 @@ export default function SentrylinePrototype() {
           accounts={accounts}
           accountsLoaded={accountsLoaded}
           autoLoggedOut={autoLoggedOut}
+          logoUrl={logoUrl}
           onLogin={(s) => { setSession(s); setAutoLoggedOut(false); }}
         />
       </Shell>
@@ -373,7 +416,7 @@ export default function SentrylinePrototype() {
 
   return (
     <Shell>
-      <TopBar session={session} onSignOut={() => setSession(null)} onOpenSettings={() => setShowSettings(true)} now={now} />
+      <TopBar session={session} onSignOut={() => setSession(null)} onOpenSettings={() => setShowSettings(true)} now={now} logoUrl={logoUrl} />
       {banner && <NotifBanner banner={banner} onDismiss={() => setBanner(null)} />}
       {showSettings && (
         <SettingsModal session={session} accounts={accounts} persistAccounts={persistAccounts} onClose={() => setShowSettings(false)} />
@@ -381,7 +424,7 @@ export default function SentrylinePrototype() {
       {!accountsLoaded || !sitesLoaded ? (
         <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
       ) : session.role === "manager" ? (
-        <ManagerView session={session} accounts={accounts} persistAccounts={persistAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} jobs={jobs} now={now} />
+        <ManagerView session={session} accounts={accounts} persistAccounts={persistAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} logoUrl={logoUrl} persistLogo={persistLogo} jobs={jobs} now={now} />
       ) : session.role === "operator" ? (
         <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} />
       ) : (
@@ -424,12 +467,16 @@ function Shell({ children }) {
   );
 }
 
-function Logo() {
+function Logo({ src }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <div style={{ width: 26, height: 26, borderRadius: 6, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <Radio size={15} color="#0B0E11" strokeWidth={2.5} />
-      </div>
+      {src ? (
+        <img src={src} alt="Company logo" style={{ width: 32, height: 32, borderRadius: 6, objectFit: "contain" }} />
+      ) : (
+        <div style={{ width: 26, height: 26, borderRadius: 6, background: "var(--accent)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Radio size={15} color="#0B0E11" strokeWidth={2.5} />
+        </div>
+      )}
     </div>
   );
 }
@@ -438,7 +485,7 @@ function Logo() {
    LOGIN — role select, then Login Name / Password only
 ---------------------------------------------------------------- */
 
-function Login({ accounts, accountsLoaded, autoLoggedOut, onLogin }) {
+function Login({ accounts, accountsLoaded, autoLoggedOut, logoUrl, onLogin }) {
   const [role, setRole] = useState(null);
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
@@ -468,7 +515,7 @@ function Login({ accounts, accountsLoaded, autoLoggedOut, onLogin }) {
   if (!role) {
     return (
       <div style={{ padding: "48px 32px", maxWidth: 380, margin: "0 auto" }}>
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 28 }}><Logo /></div>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 28 }}><Logo src={logoUrl} /></div>
         <div style={{ fontSize: 13, color: "var(--text-dim)", textAlign: "center", marginBottom: 32 }}>
           Alarm response dispatch — choose your sign-in
         </div>
@@ -509,7 +556,7 @@ function Login({ accounts, accountsLoaded, autoLoggedOut, onLogin }) {
 
   return (
     <div style={{ padding: "48px 32px", maxWidth: 340, margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "center", marginBottom: 28 }}><Logo /></div>
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: 28 }}><Logo src={logoUrl} /></div>
       <button onClick={() => { setRole(null); setError(""); }} style={backBtn}>
         <ArrowLeft size={13} /> Change sign-in type
       </button>
@@ -588,10 +635,10 @@ const roleCardStyle = {
    TOP BAR / NOTIF BANNER / SETTINGS
 ---------------------------------------------------------------- */
 
-function TopBar({ session, onSignOut, onOpenSettings, now }) {
+function TopBar({ session, onSignOut, onOpenSettings, now, logoUrl }) {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", borderBottom: "1px solid var(--border)", background: "var(--panel)" }}>
-      <Logo />
+      <Logo src={logoUrl} />
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
         <div style={{ fontFamily: "var(--mono)", fontSize: 12.5, color: "var(--text-dim)" }}>
           {new Date(now).toLocaleTimeString("en-AU", { hour12: false })}
@@ -1401,7 +1448,7 @@ function DetailRow({ icon: Icon, label, value }) {
    MANAGER VIEW — create & manage logins
 ---------------------------------------------------------------- */
 
-function ManagerView({ session, accounts, persistAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, jobs, now }) {
+function ManagerView({ session, accounts, persistAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, logoUrl, persistLogo, jobs, now }) {
   const [tab, setTab] = useState("accounts");
   return (
     <div style={{ display: "flex", minHeight: 560 }}>
@@ -1418,7 +1465,7 @@ function ManagerView({ session, accounts, persistAccounts, zones, persistZones, 
         ))}
       </div>
       <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
-        {tab === "accounts" && <AccountsManager accounts={accounts} persistAccounts={persistAccounts} zones={zones} session={session} />}
+        {tab === "accounts" && <AccountsManager accounts={accounts} persistAccounts={persistAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} />}
         {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} persistAccounts={persistAccounts} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
         {tab === "logs" && <Logs jobs={jobs} now={now} />}
@@ -1547,7 +1594,48 @@ function PatrolmanRosterImport({ accounts, persistAccounts, zones }) {
   );
 }
 
-function AccountsManager({ accounts, persistAccounts, zones, session }) {
+function LogoUploader({ logoUrl, persistLogo }) {
+  const fileRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy(true);
+    setError("");
+    try {
+      const dataUrl = await resizeLogo(file);
+      await persistLogo(dataUrl);
+    } catch (err) {
+      setError("Couldn't read that image — try a different file.");
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div style={{ padding: 14, borderRadius: 8, border: "1px dashed var(--border)", background: "var(--panel-alt)", marginBottom: 24, maxWidth: 560 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <div style={{ width: 48, height: 48, borderRadius: 8, border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--panel)", flexShrink: 0, overflow: "hidden" }}>
+          {logoUrl ? <img src={logoUrl} alt="Current logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <Radio size={20} color="var(--text-dim)" />}
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>Company logo</div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>Shown at the top of every screen, for all three sign-in types.</div>
+        </div>
+        <button onClick={() => fileRef.current?.click()} disabled={busy} style={secondaryBtn}>
+          <Upload size={13} /> {busy ? "Uploading…" : logoUrl ? "Replace" : "Upload"}
+        </button>
+        {logoUrl && <button onClick={() => persistLogo("")} title="Remove logo" style={iconBtn}><X size={13} /></button>}
+        <input ref={fileRef} type="file" accept="image/*" hidden onChange={handleFile} />
+      </div>
+      {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 8 }}>{error}</div>}
+    </div>
+  );
+}
+
+function AccountsManager({ accounts, persistAccounts, zones, session, logoUrl, persistLogo }) {
   const [role, setRole] = useState("patrolman");
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
@@ -1578,6 +1666,8 @@ function AccountsManager({ accounts, persistAccounts, zones, session }) {
 
   return (
     <div>
+      <LogoUploader logoUrl={logoUrl} persistLogo={persistLogo} />
+
       <SectionTitle icon={UserPlus} title="Create a login" />
       <div style={{ maxWidth: 560, marginBottom: 30 }}>
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
