@@ -1749,6 +1749,8 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
   const [showPw, setShowPw] = useState(false);
   const [editingContact, setEditingContact] = useState(false);
   const [newContact, setNewContact] = useState(account.contactNumber || "");
+  const [showSendLogin, setShowSendLogin] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   function update(patch) {
     persistAccounts(accounts.map((a) => (a.loginName === account.loginName && a.role === account.role ? { ...a, ...patch } : a)));
@@ -1762,6 +1764,9 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
   }
 
   const inactive = account.active === false;
+
+  const loginMessage = `Your Sentryline login\n\nLogin name: ${account.loginName}\nPassword: ${account.password}\n\nSign in at: ${window.location.origin}`;
+  const smsHref = `sms:${encodeURIComponent(account.contactNumber || "")}?body=${encodeURIComponent(loginMessage)}`;
 
   return (
     <div style={{ padding: "10px 14px", borderRadius: 8, background: "var(--panel)", border: "1px solid var(--border)", opacity: inactive ? 0.55 : 1 }}>
@@ -1780,6 +1785,7 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
             {zones.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
         )}
+        <button onClick={() => { setCopied(false); setShowSendLogin((v) => !v); }} title="Send login details" style={iconBtn}><Send size={13} /></button>
         <button onClick={() => { setNewContact(account.contactNumber || ""); setEditingContact((v) => !v); }} title="Edit contact number" style={iconBtn}><Phone size={13} /></button>
         <button onClick={() => update({ active: inactive ? true : false })} title={inactive ? "Reactivate login" : "Deactivate login"} style={iconBtn}>
           <Power size={13} color={inactive ? "var(--ok)" : "var(--text-dim)"} />
@@ -1787,6 +1793,26 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
         <button onClick={() => { setNewPw(account.password || ""); setShowPw(false); setEditingPw((v) => !v); }} title="View / change password" style={iconBtn}><RotateCcw size={13} /></button>
         <button onClick={remove} title="Delete login" style={iconBtn}><Trash2 size={13} color="var(--breach)" /></button>
       </div>
+      {showSendLogin && (
+        <div style={{ marginTop: 8, padding: 10, borderRadius: 7, background: "var(--panel-alt)", border: "1px solid var(--border)" }}>
+          <pre style={{ whiteSpace: "pre-wrap", fontFamily: "var(--mono)", fontSize: 11, margin: 0, marginBottom: 8 }}>{loginMessage}</pre>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              onClick={() => { navigator.clipboard?.writeText(loginMessage); setCopied(true); }}
+              style={secondaryBtn}
+            >
+              <Copy size={13} /> {copied ? "Copied!" : "Copy message"}
+            </button>
+            {account.contactNumber ? (
+              <a href={smsHref} style={{ ...secondaryBtn, textDecoration: "none" }}>
+                <Phone size={13} /> Text via SMS
+              </a>
+            ) : (
+              <span style={{ fontSize: 11.5, color: "var(--text-dim)", alignSelf: "center" }}>Add a contact number to text this directly.</span>
+            )}
+          </div>
+        </div>
+      )}
       {editingContact && (
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           <input value={newContact} onChange={(e) => setNewContact(e.target.value)} placeholder="Contact number" style={{ ...selectStyle, fontSize: 12 }} />
