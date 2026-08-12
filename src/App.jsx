@@ -781,7 +781,7 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
         {tab === "board" && selected && (
           <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} persist={persist} now={now} session={session} onBack={() => setSelectedId(null)} />
         )}
-        {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} roster={roster} persist={persist} onCreated={(id) => { setTab("board"); setSelectedId(id); }} />}
+        {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} roster={roster} session={session} persist={persist} onCreated={(id) => { setTab("board"); setSelectedId(id); }} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
         {tab === "logs" && <Logs jobs={jobs} now={now} />}
       </div>
@@ -824,7 +824,7 @@ function JobCard({ job, now, onClick }) {
       <div style={{ fontFamily: "var(--mono)", fontSize: 11.5, color: "var(--text-dim)", width: 76 }}>{job.jobNumber}</div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.siteName}</div>
-        <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{job.run} · {job.monitoringCo} · assigned {job.assigneeName}</div>
+        <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{job.run} · {job.monitoringCo} · assigned {job.assigneeName}{job.handlingName ? ` · handled by ${job.handlingName}` : ""}</div>
       </div>
       {job.delayReason && <span title={job.delayReason}><AlertTriangle size={14} color="var(--warn)" /></span>}
       <SlaChip job={job} now={now} />
@@ -840,7 +840,7 @@ function Empty({ text }) {
 
 /* ---------------------- New job form ---------------------- */
 
-function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, persist, onCreated }) {
+function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, session, persist, onCreated }) {
   const [siteId, setSiteId] = useState("");
   const [siteQuery, setSiteQuery] = useState("");
   const [jobNumber, setJobNumber] = useState(() => `JB-${String(jobs.length + 1).padStart(4, "0")}`);
@@ -920,6 +920,10 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, persi
       alarmCode,
       assigneeId: assignee.loginName,
       assigneeName: assignee.displayName,
+      dispatchedByLoginName: session.loginName,
+      dispatchedByName: session.displayName,
+      handlingLoginName: session.loginName,
+      handlingName: session.displayName,
       dispatchTime: new Date().toISOString(),
       status: "dispatched",
       outcomeNotes: "",
@@ -1064,7 +1068,7 @@ function AddSiteInline({ zones, initialName = "", onCancel, onAdded }) {
 
 /* ---------------------- Operator job detail ---------------------- */
 
-function JobDetailOperator({ job, jobs, patrolmen, persist, now, onBack }) {
+function JobDetailOperator({ job, jobs, patrolmen, session, persist, now, onBack }) {
   const [notes, setNotes] = useState(job.reviewNotes || job.outcomeNotes);
   const [delayText, setDelayText] = useState("");
   const [showEmail, setShowEmail] = useState(false);
@@ -1091,10 +1095,27 @@ function JobDetailOperator({ job, jobs, patrolmen, persist, now, onBack }) {
     setShowCancelForm(false);
   }
 
+  function takeJob() {
+    update({ handlingLoginName: session.loginName, handlingName: session.displayName });
+  }
+
+  const isHandling = job.handlingLoginName === session.loginName;
+
   return (
     <div style={{ maxWidth: 640 }}>
       <button onClick={onBack} style={backBtn}><ArrowLeft size={13} /> Back to board</button>
       <JobHeader job={job} />
+
+      {job.dispatchedByName && (
+        <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 12, color: "var(--text-dim)" }}>
+          <span>Dispatched by <b style={{ color: "var(--text)" }}>{job.dispatchedByName}</b></span>
+          <span>·</span>
+          <span>Handling: <b style={{ color: isHandling ? "var(--ok)" : "var(--text)" }}>{job.handlingName}</b>{isHandling ? " (you)" : ""}</span>
+          {!isHandling && (
+            <button onClick={takeJob} style={{ ...secondaryBtn, padding: "4px 10px", fontSize: 11.5 }}>Take this job</button>
+          )}
+        </div>
+      )}
 
       <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <span style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.4 }}>Attending patrolman</span>
