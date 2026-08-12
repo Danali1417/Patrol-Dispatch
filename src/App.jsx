@@ -489,7 +489,6 @@ function Login({ accounts, accountsLoaded, autoLoggedOut, logoUrl, onLogin }) {
   const [role, setRole] = useState(null);
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
-  const [showDemo, setShowDemo] = useState(false);
   const loginNameRef = useRef(null);
   const passwordRef = useRef(null);
 
@@ -599,21 +598,8 @@ function Login({ accounts, accountsLoaded, autoLoggedOut, logoUrl, onLogin }) {
         </button>
       </div>
 
-      <button onClick={() => setShowDemo((v) => !v)} style={{ ...backBtn, marginTop: 20 }}>
-        {showDemo ? "Hide" : "Show"} demo login list
-      </button>
-      {showDemo && (
-        <div style={{ marginTop: 8, padding: 10, borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontFamily: "var(--mono)", fontSize: 11 }}>
-          {accounts.filter((a) => a.role === role).map((a) => (
-            <div key={a.loginName} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
-              <span>{a.loginName}</span><span style={{ color: "var(--text-dim)" }}>{a.password}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
       <div style={{ marginTop: 16, padding: 12, borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
-        Prototype note: accounts and jobs live in this artifact's shared storage — anyone with the link can sign in. Passwords are stored in plain text here for demo purposes only; a real build must hash and store these server-side. Sign in, then use the settings icon (top right) to change your password.
+        Forgotten your password? Ask your Manager to look it up or reset it from Manage logins. Use the settings icon (top right) after signing in to change it yourself.
       </div>
 
       <div style={{ marginTop: 10, fontSize: 10.5, color: "var(--text-dim)", fontFamily: "var(--mono)", textAlign: "center" }}>
@@ -1760,6 +1746,7 @@ function AccountsManager({ accounts, persistAccounts, zones, session, logoUrl, p
 function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
   const [editingPw, setEditingPw] = useState(false);
   const [newPw, setNewPw] = useState("");
+  const [showPw, setShowPw] = useState(false);
   const [editingContact, setEditingContact] = useState(false);
   const [newContact, setNewContact] = useState(account.contactNumber || "");
 
@@ -1797,7 +1784,7 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
         <button onClick={() => update({ active: inactive ? true : false })} title={inactive ? "Reactivate login" : "Deactivate login"} style={iconBtn}>
           <Power size={13} color={inactive ? "var(--ok)" : "var(--text-dim)"} />
         </button>
-        <button onClick={() => setEditingPw((v) => !v)} title="Reset password" style={iconBtn}><RotateCcw size={13} /></button>
+        <button onClick={() => { setNewPw(account.password || ""); setShowPw(false); setEditingPw((v) => !v); }} title="View / change password" style={iconBtn}><RotateCcw size={13} /></button>
         <button onClick={remove} title="Delete login" style={iconBtn}><Trash2 size={13} color="var(--breach)" /></button>
       </div>
       {editingContact && (
@@ -1813,9 +1800,20 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
       )}
       {editingPw && (
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-          <input value={newPw} onChange={(e) => setNewPw(e.target.value)} placeholder="New password (min 4 chars)" style={{ ...selectStyle, fontSize: 12 }} />
+          <div style={{ position: "relative", flex: 1 }}>
+            <input
+              value={newPw}
+              onChange={(e) => setNewPw(e.target.value)}
+              type={showPw ? "text" : "password"}
+              placeholder="Password (min 4 chars)"
+              style={{ ...selectStyle, fontSize: 12, paddingRight: 30 }}
+            />
+            <button type="button" onClick={() => setShowPw((v) => !v)} title={showPw ? "Hide password" : "Show password"} style={{ position: "absolute", right: 6, top: 6, background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer" }}>
+              {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </div>
           <button
-            onClick={() => { if (newPw.length >= 4) { update({ password: newPw }); setNewPw(""); setEditingPw(false); } }}
+            onClick={() => { if (newPw.length >= 4) { update({ password: newPw }); setEditingPw(false); } }}
             style={secondaryBtn}
           >
             Save
