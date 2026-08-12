@@ -3,7 +3,7 @@ import {
   Bell, Camera, CheckCircle2, AlertTriangle, Clock, LogOut, Mail,
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
   ShieldAlert, ArrowLeft, Building2, Settings, Lock, Eye, EyeOff,
-  Users, UserPlus, Power, Trash2, RotateCcw
+  Users, UserPlus, Power, Trash2, RotateCcw, Upload
 } from "lucide-react";
 
 /* ---------------------------------------------------------------
@@ -92,8 +92,8 @@ function mapsUrl(address) {
 function jobTiming(job, now) {
   const dispatched = new Date(job.dispatchTime);
   const slaMin = slaWindowMinutes(dispatched);
-  const elapsed = job.attendTime
-    ? Math.floor((new Date(job.attendTime) - dispatched) / 60000)
+  const elapsed = job.onsiteTime
+    ? Math.floor((new Date(job.onsiteTime) - dispatched) / 60000)
     : minutesSince(job.dispatchTime, now);
   const remaining = slaMin - elapsed;
   let level = "ok";
@@ -333,7 +333,7 @@ export default function SentrylinePrototype() {
       ) : session.role === "manager" ? (
         <ManagerView session={session} accounts={accounts} persistAccounts={persistAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} jobs={jobs} now={now} />
       ) : session.role === "operator" ? (
-        <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persist={persistJobs} now={now} />
+        <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} persist={persistJobs} now={now} />
       ) : (
         <PatrolmanView session={session} jobs={jobs} persist={persistJobs} now={now} />
       )}
@@ -648,7 +648,7 @@ function SlaChip({ job, now }) {
    OPERATOR VIEW
 ---------------------------------------------------------------- */
 
-function OperatorView({ session, jobs, accounts, sites, persist, now }) {
+function OperatorView({ session, jobs, accounts, sites, persistSites, zones, persist, now }) {
   const [tab, setTab] = useState("board");
   const [selectedId, setSelectedId] = useState(null);
   const selected = jobs.find((j) => j.id === selectedId);
@@ -673,7 +673,7 @@ function OperatorView({ session, jobs, accounts, sites, persist, now }) {
         {tab === "board" && selected && (
           <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} persist={persist} now={now} session={session} onBack={() => setSelectedId(null)} />
         )}
-        {tab === "new" && <NewJobForm jobs={jobs} sites={sites} patrolmen={patrolmen} persist={persist} onCreated={(id) => { setTab("board"); setSelectedId(id); }} />}
+        {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} persist={persist} onCreated={(id) => { setTab("board"); setSelectedId(id); }} />}
         {tab === "logs" && <Logs jobs={jobs} now={now} />}
       </div>
     </div>
@@ -730,24 +730,31 @@ function Empty({ text }) {
 
 /* ---------------------- New job form ---------------------- */
 
-function NewJobForm({ jobs, sites, patrolmen, persist, onCreated }) {
+function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, persist, onCreated }) {
   const [siteId, setSiteId] = useState("");
   const [description, setDescription] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
   const [keyInfo, setKeyInfo] = useState("");
   const [alarmCode, setAlarmCode] = useState("");
+  const [addingSite, setAddingSite] = useState(false);
 
   const site = sites.find((s) => s.id === siteId);
   const recommended = site ? patrolmen.filter((r) => r.run === site.run) : [];
 
   useEffect(() => {
     if (site) {
-      setKeyInfo(site.keyInfo);
-      setAlarmCode(site.alarmCode);
+      setKeyInfo(site.keyInfo || "");
+      setAlarmCode(site.alarmCode || "");
       setAssigneeId(recommended[0]?.loginName || "");
     }
     // eslint-disable-next-line
   }, [siteId]);
+
+  function handleSiteAdded(newSite) {
+    persistSites([...sites, newSite]);
+    setSiteId(newSite.id);
+    setAddingSite(false);
+  }
 
   const canDispatch = site && description.trim() && assigneeId;
 
@@ -761,6 +768,8 @@ function NewJobForm({ jobs, sites, patrolmen, persist, onCreated }) {
       address: site.address,
       run: site.run,
       monitoringCo: site.monitoringCo,
+      bureau: site.bureau || "",
+      poNumber: site.poNumber || "",
       description: description.trim(),
       keyInfo,
       alarmCode,
@@ -770,7 +779,8 @@ function NewJobForm({ jobs, sites, patrolmen, persist, onCreated }) {
       status: "dispatched",
       outcomeNotes: "",
       photos: [],
-      attendTime: null,
+      onsiteTime: null,
+      offsiteTime: null,
       delayReason: null,
       reviewNotes: "",
       emailedAt: null,
@@ -784,18 +794,32 @@ function NewJobForm({ jobs, sites, patrolmen, persist, onCreated }) {
     <div style={{ maxWidth: 560 }}>
       <SectionTitle icon={Send} title="Dispatch a new alarm response" />
       <Field label="Site">
-        <select value={siteId} onChange={(e) => setSiteId(e.target.value)} style={selectStyle}>
+        <select
+          value={addingSite ? "__new__" : siteId}
+          onChange={(e) => {
+            if (e.target.value === "__new__") { setAddingSite(true); return; }
+            setAddingSite(false);
+            setSiteId(e.target.value);
+          }}
+          style={selectStyle}
+        >
           <option value="">Select site…</option>
           {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          <option value="__new__">+ Add a new site…</option>
         </select>
       </Field>
 
-      {site && (
+      {addingSite && (
+        <AddSiteInline zones={zones} onCancel={() => setAddingSite(false)} onAdded={handleSiteAdded} />
+      )}
+
+      {site && !addingSite && (
         <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 14, display: "flex", gap: 14, flexWrap: "wrap" }}>
           <a href={mapsUrl(site.address)} target="_blank" rel="noopener noreferrer" style={{ color: "var(--info)", textDecoration: "none" }}>
             <MapPin size={11} style={{ verticalAlign: -1 }} /> {site.address}
           </a>
           <span><Building2 size={11} style={{ verticalAlign: -1 }} /> {site.monitoringCo}</span>
+          {site.bureau && <span>Bureau: {site.bureau}</span>}
           <span>{site.run}</span>
         </div>
       )}
@@ -820,6 +844,57 @@ function NewJobForm({ jobs, sites, patrolmen, persist, onCreated }) {
       <button disabled={!canDispatch} onClick={dispatch} style={{ ...primaryBtn, width: "100%", marginTop: 6, opacity: canDispatch ? 1 : 0.4, cursor: canDispatch ? "pointer" : "not-allowed" }}>
         <Send size={14} /> Dispatch job
       </button>
+    </div>
+  );
+}
+
+/* ---------------------- Inline "add a new site" (Control Room) ---------------------- */
+
+function AddSiteInline({ zones, onCancel, onAdded }) {
+  const blank = { name: "", address: "", poNumber: "", monitoringCo: "", bureau: "", run: zones[0] || "Unassigned" };
+  const [form, setForm] = useState(blank);
+  const [error, setError] = useState("");
+
+  function set(field, value) { setForm((f) => ({ ...f, [field]: value })); }
+
+  function save() {
+    if (!form.name.trim() || !form.address.trim()) { setError("Site name and address are required."); return; }
+    onAdded({
+      id: `site_${Date.now()}`,
+      name: form.name.trim(),
+      address: form.address.trim(),
+      poNumber: form.poNumber.trim(),
+      monitoringCo: form.monitoringCo.trim(),
+      bureau: form.bureau.trim(),
+      run: form.run,
+      keyInfo: "",
+      alarmCode: "",
+    });
+  }
+
+  return (
+    <div style={{ padding: 14, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel-alt)", marginBottom: 14 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>New site</div>
+      <Field label="Site name"><input value={form.name} onChange={(e) => set("name", e.target.value)} style={selectStyle} /></Field>
+      <Field label="Address"><input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, suburb, state" style={selectStyle} /></Field>
+      <div style={{ display: "flex", gap: 12 }}>
+        <Field label="PO number" style={{ flex: 1 }}><input value={form.poNumber} onChange={(e) => set("poNumber", e.target.value)} style={selectStyle} /></Field>
+        <Field label="Run / zone" style={{ width: 160 }}>
+          <select value={form.run} onChange={(e) => set("run", e.target.value)} style={selectStyle}>
+            <option value="Unassigned">Unassigned</option>
+            {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+          </select>
+        </Field>
+      </div>
+      <div style={{ display: "flex", gap: 12 }}>
+        <Field label="Monitoring" style={{ flex: 1 }}><input value={form.monitoringCo} onChange={(e) => set("monitoringCo", e.target.value)} placeholder="Who dispatches the alarm to us" style={selectStyle} /></Field>
+        <Field label="Bureau" style={{ flex: 1 }}><input value={form.bureau} onChange={(e) => set("bureau", e.target.value)} placeholder="Who we invoice, if different" style={selectStyle} /></Field>
+      </div>
+      {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={save} style={secondaryBtn}><MapPin size={13} /> Save site</button>
+        <button onClick={onCancel} style={iconBtn}><X size={13} /></button>
+      </div>
     </div>
   );
 }
@@ -876,13 +951,14 @@ function JobDetailOperator({ job, jobs, patrolmen, persist, now, onBack }) {
         </div>
       )}
 
-      {job.status === "dispatched" && <div style={{ marginTop: 18, color: "var(--text-dim)", fontSize: 13 }}>Waiting on patrolman to attend and submit outcome.</div>}
+      {job.status === "dispatched" && !job.onsiteTime && <div style={{ marginTop: 18, color: "var(--text-dim)", fontSize: 13 }}>Waiting on patrolman to arrive onsite.</div>}
+      {job.status === "dispatched" && job.onsiteTime && <div style={{ marginTop: 18, color: "var(--text-dim)", fontSize: 13 }}>Patrolman marked onsite at {fmtTime(job.onsiteTime)} — awaiting outcome submission.</div>}
 
       {job.status !== "dispatched" && (
         <div style={{ marginTop: 18 }}>
           <SectionTitle icon={CheckCircle2} title="Outcome" small />
           <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 6 }}>
-            Attended {fmtDateTime(job.attendTime)} · response time {jobTiming(job, now).elapsed}m (SLA {jobTiming(job, now).slaMin}m)
+            Onsite {fmtDateTime(job.onsiteTime)} · Offsite {fmtDateTime(job.offsiteTime)} · response time {jobTiming(job, now).elapsed}m (SLA {jobTiming(job, now).slaMin}m)
           </div>
           <textarea rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} style={{ ...selectStyle, resize: "vertical" }} />
           {job.photos?.length > 0 && (
@@ -930,7 +1006,8 @@ Address: ${job.address}
 Alarm description: ${job.description}
 Patrolman: ${job.assigneeName}
 Dispatched: ${fmtDateTime(job.dispatchTime)}
-Attended: ${fmtDateTime(job.attendTime)}
+Onsite: ${fmtDateTime(job.onsiteTime)}
+Offsite: ${fmtDateTime(job.offsiteTime)}
 ${job.delayReason ? `Delay advised: ${job.delayReason}\n` : ""}
 Outcome:
 ${job.reviewNotes}
@@ -957,15 +1034,15 @@ ${job.photos?.length ? `${job.photos.length} time-stamped photo(s) attached.` : 
 /* ---------------------- Logs ---------------------- */
 
 function Logs({ jobs, now }) {
-  const attended = jobs.filter((j) => j.attendTime);
+  const attended = jobs.filter((j) => j.onsiteTime);
   const avgResp = attended.length ? Math.round(attended.reduce((s, j) => s + jobTiming(j, now).elapsed, 0) / attended.length) : 0;
-  const breaches = jobs.filter((j) => (j.attendTime ? jobTiming(j, now).elapsed > jobTiming(j, now).slaMin : jobTiming(j, now).level === "breach")).length;
+  const breaches = jobs.filter((j) => (j.onsiteTime ? jobTiming(j, now).elapsed > jobTiming(j, now).slaMin : jobTiming(j, now).level === "breach")).length;
 
   const byCompany = {};
   jobs.forEach((j) => {
     byCompany[j.monitoringCo] = byCompany[j.monitoringCo] || { count: 0, respSum: 0, respN: 0 };
     byCompany[j.monitoringCo].count++;
-    if (j.attendTime) { byCompany[j.monitoringCo].respSum += jobTiming(j, now).elapsed; byCompany[j.monitoringCo].respN++; }
+    if (j.onsiteTime) { byCompany[j.monitoringCo].respSum += jobTiming(j, now).elapsed; byCompany[j.monitoringCo].respN++; }
   });
 
   return (
@@ -1033,6 +1110,7 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
   const submitted = job.status !== "dispatched";
+  const isOnsite = !!job.onsiteTime;
 
   async function handleFiles(e) {
     const files = Array.from(e.target.files || []);
@@ -1046,8 +1124,13 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
     e.target.value = "";
   }
 
+  async function markOnsite() {
+    const updated = jobs.map((j) => (j.id === job.id ? { ...j, onsiteTime: new Date().toISOString() } : j));
+    await persist(updated);
+  }
+
   async function submit() {
-    const updated = jobs.map((j) => (j.id === job.id ? { ...j, status: "submitted", outcomeNotes: outcome.trim(), photos, attendTime: new Date().toISOString() } : j));
+    const updated = jobs.map((j) => (j.id === job.id ? { ...j, status: "submitted", outcomeNotes: outcome.trim(), photos, offsiteTime: new Date().toISOString() } : j));
     await persist(updated);
     onBack();
   }
@@ -1065,8 +1148,21 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
         <DetailRow icon={KeyRound} label="Alarm code" value={job.alarmCode} />
       </div>
 
-      {!submitted ? (
+      {!submitted && !isOnsite && (
         <div style={{ marginTop: 20 }}>
+          <SectionTitle icon={MapPin} title="Arrived at site?" small />
+          <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 12 }}>
+            Mark onsite the moment you arrive — this records your response time and unlocks the outcome form.
+          </div>
+          <button onClick={markOnsite} style={{ ...primaryBtn, width: "100%", justifyContent: "center" }}>
+            <MapPin size={14} /> Mark onsite
+          </button>
+        </div>
+      )}
+
+      {!submitted && isOnsite && (
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 11.5, color: "var(--ok)", marginBottom: 10 }}>Onsite at {fmtTime(job.onsiteTime)}</div>
           <SectionTitle icon={CheckCircle2} title="Submit outcome" small />
           <textarea rows={4} value={outcome} onChange={(e) => setOutcome(e.target.value)} placeholder="What did you find on attendance? e.g. Premises secure, false alarm — sensor fault suspected." style={{ ...selectStyle, resize: "vertical" }} />
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
@@ -1085,12 +1181,14 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
           </div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 6 }}>Photos are timestamped automatically on capture.</div>
           <button disabled={!outcome.trim()} onClick={submit} style={{ ...primaryBtn, width: "100%", marginTop: 16, justifyContent: "center", opacity: outcome.trim() ? 1 : 0.4 }}>
-            <Send size={14} /> Submit to control room
+            <Send size={14} /> Mark offsite &amp; submit
           </button>
         </div>
-      ) : (
+      )}
+
+      {submitted && (
         <div style={{ marginTop: 20, padding: 14, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7, color: "var(--ok)", fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}><CheckCircle2 size={14} /> Submitted {fmtDateTime(job.attendTime)}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, color: "var(--ok)", fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}><CheckCircle2 size={14} /> Submitted — onsite {fmtTime(job.onsiteTime)}, offsite {fmtTime(job.offsiteTime)}</div>
           <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>{job.outcomeNotes}</div>
         </div>
       )}
@@ -1391,15 +1489,125 @@ function ZonesEditor({ zones, persistZones, sites, persistSites, accounts, persi
   );
 }
 
+/* ---------------------- Sites import (Excel/CSV) ---------------------- */
+
+const SITE_IMPORT_FIELDS = [
+  { key: "name", match: (h) => h === "sitename" || h === "name" },
+  { key: "address", match: (h) => h === "address" },
+  { key: "keyInfo", match: (h) => h.includes("key") || h.includes("swipe") },
+  { key: "siteNotes", match: (h) => h.includes("note") },
+  { key: "monitoringCo", match: (h) => h.includes("monitoring") },
+  { key: "bureau", match: (h) => h === "bureau" },
+  { key: "siteContact", match: (h) => h.includes("contact") },
+  { key: "poNumber", match: (h) => h === "ponumber" || h === "po" || (h.includes("po") && h.includes("number")) },
+  { key: "run", match: (h) => h === "run" || h === "zone" || h.includes("run") || h.includes("zone") },
+];
+
+function normalizeHeader(h) {
+  return String(h || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function SitesImport({ zones, sites, persistSites }) {
+  const fileRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy(true);
+    setError("");
+    setResult(null);
+    try {
+      const XLSX = await import("xlsx");
+      const buf = await file.arrayBuffer();
+      const workbook = XLSX.read(buf, { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      if (!rows.length) { setError("That file has no rows to import."); setBusy(false); return; }
+
+      const headers = Object.keys(rows[0]);
+      const fieldToHeader = {};
+      SITE_IMPORT_FIELDS.forEach(({ key, match }) => {
+        const h = headers.find((h) => match(normalizeHeader(h)));
+        if (h) fieldToHeader[key] = h;
+      });
+
+      const existingKeys = new Set(sites.map((s) => `${(s.name || "").trim().toLowerCase()}|${(s.address || "").trim().toLowerCase()}`));
+      const seen = new Set();
+      let skippedMissing = 0;
+      let skippedDupe = 0;
+      const imported = [];
+
+      rows.forEach((row, i) => {
+        const get = (key) => (fieldToHeader[key] ? String(row[fieldToHeader[key]] ?? "").trim() : "");
+        const name = get("name");
+        const address = get("address");
+        if (!name || !address) { skippedMissing++; return; }
+        const dedupeKey = `${name.toLowerCase()}|${address.toLowerCase()}`;
+        if (existingKeys.has(dedupeKey) || seen.has(dedupeKey)) { skippedDupe++; return; }
+        seen.add(dedupeKey);
+        imported.push({
+          id: `site_import_${Date.now()}_${i}`,
+          name,
+          address,
+          run: get("run") || zones[0] || "Unassigned",
+          monitoringCo: get("monitoringCo"),
+          bureau: get("bureau"),
+          poNumber: get("poNumber"),
+          keyInfo: get("keyInfo"),
+          siteNotes: get("siteNotes"),
+          siteContact: get("siteContact"),
+          alarmCode: "",
+        });
+      });
+
+      if (imported.length) persistSites([...sites, ...imported]);
+      setResult({ imported: imported.length, skippedMissing, skippedDupe, total: rows.length });
+    } catch (err) {
+      setError("Couldn't read that file — make sure it's a valid .xlsx, .xls, or .csv export.");
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div style={{ padding: 14, borderRadius: 8, border: "1px dashed var(--border)", background: "var(--panel-alt)", marginBottom: 24, maxWidth: 560 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>Import sites from Excel</div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>
+            Columns recognized: Site name, Address, Key/swipe card, Site notes, Monitoring, Bureau, Site contact (PO number and Run/zone also picked up if present). Site name and Address are required per row.
+          </div>
+        </div>
+        <button onClick={() => fileRef.current?.click()} disabled={busy} style={secondaryBtn}>
+          <Upload size={13} /> {busy ? "Importing…" : "Choose file"}
+        </button>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={handleFile} />
+      </div>
+      {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 10 }}>{error}</div>}
+      {result && (
+        <div style={{ color: "var(--ok)", fontSize: 12, marginTop: 10 }}>
+          Imported {result.imported} of {result.total} row(s).
+          {result.skippedDupe > 0 && ` ${result.skippedDupe} skipped as duplicates of existing sites.`}
+          {result.skippedMissing > 0 && ` ${result.skippedMissing} skipped (missing site name or address).`}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SitesEditor({ zones, sites, persistSites }) {
-  const blank = { name: "", address: "", run: zones[0] || "Unassigned", monitoringCo: "", keyInfo: "", alarmCode: "" };
+  const blank = { name: "", address: "", run: zones[0] || "Unassigned", monitoringCo: "", bureau: "", poNumber: "", keyInfo: "", siteNotes: "", siteContact: "", alarmCode: "" };
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState("");
+  const [filter, setFilter] = useState("");
 
   function set(field, value) { setForm((f) => ({ ...f, [field]: value })); }
 
-  function startEdit(site) { setEditingId(site.id); setForm({ ...site }); }
+  function startEdit(site) { setEditingId(site.id); setForm({ ...blank, ...site }); }
   function cancelEdit() { setEditingId(null); setForm(blank); setError(""); }
 
   function save() {
@@ -1420,6 +1628,11 @@ function SitesEditor({ zones, sites, persistSites }) {
     }
   }
 
+  const q = filter.trim().toLowerCase();
+  const filteredSites = q
+    ? sites.filter((s) => [s.name, s.address, s.monitoringCo, s.bureau, s.poNumber].some((v) => (v || "").toLowerCase().includes(q)))
+    : sites;
+
   return (
     <div>
       <SectionTitle icon={Building2} title={editingId ? "Edit site" : "Add a site"} small />
@@ -1432,12 +1645,20 @@ function SitesEditor({ zones, sites, persistSites }) {
             </select>
           </Field>
         </div>
-        <Field label="Address"><input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, suburb, state" style={selectStyle} /></Field>
-        <Field label="Monitoring company / client"><input value={form.monitoringCo} onChange={(e) => set("monitoringCo", e.target.value)} style={selectStyle} /></Field>
         <div style={{ display: "flex", gap: 12 }}>
-          <Field label="Key number / code" style={{ flex: 1 }}><input value={form.keyInfo} onChange={(e) => set("keyInfo", e.target.value)} style={selectStyle} /></Field>
+          <Field label="Address" style={{ flex: 1 }}><input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, suburb, state" style={selectStyle} /></Field>
+          <Field label="PO number" style={{ width: 150 }}><input value={form.poNumber} onChange={(e) => set("poNumber", e.target.value)} style={selectStyle} /></Field>
+        </div>
+        <div style={{ display: "flex", gap: 12 }}>
+          <Field label="Monitoring" style={{ flex: 1 }}><input value={form.monitoringCo} onChange={(e) => set("monitoringCo", e.target.value)} placeholder="Who dispatches the alarm to us" style={selectStyle} /></Field>
+          <Field label="Bureau" style={{ flex: 1 }}><input value={form.bureau} onChange={(e) => set("bureau", e.target.value)} placeholder="Who we invoice, if different" style={selectStyle} /></Field>
+        </div>
+        <Field label="Site contact (optional)"><input value={form.siteContact} onChange={(e) => set("siteContact", e.target.value)} style={selectStyle} /></Field>
+        <div style={{ display: "flex", gap: 12 }}>
+          <Field label="Key / swipe card (optional)" style={{ flex: 1 }}><input value={form.keyInfo} onChange={(e) => set("keyInfo", e.target.value)} style={selectStyle} /></Field>
           <Field label="Alarm code" style={{ width: 130 }}><input value={form.alarmCode} onChange={(e) => set("alarmCode", e.target.value)} style={selectStyle} /></Field>
         </div>
+        <Field label="Site notes (optional)"><textarea rows={2} value={form.siteNotes} onChange={(e) => set("siteNotes", e.target.value)} style={{ ...selectStyle, resize: "vertical" }} /></Field>
         {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={save} style={primaryBtn}><UserPlus size={14} /> {editingId ? "Save changes" : "Add site"}</button>
@@ -1445,19 +1666,25 @@ function SitesEditor({ zones, sites, persistSites }) {
         </div>
       </div>
 
+      <SitesImport zones={zones} sites={sites} persistSites={persistSites} />
+
       <SectionTitle icon={MapPin} title={`Sites (${sites.length})`} small />
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {sites.map((s) => (
+      <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search by name, address, monitoring, bureau, PO number…" style={{ ...selectStyle, marginBottom: 10 }} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 480, overflowY: "auto" }}>
+        {filteredSites.map((s) => (
           <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: "var(--panel)", border: "1px solid var(--border)" }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 600 }}>{s.name}</div>
-              <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{s.address} · {s.run}{s.monitoringCo ? ` · ${s.monitoringCo}` : ""}</div>
+              <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
+                {s.address} · {s.run}{s.monitoringCo ? ` · Mon: ${s.monitoringCo}` : ""}{s.bureau ? ` · Bureau: ${s.bureau}` : ""}{s.poNumber ? ` · PO ${s.poNumber}` : ""}
+              </div>
             </div>
             <button onClick={() => startEdit(s)} title="Edit" style={iconBtn}><RotateCcw size={13} /></button>
             <button onClick={() => remove(s.id)} title="Delete" style={iconBtn}><Trash2 size={13} color="var(--breach)" /></button>
           </div>
         ))}
-        {sites.length === 0 && <Empty text="No sites yet — add your first one above." />}
+        {sites.length === 0 && <Empty text="No sites yet — add your first one above, or import from Excel." />}
+        {sites.length > 0 && filteredSites.length === 0 && <Empty text="No sites match that search." />}
       </div>
     </div>
   );
