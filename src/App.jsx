@@ -765,6 +765,7 @@ function Empty({ text }) {
 function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, persist, onCreated }) {
   const [siteId, setSiteId] = useState("");
   const [siteQuery, setSiteQuery] = useState("");
+  const [jobNumber, setJobNumber] = useState(() => `JB-${String(jobs.length + 1).padStart(4, "0")}`);
   const [description, setDescription] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
   const [keyInfo, setKeyInfo] = useState("");
@@ -822,13 +823,13 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, persi
     setAddingSite(false);
   }
 
-  const canDispatch = site && description.trim() && assigneeId;
+  const canDispatch = site && description.trim() && assigneeId && jobNumber.trim();
 
   async function dispatch() {
     const assignee = patrolmen.find((r) => r.loginName === assigneeId);
     const job = {
       id: `job_${Date.now()}`,
-      jobNumber: `JB-${String(jobs.length + 1).padStart(4, "0")}`,
+      jobNumber: jobNumber.trim(),
       siteId: site.id,
       siteName: site.name,
       address: site.address,
@@ -853,6 +854,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, persi
     };
     await persist([...jobs, job]);
     setSiteId(""); setSiteQuery(""); setDescription(""); setAssigneeId(""); setKeyInfo(""); setAlarmCode("");
+    setJobNumber(`JB-${String(jobs.length + 2).padStart(4, "0")}`);
     onCreated(job.id);
   }
 
@@ -900,6 +902,10 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, persi
           <span>{site.run}</span>
         </div>
       )}
+
+      <Field label="Job number">
+        <input value={jobNumber} onChange={(e) => setJobNumber(e.target.value)} placeholder="e.g. the monitoring company's reference number" style={selectStyle} />
+      </Field>
 
       <Field label="Alarm description / area(s) in alarm">
         <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Zone 4 motion sensor — loading dock" style={{ ...selectStyle, resize: "vertical", fontFamily: "var(--sans)" }} />
