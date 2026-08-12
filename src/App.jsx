@@ -1765,7 +1765,7 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
 
   const inactive = account.active === false;
 
-  const loginMessage = `Your Sentryline login\n\nLogin name: ${account.loginName}\nPassword: ${account.password}\n\nSign in at: ${window.location.origin}`;
+  const loginMessage = `Your Alarm Response Dispatch login\n\nLogin name: ${account.loginName}\nPassword: ${account.password}\n\nSign in at: ${window.location.origin}`;
   const smsHref = `sms:${encodeURIComponent(account.contactNumber || "")}?body=${encodeURIComponent(loginMessage)}`;
 
   return (
