@@ -3,7 +3,7 @@ import {
   Bell, Camera, CheckCircle2, AlertTriangle, Clock, LogOut, Mail,
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
   ShieldAlert, ArrowLeft, Building2, Settings, Lock, Eye, EyeOff,
-  Users, UserPlus, Power, Trash2, RotateCcw, Upload
+  Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone
 } from "lucide-react";
 
 /* ---------------------------------------------------------------
@@ -1250,6 +1250,126 @@ function ManagerView({ session, accounts, persistAccounts, zones, persistZones, 
   );
 }
 
+/* ---------------------- Patrolman roster import (Excel/CSV) ---------------------- */
+
+const PATROLMAN_IMPORT_FIELDS = [
+  { key: "name", match: (h) => h.includes("name") },
+  { key: "run", match: (h) => h === "run" || h === "zone" || h.includes("run") || h.includes("zone") },
+  { key: "contactNumber", match: (h) => h.includes("contact") || h.includes("phone") || h.includes("mobile") || h.includes("number") },
+];
+
+function PatrolmanRosterImport({ accounts, persistAccounts, zones }) {
+  const fileRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy(true);
+    setError("");
+    setResult(null);
+    try {
+      const XLSX = await import("xlsx");
+      const buf = await file.arrayBuffer();
+      const workbook = XLSX.read(buf, { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      if (!rows.length) { setError("That file has no rows to import."); setBusy(false); return; }
+
+      const headers = Object.keys(rows[0]);
+      const fieldToHeader = {};
+      PATROLMAN_IMPORT_FIELDS.forEach(({ key, match }) => {
+        const h = headers.find((h) => match(normalizeHeader(h)));
+        if (h) fieldToHeader[key] = h;
+      });
+
+      const working = accounts.slice();
+      const existingLoginNames = new Set(working.map((a) => a.loginName.toLowerCase()));
+
+      let updated = 0;
+      let created = 0;
+      let skippedMissing = 0;
+      let runNotRecognized = 0;
+
+      rows.forEach((row) => {
+        const get = (key) => (fieldToHeader[key] ? String(row[fieldToHeader[key]] ?? "").trim() : "");
+        const name = get("name");
+        if (!name) { skippedMissing++; return; }
+        const contactNumber = get("contactNumber");
+        const rawRun = get("run");
+        let run = "";
+        if (rawRun) {
+          const zoneMatch = zones.find((z) => z.toLowerCase() === rawRun.toLowerCase());
+          if (zoneMatch) run = zoneMatch;
+          else runNotRecognized++;
+        }
+
+        const existingIdx = working.findIndex(
+          (a) => a.role === "patrolman" && (a.displayName.toLowerCase() === name.toLowerCase() || a.loginName.toLowerCase() === name.toLowerCase())
+        );
+
+        if (existingIdx >= 0) {
+          const patch = {};
+          if (contactNumber) patch.contactNumber = contactNumber;
+          if (run) patch.run = run;
+          if (Object.keys(patch).length) { working[existingIdx] = { ...working[existingIdx], ...patch }; updated++; }
+        } else {
+          const slug = name.replace(/[^a-zA-Z0-9]/g, "") || "Patrolman";
+          let loginName = slug;
+          let n = 2;
+          while (existingLoginNames.has(loginName.toLowerCase())) { loginName = `${slug}${n}`; n++; }
+          existingLoginNames.add(loginName.toLowerCase());
+          working.push({
+            loginName,
+            password: "patrol123",
+            role: "patrolman",
+            displayName: name,
+            run: run || "Unassigned",
+            shift: "",
+            contactNumber,
+            active: true,
+          });
+          created++;
+        }
+      });
+
+      if (updated || created) persistAccounts(working);
+      setResult({ updated, created, runNotRecognized, skippedMissing, total: rows.length });
+    } catch (err) {
+      setError("Couldn't read that file — make sure it's a valid .xlsx, .xls, or .csv export.");
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div style={{ padding: 14, borderRadius: 8, border: "1px dashed var(--border)", background: "var(--panel-alt)", marginBottom: 24, maxWidth: 560 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>Import patrolman roster from Excel</div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>
+            Columns: Patrolmen Name, Run/Zone, Patrolmen contact number. Matches existing patrolmen by name and updates their run + contact number; a name that isn't found gets a new login created automatically (default password "patrol123" — reset it from their row below). Run/Zone must match a run you've already added above, or it's left unchanged.
+          </div>
+        </div>
+        <button onClick={() => fileRef.current?.click()} disabled={busy} style={secondaryBtn}>
+          <Upload size={13} /> {busy ? "Importing…" : "Choose file"}
+        </button>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={handleFile} />
+      </div>
+      {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 10 }}>{error}</div>}
+      {result && (
+        <div style={{ color: "var(--ok)", fontSize: 12, marginTop: 10 }}>
+          {result.updated} existing patrolman{result.updated !== 1 ? "s" : ""} updated, {result.created} new login{result.created !== 1 ? "s" : ""} created (default password "patrol123").
+          {result.runNotRecognized > 0 && ` ${result.runNotRecognized} row(s) had a run/zone that doesn't match any existing run — left unchanged.`}
+          {result.skippedMissing > 0 && ` ${result.skippedMissing} row(s) skipped (missing name).`}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AccountsManager({ accounts, persistAccounts, zones, session }) {
   const [role, setRole] = useState("patrolman");
   const [loginName, setLoginName] = useState("");
@@ -1257,6 +1377,7 @@ function AccountsManager({ accounts, persistAccounts, zones, session }) {
   const [displayName, setDisplayName] = useState("");
   const [shift, setShift] = useState("");
   const [run, setRun] = useState("Unassigned");
+  const [contactNumber, setContactNumber] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -1265,11 +1386,11 @@ function AccountsManager({ accounts, persistAccounts, zones, session }) {
     const name = loginName.trim();
     if (!name || !password) { setError("Login name and password are required."); return; }
     if (accounts.some((a) => a.loginName.toLowerCase() === name.toLowerCase())) { setError("That login name is already in use — pick a unique one."); return; }
-    const acct = { loginName: name, password, role, displayName: displayName.trim() || name, active: true };
+    const acct = { loginName: name, password, role, displayName: displayName.trim() || name, active: true, contactNumber: contactNumber.trim() };
     if (role === "patrolman") { acct.shift = shift.trim(); acct.run = run; }
     persistAccounts([...accounts, acct]);
     setSuccess(`Login "${name}" created.`);
-    setLoginName(""); setPassword(""); setDisplayName(""); setShift(""); setRun("Unassigned");
+    setLoginName(""); setPassword(""); setDisplayName(""); setShift(""); setRun("Unassigned"); setContactNumber("");
   }
 
   const groups = [
@@ -1317,11 +1438,17 @@ function AccountsManager({ accounts, persistAccounts, zones, session }) {
           </div>
         )}
 
+        <Field label="Contact number (optional)">
+          <input value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} placeholder="e.g. 0412 345 678" style={selectStyle} />
+        </Field>
+
         {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
         {success && <div style={{ color: "var(--ok)", fontSize: 12, marginBottom: 10 }}>{success}</div>}
 
         <button onClick={createAccount} style={primaryBtn}><UserPlus size={14} /> Create login</button>
       </div>
+
+      <PatrolmanRosterImport accounts={accounts} persistAccounts={persistAccounts} zones={zones} />
 
       <SectionTitle icon={Users} title="Existing logins" />
       {groups.map((g) => {
@@ -1345,6 +1472,8 @@ function AccountsManager({ accounts, persistAccounts, zones, session }) {
 function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
   const [editingPw, setEditingPw] = useState(false);
   const [newPw, setNewPw] = useState("");
+  const [editingContact, setEditingContact] = useState(false);
+  const [newContact, setNewContact] = useState(account.contactNumber || "");
 
   function update(patch) {
     persistAccounts(accounts.map((a) => (a.loginName === account.loginName && a.role === account.role ? { ...a, ...patch } : a)));
@@ -1367,7 +1496,7 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
             {account.loginName} {isSelf && <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>(you)</span>}
           </div>
           <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
-            {account.displayName}{account.run ? ` · ${account.run}` : ""}{account.shift ? ` · ${account.shift}` : ""}{inactive ? " · deactivated" : ""}
+            {account.displayName}{account.run ? ` · ${account.run}` : ""}{account.shift ? ` · ${account.shift}` : ""}{account.contactNumber ? ` · ${account.contactNumber}` : ""}{inactive ? " · deactivated" : ""}
           </div>
         </div>
         {account.role === "patrolman" && (
@@ -1376,12 +1505,24 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
             {zones.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
         )}
+        <button onClick={() => { setNewContact(account.contactNumber || ""); setEditingContact((v) => !v); }} title="Edit contact number" style={iconBtn}><Phone size={13} /></button>
         <button onClick={() => update({ active: inactive ? true : false })} title={inactive ? "Reactivate login" : "Deactivate login"} style={iconBtn}>
           <Power size={13} color={inactive ? "var(--ok)" : "var(--text-dim)"} />
         </button>
         <button onClick={() => setEditingPw((v) => !v)} title="Reset password" style={iconBtn}><RotateCcw size={13} /></button>
         <button onClick={remove} title="Delete login" style={iconBtn}><Trash2 size={13} color="var(--breach)" /></button>
       </div>
+      {editingContact && (
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <input value={newContact} onChange={(e) => setNewContact(e.target.value)} placeholder="Contact number" style={{ ...selectStyle, fontSize: 12 }} />
+          <button
+            onClick={() => { update({ contactNumber: newContact.trim() }); setEditingContact(false); }}
+            style={secondaryBtn}
+          >
+            Save
+          </button>
+        </div>
+      )}
       {editingPw && (
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
           <input value={newPw} onChange={(e) => setNewPw(e.target.value)} placeholder="New password (min 4 chars)" style={{ ...selectStyle, fontSize: 12 }} />
