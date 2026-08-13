@@ -1072,6 +1072,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       address: site.address,
       run: assignee.run || site.run,
       monitoringCo: site.monitoringCo,
+      monitoringEmail: site.monitoringEmail || "",
       bureau: site.bureau || "",
       poNumber: site.poNumber || "",
       description: description.trim(),
@@ -1092,6 +1093,8 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       delayReason: null,
       reviewNotes: "",
       emailedAt: null,
+      clientEmail: "",
+      emailSentByApp: false,
     };
     await persist([...jobs, job]);
     setSiteId(""); setSiteQuery(""); setDescription(""); setAssigneeId(""); setKeyInfo(""); setAlarmCode("");
@@ -1182,7 +1185,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
 /* ---------------------- Inline "add a new site" (Control Room) ---------------------- */
 
 function AddSiteInline({ zones, initialName = "", onCancel, onAdded }) {
-  const blank = { name: initialName, address: "", poNumber: "", monitoringCo: "", bureau: "", run: zones[0] || "Unassigned" };
+  const blank = { name: initialName, address: "", poNumber: "", monitoringCo: "", monitoringEmail: "", bureau: "", run: zones[0] || "Unassigned" };
   const [form, setForm] = useState(blank);
   const [error, setError] = useState("");
 
@@ -1196,6 +1199,7 @@ function AddSiteInline({ zones, initialName = "", onCancel, onAdded }) {
       address: form.address.trim(),
       poNumber: form.poNumber.trim(),
       monitoringCo: form.monitoringCo.trim(),
+      monitoringEmail: form.monitoringEmail.trim(),
       bureau: form.bureau.trim(),
       run: form.run,
       keyInfo: "",
@@ -1221,6 +1225,7 @@ function AddSiteInline({ zones, initialName = "", onCancel, onAdded }) {
         <Field label="Monitoring" style={{ flex: 1 }}><input value={form.monitoringCo} onChange={(e) => set("monitoringCo", e.target.value)} placeholder="Who dispatches the alarm to us" style={selectStyle} /></Field>
         <Field label="Bureau" style={{ flex: 1 }}><input value={form.bureau} onChange={(e) => set("bureau", e.target.value)} placeholder="Who we invoice, if different" style={selectStyle} /></Field>
       </div>
+      <Field label="Monitoring email (optional)"><input type="email" value={form.monitoringEmail} onChange={(e) => set("monitoringEmail", e.target.value)} placeholder="Where to send the outcome report" style={selectStyle} /></Field>
       {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
       <div style={{ display: "flex", gap: 8 }}>
         <button onClick={save} style={secondaryBtn}><MapPin size={13} /> Save site</button>
@@ -1365,13 +1370,24 @@ function JobDetailOperator({ job, jobs, patrolmen, session, persist, now, onBack
           <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
             {job.status === "submitted" && <button onClick={() => update({ status: "reviewed", reviewNotes: notes })} style={secondaryBtn}><CheckCircle2 size={14} /> Mark reviewed</button>}
             {(job.status === "reviewed" || job.status === "submitted") && <button onClick={() => { update({ reviewNotes: notes }); setShowEmail(true); }} style={primaryBtn}><Mail size={14} /> Prepare client email</button>}
-            {job.status === "emailed" && <span style={{ color: "var(--ok)", fontSize: 12.5, display: "flex", alignItems: "center", gap: 6 }}><CheckCircle2 size={14} /> Sent to client {fmtDateTime(job.emailedAt)}</span>}
+            {job.status === "emailed" && (
+              <span style={{ color: "var(--ok)", fontSize: 12.5, display: "flex", alignItems: "center", gap: 6 }}>
+                <CheckCircle2 size={14} /> {job.emailSentByApp ? `Emailed to client ${fmtDateTime(job.emailedAt)}` : `Marked sent ${fmtDateTime(job.emailedAt)}`}
+              </span>
+            )}
           </div>
         </div>
       )}
 
       {showEmail && (
-        <EmailModal job={{ ...job, reviewNotes: notes }} onClose={() => setShowEmail(false)} onSent={() => { update({ status: "emailed", emailedAt: new Date().toISOString(), reviewNotes: notes }); setShowEmail(false); }} />
+        <EmailModal
+          job={{ ...job, reviewNotes: notes }}
+          onClose={() => setShowEmail(false)}
+          onSent={({ clientEmail, emailSentByApp }) => {
+            update({ status: "emailed", emailedAt: new Date().toISOString(), reviewNotes: notes, clientEmail, emailSentByApp });
+            setShowEmail(false);
+          }}
+        />
       )}
     </div>
   );
@@ -1393,10 +1409,13 @@ function JobHeader({ job }) {
 }
 
 function EmailModal({ job, onClose, onSent }) {
-  const text = `To: ${job.monitoringCo}
-Subject: Alarm Response Outcome — ${job.jobNumber} — ${job.siteName}
+  const [clientEmail, setClientEmail] = useState(job.clientEmail || job.monitoringEmail || "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const showToast = useToast();
 
-Job number: ${job.jobNumber}
+  const subject = `Alarm Response Outcome — ${job.jobNumber} — ${job.siteName}`;
+  const body = `Job number: ${job.jobNumber}
 Site: ${job.siteName}
 Address: ${job.address}
 Alarm description: ${job.description}
@@ -1410,17 +1429,50 @@ ${job.reviewNotes}
 
 ${job.photos?.length ? `${job.photos.length} time-stamped photo(s) attached.` : "No photos attached."}
 `;
+  const preview = `To: ${clientEmail.trim() || job.monitoringCo || "(add a client email above)"}\nSubject: ${subject}\n\n${body}`;
+  const emailLooksValid = /\S+@\S+\.\S+/.test(clientEmail.trim());
+
+  async function sendNow() {
+    setError("");
+    setBusy(true);
+    try {
+      const res = await fetch("/api/send-client-email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-App-Secret": import.meta.env.VITE_APP_MAIL_SECRET || "" },
+        body: JSON.stringify({ to: clientEmail.trim(), subject, text: body }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Send failed (${res.status})`);
+      showToast("Email sent to client.");
+      onSent({ clientEmail: clientEmail.trim(), emailSentByApp: true });
+    } catch (e) {
+      setError(e.message || "Couldn't send — try again, or copy the text and send it yourself.");
+    }
+    setBusy(false);
+  }
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000000aa", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
       <div style={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10, width: 480, maxWidth: "90%", padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-          <SectionTitle icon={Mail} title="Client email preview" small />
+          <SectionTitle icon={Mail} title="Client email" small />
           <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer" }}><X size={16} /></button>
         </div>
-        <pre style={{ whiteSpace: "pre-wrap", fontFamily: "var(--mono)", fontSize: 11.5, background: "var(--panel-alt)", padding: 12, borderRadius: 7, maxHeight: 260, overflowY: "auto", border: "1px solid var(--border)" }}>{text}</pre>
-        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-          <button onClick={() => navigator.clipboard?.writeText(text)} style={secondaryBtn}><Copy size={13} /> Copy</button>
-          <button onClick={onSent} style={{ ...primaryBtn, flex: 1, justifyContent: "center" }}><Send size={13} /> Mark as sent to client</button>
+        <Field label="Client email">
+          <input type="email" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} placeholder="e.g. monitoring@client.com" style={selectStyle} />
+        </Field>
+        <pre style={{ whiteSpace: "pre-wrap", fontFamily: "var(--mono)", fontSize: 11.5, background: "var(--panel-alt)", padding: 12, borderRadius: 7, maxHeight: 220, overflowY: "auto", border: "1px solid var(--border)" }}>{preview}</pre>
+        {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 8 }}>{error}</div>}
+        <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          <button onClick={() => navigator.clipboard?.writeText(preview)} style={secondaryBtn}><Copy size={13} /> Copy</button>
+          <button onClick={() => onSent({ clientEmail: clientEmail.trim(), emailSentByApp: false })} style={secondaryBtn}><CheckCircle2 size={13} /> Mark as sent / closed</button>
+          <button
+            onClick={sendNow}
+            disabled={busy || !emailLooksValid}
+            style={{ ...primaryBtn, flex: 1, justifyContent: "center", opacity: busy || !emailLooksValid ? 0.5 : 1, cursor: busy || !emailLooksValid ? "not-allowed" : "pointer" }}
+          >
+            <Send size={13} /> {busy ? "Sending…" : "Send email now"}
+          </button>
         </div>
       </div>
     </div>
@@ -2490,7 +2542,7 @@ function SitesImport({ zones, sites, persistSites }) {
 }
 
 function SitesEditor({ zones, sites, persistSites }) {
-  const blank = { name: "", address: "", run: zones[0] || "Unassigned", monitoringCo: "", bureau: "", poNumber: "", keyInfo: "", siteNotes: "", siteContact: "", alarmCode: "" };
+  const blank = { name: "", address: "", run: zones[0] || "Unassigned", monitoringCo: "", monitoringEmail: "", bureau: "", poNumber: "", keyInfo: "", siteNotes: "", siteContact: "", alarmCode: "" };
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState("");
@@ -2561,6 +2613,7 @@ function SitesEditor({ zones, sites, persistSites }) {
           <Field label="Monitoring" style={{ flex: 1 }}><input value={form.monitoringCo} onChange={(e) => set("monitoringCo", e.target.value)} placeholder="Who dispatches the alarm to us" style={selectStyle} /></Field>
           <Field label="Bureau" style={{ flex: 1 }}><input value={form.bureau} onChange={(e) => set("bureau", e.target.value)} placeholder="Who we invoice, if different" style={selectStyle} /></Field>
         </div>
+        <Field label="Monitoring email (optional)"><input type="email" value={form.monitoringEmail} onChange={(e) => set("monitoringEmail", e.target.value)} placeholder="Where to send the outcome report" style={selectStyle} /></Field>
         <Field label="Site contact (optional)"><input value={form.siteContact} onChange={(e) => set("siteContact", e.target.value)} style={selectStyle} /></Field>
         <div style={{ display: "flex", gap: 12 }}>
           <Field label="Key / swipe card (optional)" style={{ flex: 1 }}><input value={form.keyInfo} onChange={(e) => set("keyInfo", e.target.value)} style={selectStyle} /></Field>
