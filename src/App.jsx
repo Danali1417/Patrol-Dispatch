@@ -105,7 +105,23 @@ function beep(pattern = [880]) {
   }
 }
 
-function watermarkPhoto(file, label) {
+function getCurrentLocation() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude, accuracy: pos.coords.accuracy }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
+    );
+  });
+}
+
+function formatLocation(loc) {
+  if (!loc) return "";
+  return `${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)}`;
+}
+
+function watermarkPhoto(file, label, location) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -120,14 +136,23 @@ function watermarkPhoto(file, label) {
         canvas.height = h;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0, w, h);
-        const stamp = `${label}  ·  ${new Date().toLocaleString("en-AU", { hour12: false })}`;
+        const locationText = formatLocation(location);
+        const lines = [
+          `${label}  ·  ${new Date().toLocaleString("en-AU", { hour12: false })}`,
+          locationText ? `📍 ${locationText}` : "📍 Location unavailable",
+        ];
         ctx.font = "12px ui-monospace, monospace";
-        const textW = ctx.measureText(stamp).width;
+        const textW = Math.max(...lines.map((l) => ctx.measureText(l).width));
+        const boxH = lines.length * 16 + 8;
         ctx.fillStyle = "rgba(0,0,0,0.62)";
-        ctx.fillRect(0, h - 24, textW + 16, 24);
+        ctx.fillRect(0, h - boxH, textW + 16, boxH);
         ctx.fillStyle = "#F5A623";
-        ctx.fillText(stamp, 8, h - 8);
-        resolve({ dataUrl: canvas.toDataURL("image/jpeg", 0.72), ts: new Date().toISOString() });
+        lines.forEach((line, i) => ctx.fillText(line, 8, h - boxH + 16 * (i + 1)));
+        resolve({
+          dataUrl: canvas.toDataURL("image/jpeg", 0.72),
+          ts: new Date().toISOString(),
+          location: location ? { lat: location.lat, lon: location.lon } : null,
+        });
       };
       img.onerror = reject;
       img.src = reader.result;
@@ -1236,9 +1261,20 @@ function JobDetailOperator({ job, jobs, patrolmen, session, persist, now, onBack
   const [showEmail, setShowEmail] = useState(false);
   const [showCancelForm, setShowCancelForm] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
+  const [pdfBusy, setPdfBusy] = useState(false);
   const showToast = useToast();
 
   useEffect(() => setNotes(job.reviewNotes || job.outcomeNotes), [job.id]);
+
+  async function downloadPdf() {
+    setPdfBusy(true);
+    try {
+      await downloadJobAttendancePdf(job, companyName, now);
+    } catch (e) {
+      showToast("Couldn't generate the PDF — try again.", "error");
+    }
+    setPdfBusy(false);
+  }
 
   const t = jobTiming(job, now);
 
@@ -1268,7 +1304,12 @@ function JobDetailOperator({ job, jobs, patrolmen, session, persist, now, onBack
 
   return (
     <div style={{ maxWidth: 640 }}>
-      <button onClick={onBack} style={backBtn}><ArrowLeft size={13} /> Back to board</button>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <button onClick={onBack} style={backBtn}><ArrowLeft size={13} /> Back to board</button>
+        <button onClick={downloadPdf} disabled={pdfBusy} style={{ ...secondaryBtn, opacity: pdfBusy ? 0.6 : 1 }}>
+          <Download size={13} /> {pdfBusy ? "Generating…" : "Download attendance PDF"}
+        </button>
+      </div>
       <JobHeader job={job} />
 
       {job.dispatchedByName && (
@@ -1354,10 +1395,20 @@ function JobDetailOperator({ job, jobs, patrolmen, session, persist, now, onBack
           <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 6 }}>
             Onsite {fmtDateTime(job.onsiteTime)} · Offsite {fmtDateTime(job.offsiteTime)} · response time {jobTiming(job, now).elapsed}m (SLA {jobTiming(job, now).slaMin}m)
           </div>
+          <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 10 }}>
+            Docket No: <b style={{ color: "var(--text)" }}>{job.docketNo || "—"}</b>
+          </div>
           <textarea rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} style={{ ...selectStyle, resize: "vertical" }} />
           {job.photos?.length > 0 && (
-            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-              {job.photos.map((p, i) => <img key={i} src={p.dataUrl} alt="attendance evidence" style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }} />)}
+            <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
+              {job.photos.map((p, i) => (
+                <div key={i} style={{ width: 100 }}>
+                  <img src={p.dataUrl} alt="attendance evidence" style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }} />
+                  <div style={{ fontSize: 9.5, color: "var(--text-dim)", marginTop: 3, lineHeight: 1.3 }}>
+                    {p.ts ? fmtDateTime(p.ts) : ""}{p.location ? ` · ${formatLocation(p.location)}` : ""}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
           <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
@@ -1463,6 +1514,90 @@ function photoAttachments(job) {
     const ext = contentType.split("/")[1] || "jpg";
     return { filename: `${job.jobNumber}-photo-${i + 1}.${ext}`, content, contentType };
   }).filter(Boolean);
+}
+
+function loadImageSize(dataUrl) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.naturalWidth || 480, height: img.naturalHeight || 360 });
+    img.onerror = () => resolve({ width: 480, height: 360 });
+    img.src = dataUrl;
+  });
+}
+
+async function downloadJobAttendancePdf(job, companyName, now) {
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ unit: "pt" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const marginX = 40;
+  let y = 44;
+
+  const name = companyName || "Ausgroup";
+  doc.setFontSize(14);
+  doc.setTextColor(20);
+  doc.text(`${name} Security — Alarm Response Attendance Report`, marginX, y);
+  y += 18;
+  doc.setFontSize(9);
+  doc.setTextColor(110);
+  doc.text(`Generated ${fmtDateTime(new Date().toISOString())}`, marginX, y);
+  y += 22;
+
+  const t = jobTiming(job, now || new Date());
+  const fields = [
+    ["Job Ref", job.jobNumber],
+    ["Site", job.siteName],
+    ["Address", job.address || "—"],
+    ["Customer", job.bureau || "—"],
+    ["Monitoring company", job.monitoringCo || "—"],
+    ["Order No", job.orderNo || "—"],
+    ["Docket No", job.docketNo || "—"],
+    ["Alarm / area", job.description || "—"],
+    ["Status", STATUS_META[job.status]?.label || job.status],
+    ["Attending patrolman", [job.assigneeName, job.run].filter(Boolean).join(" — ") || "—"],
+    ["Dispatched", fmtDateTime(job.dispatchTime)],
+    ["Acknowledged", job.acknowledgedAt ? fmtDateTime(job.acknowledgedAt) : "—"],
+    ["Onsite", job.onsiteTime ? fmtDateTime(job.onsiteTime) : "—"],
+    ["Offsite", job.offsiteTime ? fmtDateTime(job.offsiteTime) : "—"],
+    ["Response time", job.onsiteTime ? `${t.elapsed}m (SLA ${t.slaMin}m)` : "—"],
+    ["Outcome / notes", job.reviewNotes || job.outcomeNotes || "—"],
+  ];
+
+  doc.setFontSize(10);
+  fields.forEach(([label, value]) => {
+    doc.setTextColor(110);
+    doc.text(`${label}:`, marginX, y);
+    doc.setTextColor(20);
+    const lines = doc.splitTextToSize(String(value), pageW - marginX * 2 - 130);
+    doc.text(lines, marginX + 130, y);
+    y += Math.max(14, lines.length * 12) + 4;
+    if (y > pageH - 60) { doc.addPage(); y = 44; }
+  });
+
+  if (job.photos?.length) {
+    y += 12;
+    if (y > pageH - 200) { doc.addPage(); y = 44; }
+    doc.setFontSize(12);
+    doc.setTextColor(20);
+    doc.text(`Attendance photos (${job.photos.length})`, marginX, y);
+    y += 16;
+
+    const imgW = 220;
+    for (let i = 0; i < job.photos.length; i++) {
+      const p = job.photos[i];
+      const size = await loadImageSize(p.dataUrl);
+      const imgH = imgW * (size.height / size.width);
+      if (y + imgH + 26 > pageH - 40) { doc.addPage(); y = 44; }
+      doc.addImage(p.dataUrl, "JPEG", marginX, y, imgW, imgH);
+      doc.setFontSize(9);
+      doc.setTextColor(110);
+      const caption = `Photo ${i + 1} — ${p.ts ? fmtDateTime(p.ts) : "time unknown"}${p.location ? ` — ${formatLocation(p.location)}` : ""}`;
+      doc.text(caption, marginX, y + imgH + 14);
+      y += imgH + 28;
+    }
+  }
+
+  doc.save(`${job.jobNumber}-attendance.pdf`);
 }
 
 function EmailModal({ job, companyName, onClose, onSent }) {
@@ -1823,9 +1958,10 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
   async function handleFiles(e) {
     const files = Array.from(e.target.files || []);
     setBusy(true);
+    const location = await getCurrentLocation();
     const results = [];
     for (const f of files.slice(0, 4 - photos.length)) {
-      try { results.push(await watermarkPhoto(f, job.jobNumber)); } catch (err) { /* skip bad file */ }
+      try { results.push(await watermarkPhoto(f, job.jobNumber, location)); } catch (err) { /* skip bad file */ }
     }
     setPhotos((p) => [...p, ...results]);
     setBusy(false);
