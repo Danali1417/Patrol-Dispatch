@@ -887,7 +887,7 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
       <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
         {tab === "board" && !selected && <Board jobs={jobs} now={now} onSelect={setSelectedId} />}
         {tab === "board" && selected && (
-          <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} persist={persist} now={now} session={session} companyName={companyName} onBack={() => setSelectedId(null)} />
+          <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} roster={roster} persist={persist} now={now} session={session} companyName={companyName} onBack={() => setSelectedId(null)} />
         )}
         {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} roster={roster} session={session} persist={persist} onCreated={(id) => { setTab("board"); setSelectedId(id); }} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
@@ -1036,6 +1036,10 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
   })();
 
   const recommended = rosteredOnThisRun.length ? rosteredOnThisRun : fallbackOnThisRun;
+  // Same order as the "Dispatch to" dropdown below — roster-corrected
+  // entries (today's actual run) take priority over the raw account, so
+  // dispatch() resolves the same run the dropdown actually showed.
+  const assigneeCandidates = [...rosteredOnThisRun, ...fallbackOnThisRun, ...rosteredElsewhereToday, ...patrolmen];
 
   const siteLabel = (s) => `${s.name} — ${s.address}`;
 
@@ -1074,7 +1078,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
   const canDispatch = site && description.trim() && assigneeId && jobNumber.trim();
 
   async function dispatch() {
-    const assignee = patrolmen.find((r) => r.loginName === assigneeId);
+    const assignee = assigneeCandidates.find((r) => r.loginName === assigneeId);
     const job = {
       id: `job_${Date.now()}`,
       jobNumber: jobNumber.trim(),
@@ -1255,7 +1259,7 @@ function AddSiteInline({ zones, initialName = "", onCancel, onAdded }) {
 
 /* ---------------------- Operator job detail ---------------------- */
 
-function JobDetailOperator({ job, jobs, patrolmen, session, persist, now, onBack, companyName }) {
+function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now, onBack, companyName }) {
   const [notes, setNotes] = useState(job.reviewNotes || job.outcomeNotes);
   const [delayText, setDelayText] = useState("");
   const [showEmail, setShowEmail] = useState(false);
@@ -1286,7 +1290,8 @@ function JobDetailOperator({ job, jobs, patrolmen, session, persist, now, onBack
   function reassign(loginName) {
     const p = patrolmen.find((a) => a.loginName === loginName);
     if (!p) return;
-    update({ assigneeId: p.loginName, assigneeName: p.displayName, run: p.run || job.run });
+    const todaysEntry = roster.find((r) => r.date === todayISO() && r.patrolmanLoginName === loginName);
+    update({ assigneeId: p.loginName, assigneeName: p.displayName, run: (todaysEntry ? todaysEntry.run : p.run) || job.run });
   }
 
   function confirmCancel() {
