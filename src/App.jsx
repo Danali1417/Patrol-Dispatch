@@ -1074,6 +1074,15 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
     setAddingSite(false);
   }
 
+  function clearSite() {
+    setSiteId("");
+    setSiteQuery("");
+    setKeyInfo("");
+    setAlarmCode("");
+    setAssigneeId("");
+    setAddingSite(false);
+  }
+
   const canDispatch = site && description.trim() && assigneeId && jobNumber.trim();
 
   async function dispatch() {
@@ -1135,6 +1144,11 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
           >
             <MapPin size={13} /> New site
           </button>
+          {(siteQuery || addingSite) && (
+            <button type="button" onClick={clearSite} title="Clear site" style={{ ...iconBtn, flexShrink: 0 }}>
+              <X size={13} />
+            </button>
+          )}
         </div>
         {siteQuery && !site && !addingSite && (
           <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 6 }}>
