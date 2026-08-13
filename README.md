@@ -22,16 +22,32 @@ You've likely already done this — skip to step 2 if so.
    );
 
    alter table kv_store enable row level security;
-
-   create policy "Allow anon read" on kv_store for select using (true);
-   create policy "Allow anon write" on kv_store for insert with check (true);
-   create policy "Allow anon update" on kv_store for update using (true);
-   create policy "Allow anon delete" on kv_store for delete using (true);
    ```
+
+   Row-level security is turned on with **no policies at all** — deliberately.
+   The app never talks to Supabase from the browser; every request goes
+   through this project's own `/api/*` functions, which authenticate the
+   user and then use Supabase's **service role** key, which bypasses RLS
+   entirely. With zero policies, the public "anon" key (the one that used
+   to be embedded in the client bundle) has no read or write access to
+   anything — even if someone finds it.
 
 3. Go to **Settings → API**. Note down:
    - **Project URL** (e.g. `https://xxxxx.supabase.co`)
-   - **Publishable key** (starts `sb_publishable_...`) — NOT the secret key.
+   - **service_role secret key** (under "Project API keys" — click reveal;
+     this is different from the Publishable/anon key and must never be put
+     in front-end code or a `VITE_`-prefixed variable — it only ever goes
+     into a server-only Vercel environment variable, step 4 below).
+
+   If this project previously used the old open-access setup, run this once
+   to remove the permissive policies it left behind:
+
+   ```sql
+   drop policy if exists "Allow anon read" on kv_store;
+   drop policy if exists "Allow anon write" on kv_store;
+   drop policy if exists "Allow anon update" on kv_store;
+   drop policy if exists "Allow anon delete" on kv_store;
+   ```
 
 ## 2. Put this project on GitHub
 
@@ -60,12 +76,28 @@ That's it — no git commands needed.
    | Name | Value |
    |---|---|
    | `VITE_SUPABASE_URL` | your Project URL from step 1 |
-   | `VITE_SUPABASE_ANON_KEY` | your Publishable key from step 1 |
+   | `SUPABASE_SERVICE_ROLE_KEY` | the service_role secret key from step 1 — **server-only**, do not prefix with `VITE_` |
+   | `SESSION_SECRET` | any long random string — signs login sessions, e.g. generate one at [random.org/strings](https://www.random.org/strings/) or by running `openssl rand -hex 32` |
+   | `MIGRATE_SECRET` | any random string — protects the one-time password migration step below |
 
 5. Click **Deploy**. Wait ~1 minute.
 
 You'll get a live URL like `sentryline-dashboard.vercel.app`. Share that
 with control room and every patrolman — everyone sees the same live data.
+
+### One-time step: hash any existing passwords
+
+If this is a brand-new deployment, skip this — the default accounts are
+hashed automatically the first time anyone signs in. If you're upgrading
+an older deployment that had plain-text passwords, visit this URL once
+(with your real `MIGRATE_SECRET`) to hash them in place:
+
+```
+https://your-app.vercel.app/api/migrate-passwords?secret=YOUR_MIGRATE_SECRET
+```
+
+It's safe to run more than once — it only hashes accounts that still have
+a plain-text password and leaves already-hashed ones untouched.
 
 ## 4. Daily email report (optional)
 
@@ -148,13 +180,19 @@ live site within about a minute — no need to touch Vercel again.
 
 Sign in as Manager → change every password from there before real use.
 
-## Security note
+## Security
 
-This uses an open "anon" API key with permissive read/write access to
-keep setup simple — anyone with the live URL's page source could
-technically read or write the data directly via the API, including
-stored passwords (which are also stored in plain text, not hashed).
-That's fine for internal testing with a small trusted team, but before
-this handles real client data it needs proper authentication tied to
-Supabase's row-level security, and password hashing. Worth doing before
-wider rollout.
+- The browser never talks to Supabase directly and never holds any
+  database credentials — every read and write goes through this
+  project's own `/api/*` functions, which check a signed session token
+  first.
+- Passwords are hashed (bcrypt) before they're ever stored — nobody,
+  including a Manager, can look up an existing password. Manager can
+  **reset** a login's password from Manage logins, which shows the new
+  password once (to copy or text to that person) and then it's gone.
+- Signing in issues a signed session token (kept in the browser's local
+  storage) that expires after 24 hours or 30 minutes of inactivity,
+  whichever comes first.
+- Supabase's row-level security has no policies at all (see step 1) — the
+  public "anon" key has zero access. Only the server-only service role
+  key, which is never sent to the browser, can read or write data.
