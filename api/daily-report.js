@@ -1,6 +1,9 @@
-// Vercel Cron hits this on a schedule (see vercel.json). It only actually
-// sends once a day, right after the configured local send time, and skips
-// itself the rest of the time it's invoked.
+// Vercel Cron hits this once a day (see vercel.json — Vercel's free/Hobby
+// plan only allows daily-frequency cron jobs, so this can't just poll every
+// few minutes). The single daily UTC fire time is chosen to land within
+// ~30 minutes of the target local send time on both sides of a daylight
+// saving transition; the tolerance check below accepts that and skips
+// itself if invoked well outside the target window for any other reason.
 //
 // Required env vars (set in Vercel → Project Settings → Environment Variables):
 //   GMAIL_USER            the Gmail address to send from
@@ -11,8 +14,10 @@
 //                         Vercel automatically sends it as a Bearer token
 //                         when a Cron Job calls this path.
 // Optional:
-//   REPORT_TIMEZONE       IANA zone, default "Australia/Sydney"
-//   REPORT_SEND_HOUR      local hour (0-23) to send at, default 7
+//   REPORT_TIMEZONE               IANA zone, default "Australia/Sydney"
+//   REPORT_SEND_HOUR              local hour (0-23) to send at, default 7
+//   REPORT_SEND_TOLERANCE_MINUTES how far from that hour a single daily
+//                                 cron fire is still accepted, default 90
 
 import nodemailer from "nodemailer";
 import { getZonedNow } from "./_lib/time.js";
@@ -38,10 +43,12 @@ export default async function handler(req, res) {
 
   const timeZone = process.env.REPORT_TIMEZONE || "Australia/Sydney";
   const sendHour = Number(process.env.REPORT_SEND_HOUR || 7);
+  const toleranceMinutes = Number(process.env.REPORT_SEND_TOLERANCE_MINUTES || 90);
   const testMode = req.query?.test === "1";
   const now = new Date();
   const zonedNow = getZonedNow(timeZone, now);
-  const inSendWindow = zonedNow.hour === sendHour && zonedNow.minute < 15;
+  const minutesFromTarget = Math.abs(zonedNow.hour * 60 + zonedNow.minute - sendHour * 60);
+  const inSendWindow = minutesFromTarget <= toleranceMinutes;
 
   if (!testMode && !inSendWindow) {
     return res.status(200).json({ skipped: true, reason: "outside send window", zonedNow });

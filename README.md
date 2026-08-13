@@ -87,9 +87,10 @@ sent from a Gmail account.
 
 3. Redeploy (Vercel → Deployments → ⋯ → Redeploy) so the new variables take effect.
 
-That's it — Vercel Cron calls the report job every 15 minutes; it only
-actually sends once, right after 07:00 Australia/Sydney time each day
-(configurable — see `REPORT_TIMEZONE` / `REPORT_SEND_HOUR` below).
+That's it — Vercel Cron calls the report job once a day, timed to land
+close to 07:00 Australia/Sydney (Vercel's free plan only allows daily
+cron jobs, so it's a single fire rather than a poll — see
+`REPORT_TIMEZONE` / `REPORT_SEND_HOUR` below to change the target time).
 
 **To test it immediately** without waiting for 7am, visit (with your
 real `CRON_SECRET`):
@@ -109,6 +110,7 @@ Optional environment variables:
 |---|---|---|
 | `REPORT_TIMEZONE` | `Australia/Sydney` | IANA timezone the 06:00 shift-day boundary and send time are evaluated in |
 | `REPORT_SEND_HOUR` | `7` | Local hour (0–23) the report goes out |
+| `REPORT_SEND_TOLERANCE_MINUTES` | `90` | How far from that hour the single daily cron fire is still accepted — if you change `schedule` in `vercel.json`, keep this comfortably wider than the gap between your chosen UTC time and the target local hour |
 
 ## Updating it later
 
