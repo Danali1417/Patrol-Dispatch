@@ -67,6 +67,49 @@ That's it — no git commands needed.
 You'll get a live URL like `sentryline-dashboard.vercel.app`. Share that
 with control room and every patrolman — everyone sees the same live data.
 
+## 4. Daily email report (optional)
+
+Every morning, a scheduled job can email a Brief and Detailed report PDF
+(covering the previous 06:00–06:00 shift day) to whoever you choose,
+sent from a Gmail account.
+
+1. In the Gmail account you want to send from: turn on **2-Step
+   Verification**, then create an **App Password** at
+   [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
+2. In Vercel → your project → **Settings → Environment Variables**, add:
+
+   | Name | Value |
+   |---|---|
+   | `GMAIL_USER` | the Gmail address to send from |
+   | `GMAIL_APP_PASSWORD` | the 16-character App Password from step 1 |
+   | `REPORT_RECIPIENTS` | recipient email address(es), comma-separated |
+   | `CRON_SECRET` | any random string — protects the endpoint from being triggered by anyone who finds the URL |
+
+3. Redeploy (Vercel → Deployments → ⋯ → Redeploy) so the new variables take effect.
+
+That's it — Vercel Cron calls the report job every 15 minutes; it only
+actually sends once, right after 07:00 Australia/Sydney time each day
+(configurable — see `REPORT_TIMEZONE` / `REPORT_SEND_HOUR` below).
+
+**To test it immediately** without waiting for 7am, visit (with your
+real `CRON_SECRET`):
+
+```
+https://your-app.vercel.app/api/daily-report?test=1&secret=YOUR_CRON_SECRET
+```
+
+This sends a real email right away without affecting the next scheduled
+send. It responds with JSON showing what happened (jobs found, recipients,
+or any error) — useful for confirming Gmail delivery actually works before
+relying on the schedule.
+
+Optional environment variables:
+
+| Name | Default | Purpose |
+|---|---|---|
+| `REPORT_TIMEZONE` | `Australia/Sydney` | IANA timezone the 06:00 shift-day boundary and send time are evaluated in |
+| `REPORT_SEND_HOUR` | `7` | Local hour (0–23) the report goes out |
+
 ## Updating it later
 
 Whenever you want to change something, edit the files in this project and
