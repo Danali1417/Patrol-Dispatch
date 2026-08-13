@@ -112,6 +112,27 @@ Optional environment variables:
 | `REPORT_SEND_HOUR` | `7` | Local hour (0–23) the report goes out |
 | `REPORT_SEND_TOLERANCE_MINUTES` | `90` | How far from that hour the single daily cron fire is still accepted — if you change `schedule` in `vercel.json`, keep this comfortably wider than the gap between your chosen UTC time and the target local hour |
 
+## 5. Emailing a client outcome report directly (optional)
+
+Once a job is reviewed, Control Room's "Prepare client email" screen can
+either send the outcome straight to the client's inbox (from the same
+Gmail account as the daily report) or just be marked as sent/closed if
+it was handled another way (phone call, a personal email, etc.) — both
+options are on the same screen.
+
+This reuses `GMAIL_USER` / `GMAIL_APP_PASSWORD` from step 4 above. One
+more variable is needed:
+
+| Name | Value |
+|---|---|
+| `VITE_APP_MAIL_SECRET` | any random string |
+
+Add it in Vercel → **Settings → Environment Variables**, then redeploy.
+Sites can optionally store a **Monitoring email** (Manager → Sites &
+runs, or when adding a site from the New Job screen) so it's pre-filled
+every time a job at that site is emailed — otherwise just type it in on
+the day.
+
 ## Updating it later
 
 Whenever you want to change something, edit the files in this project and
