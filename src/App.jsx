@@ -474,7 +474,7 @@ export default function SentrylinePrototype() {
           ) : session.role === "manager" ? (
             <ManagerView session={session} accounts={accounts} persistAccounts={persistAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} now={now} />
           ) : session.role === "operator" ? (
-            <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} />
+            <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} />
           ) : (
             <PatrolmanView session={session} jobs={jobs} persist={persistJobs} now={now} />
           )}
@@ -853,7 +853,7 @@ function SlaChip({ job, now }) {
    OPERATOR VIEW
 ---------------------------------------------------------------- */
 
-function OperatorView({ session, jobs, accounts, sites, persistSites, zones, roster, persistRoster, persist, now }) {
+function OperatorView({ session, jobs, accounts, sites, persistSites, zones, roster, persistRoster, persist, now, companyName }) {
   const [tab, setTab] = useState("board");
   const [selectedId, setSelectedId] = useState(null);
   const selected = jobs.find((j) => j.id === selectedId);
@@ -877,7 +877,7 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
       <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
         {tab === "board" && !selected && <Board jobs={jobs} now={now} onSelect={setSelectedId} />}
         {tab === "board" && selected && (
-          <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} persist={persist} now={now} session={session} onBack={() => setSelectedId(null)} />
+          <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} persist={persist} now={now} session={session} companyName={companyName} onBack={() => setSelectedId(null)} />
         )}
         {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} roster={roster} session={session} persist={persist} onCreated={(id) => { setTab("board"); setSelectedId(id); }} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
@@ -994,6 +994,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
   const [siteId, setSiteId] = useState("");
   const [siteQuery, setSiteQuery] = useState("");
   const [jobNumber, setJobNumber] = useState(() => `JB-${String(jobs.length + 1).padStart(4, "0")}`);
+  const [orderNo, setOrderNo] = useState("");
   const [description, setDescription] = useState("");
   const [assigneeId, setAssigneeId] = useState("");
   const [keyInfo, setKeyInfo] = useState("");
@@ -1067,6 +1068,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
     const job = {
       id: `job_${Date.now()}`,
       jobNumber: jobNumber.trim(),
+      orderNo: orderNo.trim(),
       siteId: site.id,
       siteName: site.name,
       address: site.address,
@@ -1087,6 +1089,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       dispatchTime: new Date().toISOString(),
       status: "dispatched",
       outcomeNotes: "",
+      docketNo: "",
       photos: [],
       onsiteTime: null,
       offsiteTime: null,
@@ -1097,7 +1100,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       emailSentByApp: false,
     };
     await persist([...jobs, job]);
-    setSiteId(""); setSiteQuery(""); setDescription(""); setAssigneeId(""); setKeyInfo(""); setAlarmCode("");
+    setSiteId(""); setSiteQuery(""); setDescription(""); setAssigneeId(""); setKeyInfo(""); setAlarmCode(""); setOrderNo("");
     setJobNumber(`JB-${String(jobs.length + 2).padStart(4, "0")}`);
     onCreated(job.id);
   }
@@ -1152,9 +1155,14 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
         </div>
       )}
 
-      <Field label="Job number">
-        <input value={jobNumber} onChange={(e) => setJobNumber(e.target.value)} placeholder="e.g. the monitoring company's reference number" style={selectStyle} />
-      </Field>
+      <div style={{ display: "flex", gap: 12 }}>
+        <Field label="Job number" style={{ flex: 1 }}>
+          <input value={jobNumber} onChange={(e) => setJobNumber(e.target.value)} placeholder="Our own job reference" style={selectStyle} />
+        </Field>
+        <Field label="Order number (optional)" style={{ flex: 1 }}>
+          <input value={orderNo} onChange={(e) => setOrderNo(e.target.value)} placeholder="Client / monitoring company's reference" style={selectStyle} />
+        </Field>
+      </div>
 
       <Field label="Alarm description / area(s) in alarm">
         <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Zone 4 motion sensor — loading dock" style={{ ...selectStyle, resize: "vertical", fontFamily: "var(--sans)" }} />
@@ -1237,7 +1245,7 @@ function AddSiteInline({ zones, initialName = "", onCancel, onAdded }) {
 
 /* ---------------------- Operator job detail ---------------------- */
 
-function JobDetailOperator({ job, jobs, patrolmen, session, persist, now, onBack }) {
+function JobDetailOperator({ job, jobs, patrolmen, session, persist, now, onBack, companyName }) {
   const [notes, setNotes] = useState(job.reviewNotes || job.outcomeNotes);
   const [delayText, setDelayText] = useState("");
   const [showEmail, setShowEmail] = useState(false);
@@ -1382,6 +1390,7 @@ function JobDetailOperator({ job, jobs, patrolmen, session, persist, now, onBack
       {showEmail && (
         <EmailModal
           job={{ ...job, reviewNotes: notes }}
+          companyName={companyName}
           onClose={() => setShowEmail(false)}
           onSent={({ clientEmail, emailSentByApp }) => {
             update({ status: "emailed", emailedAt: new Date().toISOString(), reviewNotes: notes, clientEmail, emailSentByApp });
@@ -1408,28 +1417,67 @@ function JobHeader({ job }) {
   );
 }
 
-function EmailModal({ job, onClose, onSent }) {
+const ADVICE_ROW_STYLE = "border:1px solid #999;padding:6px 10px;";
+const ADVICE_LABEL_STYLE = `${ADVICE_ROW_STYLE}text-align:right;font-weight:bold;white-space:nowrap;vertical-align:top;width:110px;`;
+const ADVICE_VALUE_STYLE = `${ADVICE_ROW_STYLE}text-align:left;vertical-align:top;`;
+
+function adviceRow(label, value) {
+  return `<tr><td style="${ADVICE_LABEL_STYLE}">${label}</td><td style="${ADVICE_VALUE_STYLE}">${value}</td></tr>`;
+}
+
+function buildAdviceEmail(job, companyName) {
+  const provider = [job.assigneeName, job.run].filter(Boolean).join(" — ") || "—";
+  const status = job.status === "cancelled" ? "Cancelled" : "Complete";
+  const times = `Dispatched ${fmtTime(job.dispatchTime)} On site ${fmtTime(job.onsiteTime)} Off site ${fmtTime(job.offsiteTime)} Advised ${fmtTime(new Date().toISOString())}`;
+  const location = [job.siteName, job.address].filter(Boolean).join("<br>");
+  const outcome = (job.reviewNotes || "").replace(/\n/g, "<br>");
+
+  const rows = [
+    adviceRow("Advice From:", (companyName || "Ausgroup").toUpperCase() + " SECURITY"),
+    adviceRow("Customer:", job.bureau || "—"),
+    adviceRow("Monitoring:", job.monitoringCo || "—"),
+    adviceRow("Job Ref:", job.jobNumber),
+    adviceRow("Order No:", job.orderNo || "—"),
+    adviceRow("Docket No:", job.docketNo || "—"),
+    adviceRow("Received:", fmtDateTime(job.dispatchTime)),
+    adviceRow("Location:", location),
+    adviceRow("Request:", job.description || "—"),
+    adviceRow("Status:", status),
+    adviceRow("Outcome:", outcome || "—"),
+    adviceRow("Provider:", provider),
+    adviceRow("Times:", times),
+  ].join("");
+
+  const html = `<table style="border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#111;">${rows}</table>`;
+
+  const textLines = [
+    ["Advice From", (companyName || "Ausgroup").toUpperCase() + " SECURITY"],
+    ["Customer", job.bureau || "—"],
+    ["Monitoring", job.monitoringCo || "—"],
+    ["Job Ref", job.jobNumber],
+    ["Order No", job.orderNo || "—"],
+    ["Docket No", job.docketNo || "—"],
+    ["Received", fmtDateTime(job.dispatchTime)],
+    ["Location", [job.siteName, job.address].filter(Boolean).join(", ")],
+    ["Request", job.description || "—"],
+    ["Status", status],
+    ["Outcome", job.reviewNotes || "—"],
+    ["Provider", provider],
+    ["Times", times],
+  ];
+  const text = textLines.map(([k, v]) => `${k}: ${v}`).join("\n");
+
+  return { html, text };
+}
+
+function EmailModal({ job, companyName, onClose, onSent }) {
   const [clientEmail, setClientEmail] = useState(job.clientEmail || job.monitoringEmail || "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const showToast = useToast();
 
-  const subject = `Alarm Response Outcome — ${job.jobNumber} — ${job.siteName}`;
-  const body = `Job number: ${job.jobNumber}
-Site: ${job.siteName}
-Address: ${job.address}
-Alarm description: ${job.description}
-Patrolman: ${job.assigneeName}
-Dispatched: ${fmtDateTime(job.dispatchTime)}
-Onsite: ${fmtDateTime(job.onsiteTime)}
-Offsite: ${fmtDateTime(job.offsiteTime)}
-${job.delayReason ? `Delay advised: ${job.delayReason}\n` : ""}
-Outcome:
-${job.reviewNotes}
-
-${job.photos?.length ? `${job.photos.length} time-stamped photo(s) attached.` : "No photos attached."}
-`;
-  const preview = `To: ${clientEmail.trim() || job.monitoringCo || "(add a client email above)"}\nSubject: ${subject}\n\n${body}`;
+  const subject = `Alarm Response Advice — Job Ref ${job.jobNumber} — ${job.siteName}`;
+  const { html, text } = buildAdviceEmail(job, companyName);
   const emailLooksValid = /\S+@\S+\.\S+/.test(clientEmail.trim());
 
   async function sendNow() {
@@ -1439,7 +1487,7 @@ ${job.photos?.length ? `${job.photos.length} time-stamped photo(s) attached.` : 
       const res = await fetch("/api/send-client-email", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-App-Secret": import.meta.env.VITE_APP_MAIL_SECRET || "" },
-        body: JSON.stringify({ to: clientEmail.trim(), subject, text: body }),
+        body: JSON.stringify({ to: clientEmail.trim(), subject, text, html }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Send failed (${res.status})`);
@@ -1453,7 +1501,7 @@ ${job.photos?.length ? `${job.photos.length} time-stamped photo(s) attached.` : 
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000000aa", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
-      <div style={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10, width: 480, maxWidth: "90%", padding: 20 }}>
+      <div style={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10, width: 560, maxWidth: "90%", padding: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <SectionTitle icon={Mail} title="Client email" small />
           <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer" }}><X size={16} /></button>
@@ -1461,10 +1509,13 @@ ${job.photos?.length ? `${job.photos.length} time-stamped photo(s) attached.` : 
         <Field label="Client email">
           <input type="email" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} placeholder="e.g. monitoring@client.com" style={selectStyle} />
         </Field>
-        <pre style={{ whiteSpace: "pre-wrap", fontFamily: "var(--mono)", fontSize: 11.5, background: "var(--panel-alt)", padding: 12, borderRadius: 7, maxHeight: 220, overflowY: "auto", border: "1px solid var(--border)" }}>{preview}</pre>
+        <div
+          style={{ background: "#fff", padding: 12, borderRadius: 7, maxHeight: 260, overflow: "auto", border: "1px solid var(--border)" }}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
         {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 8 }}>{error}</div>}
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
-          <button onClick={() => navigator.clipboard?.writeText(preview)} style={secondaryBtn}><Copy size={13} /> Copy</button>
+          <button onClick={() => navigator.clipboard?.writeText(text)} style={secondaryBtn}><Copy size={13} /> Copy</button>
           <button onClick={() => onSent({ clientEmail: clientEmail.trim(), emailSentByApp: false })} style={secondaryBtn}><CheckCircle2 size={13} /> Mark as sent / closed</button>
           <button
             onClick={sendNow}
@@ -1759,6 +1810,7 @@ function PatrolmanView({ session, jobs, persist, now }) {
 
 function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
   const [outcome, setOutcome] = useState(job.outcomeNotes || "");
+  const [docketNo, setDocketNo] = useState(job.docketNo || "");
   const [photos, setPhotos] = useState(job.photos || []);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
@@ -1791,7 +1843,7 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
   }
 
   async function submit() {
-    const updated = jobs.map((j) => (j.id === job.id ? { ...j, status: "submitted", outcomeNotes: outcome.trim(), photos, offsiteTime: new Date().toISOString() } : j));
+    const updated = jobs.map((j) => (j.id === job.id ? { ...j, status: "submitted", outcomeNotes: outcome.trim(), docketNo: docketNo.trim(), photos, offsiteTime: new Date().toISOString() } : j));
     await persist(updated);
     onBack();
   }
@@ -1851,6 +1903,9 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
           <div style={{ fontSize: 11.5, color: "var(--ok)", marginBottom: 10 }}>Onsite at {fmtTime(job.onsiteTime)}</div>
           <SectionTitle icon={CheckCircle2} title="Submit outcome" small />
           <textarea rows={4} value={outcome} onChange={(e) => setOutcome(e.target.value)} placeholder="What did you find on attendance? e.g. Premises secure, false alarm — sensor fault suspected." style={{ ...selectStyle, resize: "vertical" }} />
+          <Field label="Docket number (optional)">
+            <input value={docketNo} onChange={(e) => setDocketNo(e.target.value)} placeholder="Your patrol docket / report number" style={selectStyle} />
+          </Field>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
             {photos.map((p, i) => (
               <div key={i} style={{ position: "relative" }}>
