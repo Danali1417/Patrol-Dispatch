@@ -11,6 +11,12 @@ import {
   reportStatusLabel, REPORT_COLUMNS_BRIEF, REPORT_COLUMNS_DETAILED,
   reportRow, patrolmanRunSummary,
 } from "./reportUtils.js";
+import { restoreSession, login as apiLogin, logout as apiLogout, setOnUnauthorized } from "./auth.js";
+import {
+  listAccounts, createAccount as apiCreateAccount, updateAccount as apiUpdateAccount,
+  resetPassword as apiResetPassword, changeOwnPassword as apiChangeOwnPassword,
+  deleteAccount as apiDeleteAccount, bulkUpdateAccounts as apiBulkUpdateAccounts,
+} from "./accountsApi.js";
 
 /* ---------------------------------------------------------------
    SEED / REFERENCE DATA
@@ -27,36 +33,12 @@ const DEFAULT_SITES = [];
 // currently assigned to that run.
 const DEFAULT_ZONES = ["North Run", "South Run", "CBD Run", "East Run", "West Run"];
 
-// Seeded only if no accounts exist yet in storage. From here on, only a Manager
-// login can create/edit/deactivate logins via the "Manage logins" screen.
-// NOTE: T99, T55 and T22 each appeared twice in the supplied run list (once
-// as a night run, once as a day run) — the day versions were given a "Day"
-// suffix below so login names stay unique. Rename any of these from the
-// Manager screen if that's not what was intended.
-const DEFAULT_ACCOUNTS = [
-  { loginName: "Manager1", password: "manager123", role: "manager", displayName: "Duty Manager", active: true },
-  { loginName: "ControlRoom1", password: "ops123", role: "operator", displayName: "Control Room 1", active: true },
-  { loginName: "ControlRoom2", password: "ops123", role: "operator", displayName: "Control Room 2", active: true },
-  { loginName: "T13", password: "patrol123", role: "patrolman", displayName: "T13", shift: "1800–0700", run: "Unassigned", active: true },
-  { loginName: "T15", password: "patrol123", role: "patrolman", displayName: "T15", shift: "1800–0600", run: "Unassigned", active: true },
-  { loginName: "T22", password: "patrol123", role: "patrolman", displayName: "T22", shift: "1800–0600", run: "Unassigned", active: true },
-  { loginName: "T33", password: "patrol123", role: "patrolman", displayName: "T33", shift: "1800–0600", run: "Unassigned", active: true },
-  { loginName: "T44", password: "patrol123", role: "patrolman", displayName: "T44", shift: "1800–0600", run: "Unassigned", active: true },
-  { loginName: "T55", password: "patrol123", role: "patrolman", displayName: "T55", shift: "1800–0600", run: "Unassigned", active: true },
-  { loginName: "T66", password: "patrol123", role: "patrolman", displayName: "T66", shift: "1800–0600", run: "Unassigned", active: true },
-  { loginName: "T77", password: "patrol123", role: "patrolman", displayName: "T77", shift: "1800–0600", run: "Unassigned", active: true },
-  { loginName: "T88", password: "patrol123", role: "patrolman", displayName: "T88", shift: "1800–0600", run: "Unassigned", active: true },
-  { loginName: "T99", password: "patrol123", role: "patrolman", displayName: "T99", shift: "1800–0600", run: "Unassigned", active: true },
-  { loginName: "PST33", password: "patrol123", role: "patrolman", displayName: "PST33", shift: "1800–0600", run: "Unassigned", active: true },
-  { loginName: "T77 Day", password: "patrol123", role: "patrolman", displayName: "T77 Day", shift: "0600–1700", run: "Unassigned", active: true },
-  { loginName: "T88 Day", password: "patrol123", role: "patrolman", displayName: "T88 Day", shift: "0600–1700", run: "Unassigned", active: true },
-  { loginName: "T99 Day", password: "patrol123", role: "patrolman", displayName: "T99 Day", shift: "0600–1700", run: "Unassigned", active: true },
-  { loginName: "T55 Day", password: "patrol123", role: "patrolman", displayName: "T55 Day", shift: "0600–1600", run: "Unassigned", active: true },
-  { loginName: "T22 Day", password: "patrol123", role: "patrolman", displayName: "T22 Day", shift: "0600–1700", run: "Unassigned", active: true },
-];
+// Default accounts are seeded server-side (api/_lib/defaultAccounts.js,
+// hashed before ever reaching Supabase) the first time /api/accounts is
+// called against an empty database — nothing password-shaped lives in
+// the client bundle anymore.
 
 const JOBS_KEY = "ops:jobs";
-const ACCOUNTS_KEY = "ops:accounts";
 const ZONES_KEY = "ops:zones";
 const SITES_KEY = "ops:sites";
 const ROSTER_KEY = "ops:roster";
@@ -185,7 +167,7 @@ function resizeLogo(file) {
 ---------------------------------------------------------------- */
 
 export default function SentrylinePrototype() {
-  const [session, setSession] = useState(null);
+  const [session, setSession] = useState(() => restoreSession());
   const [jobs, setJobs] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [accountsLoaded, setAccountsLoaded] = useState(false);
@@ -233,6 +215,7 @@ export default function SentrylinePrototype() {
     const INACTIVITY_LIMIT_MS = 30 * 60 * 1000;
     const check = setInterval(() => {
       if (Date.now() - lastActivityRef.current >= INACTIVITY_LIMIT_MS) {
+        apiLogout();
         setSession(null);
         setAutoLoggedOut(true);
       }
@@ -244,8 +227,21 @@ export default function SentrylinePrototype() {
     };
   }, [session]);
 
-  // Load jobs
+  const handleSignOut = useCallback(() => {
+    apiLogout();
+    setSession(null);
+  }, []);
+
+  // Wire up forced sign-out if any authenticated request ever comes back
+  // 401 (expired/invalid token) — auth.js already clears the stored token.
   useEffect(() => {
+    setOnUnauthorized(() => { setSession(null); setAutoLoggedOut(true); });
+  }, []);
+
+  // Load jobs, accounts, zones, sites, roster — all require a session now,
+  // so these wait for one instead of loading unconditionally at mount.
+  useEffect(() => {
+    if (!session) return;
     (async () => {
       try {
         const res = await window.storage.get(JOBS_KEY, true);
@@ -256,33 +252,25 @@ export default function SentrylinePrototype() {
         }
       } catch (e) { /* nothing stored yet */ }
     })();
-  }, []);
+  }, [session]);
 
-  // Load accounts, seeding DEFAULT_ACCOUNTS only on a genuinely empty store
-  // (first-ever run). Once real data exists, it's authoritative — a login
-  // a Manager deletes must stay deleted, even if it happens to share a name
-  // with one of the built-in demo accounts.
+  // Load accounts (server seeds default accounts on a genuinely empty
+  // database the first time this is called — see api/accounts.js).
   useEffect(() => {
+    if (!session) return;
     (async () => {
-      let existing = [];
       try {
-        const res = await window.storage.get(ACCOUNTS_KEY, true);
-        if (res && res.value) existing = JSON.parse(res.value);
-      } catch (e) { /* nothing stored yet */ }
-
-      if (existing.length === 0) {
-        existing = DEFAULT_ACCOUNTS;
-        try { await window.storage.set(ACCOUNTS_KEY, JSON.stringify(existing), true); } catch (e) { /* ignore */ }
-      }
-
-      setAccounts(existing);
+        const existing = await listAccounts();
+        setAccounts(existing);
+      } catch (e) { console.error(e); }
       setAccountsLoaded(true);
     })();
-  }, []);
+  }, [session]);
 
   // Load or seed zones & sites (runs are named by the manager; sites are
   // demo data on first run, editable afterwards from Manager > Sites & runs)
   useEffect(() => {
+    if (!session) return;
     (async () => {
       let z = [];
       try {
@@ -307,19 +295,21 @@ export default function SentrylinePrototype() {
       setSites(s);
       setSitesLoaded(true);
     })();
-  }, []);
+  }, [session]);
 
   // Load roster (dated run assignments — separate from a login's "current" run)
   useEffect(() => {
+    if (!session) return;
     (async () => {
       try {
         const res = await window.storage.get(ROSTER_KEY, true);
         if (res && res.value) setRoster(JSON.parse(res.value));
       } catch (e) { /* nothing stored yet */ }
     })();
-  }, []);
+  }, [session]);
 
-  // Load company logo (uploaded by a Manager, shown on every login type)
+  // Load company logo (uploaded by a Manager, shown on every login type —
+  // stays public/unauthenticated so it renders before anyone signs in)
   useEffect(() => {
     (async () => {
       try {
@@ -329,7 +319,7 @@ export default function SentrylinePrototype() {
     })();
   }, []);
 
-  // Load company name (used in the header alongside the logo)
+  // Load company name (used in the header alongside the logo — also public)
   useEffect(() => {
     (async () => {
       try {
@@ -343,11 +333,6 @@ export default function SentrylinePrototype() {
     setJobs(updated);
     prevJobsRef.current = updated;
     try { await window.storage.set(JOBS_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
-  }, []);
-
-  const persistAccounts = useCallback(async (updated) => {
-    setAccounts(updated);
-    try { await window.storage.set(ACCOUNTS_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
   }, []);
 
   const persistZones = useCallback(async (updated) => {
@@ -445,8 +430,6 @@ export default function SentrylinePrototype() {
         <ConfirmContext.Provider value={showConfirm}>
           <Shell>
             <Login
-              accounts={accounts}
-              accountsLoaded={accountsLoaded}
               autoLoggedOut={autoLoggedOut}
               logoUrl={logoUrl}
               companyName={companyName}
@@ -464,15 +447,15 @@ export default function SentrylinePrototype() {
     <ToastContext.Provider value={showToast}>
       <ConfirmContext.Provider value={showConfirm}>
         <Shell>
-          <TopBar session={session} onSignOut={() => setSession(null)} onOpenSettings={() => setShowSettings(true)} now={now} logoUrl={logoUrl} companyName={companyName} />
+          <TopBar session={session} onSignOut={handleSignOut} onOpenSettings={() => setShowSettings(true)} now={now} logoUrl={logoUrl} companyName={companyName} />
           {banner && <NotifBanner banner={banner} onDismiss={() => setBanner(null)} />}
           {showSettings && (
-            <SettingsModal session={session} accounts={accounts} persistAccounts={persistAccounts} onClose={() => setShowSettings(false)} />
+            <SettingsModal session={session} onClose={() => setShowSettings(false)} />
           )}
           {!accountsLoaded || !sitesLoaded ? (
             <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
           ) : session.role === "manager" ? (
-            <ManagerView session={session} accounts={accounts} persistAccounts={persistAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} now={now} />
+            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} now={now} />
           ) : session.role === "operator" ? (
             <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} />
           ) : (
@@ -601,26 +584,28 @@ function Logo({ src }) {
    LOGIN — role select, then Login Name / Password only
 ---------------------------------------------------------------- */
 
-function Login({ accounts, accountsLoaded, autoLoggedOut, logoUrl, companyName, onLogin }) {
+function Login({ autoLoggedOut, logoUrl, companyName, onLogin }) {
   const [role, setRole] = useState(null);
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   const loginNameRef = useRef(null);
   const passwordRef = useRef(null);
 
-  function submit() {
+  async function submit() {
     setError("");
     const loginName = (loginNameRef.current?.value || "").trim();
     const password = passwordRef.current?.value || "";
     if (!loginName || !password) { setError("Enter a login name and password."); return; }
-    if (!accountsLoaded) { setError("Still loading accounts — wait a moment and try again."); return; }
-    const byName = accounts.find(
-      (a) => a.role === role && a.loginName.toLowerCase() === loginName.toLowerCase()
-    );
-    if (!byName) { setError(`No ${role} login named "${loginName}" was found.`); return; }
-    if (byName.password !== password) { setError("Password doesn't match that login name."); return; }
-    if (byName.active === false) { setError("This login has been deactivated. See your manager."); return; }
-    onLogin({ ...byName, id: byName.loginName });
+    setBusy(true);
+    try {
+      const account = await apiLogin(loginName, password, role);
+      onLogin(account);
+    } catch (err) {
+      setError(err.message || "Sign-in failed.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   function handleKeyDown(e) {
@@ -715,20 +700,14 @@ function Login({ accounts, accountsLoaded, autoLoggedOut, logoUrl, companyName, 
 
         {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 12 }}>{error}</div>}
 
-        <button type="button" onClick={submit} style={{ width: "100%", padding: "12px 0", borderRadius: 7, border: "none", background: "var(--accent)", color: "#0B0E11", fontWeight: 700, cursor: "pointer", fontSize: 13.5 }}>
-          Sign in
+        <button type="button" disabled={busy} onClick={submit} style={{ width: "100%", padding: "12px 0", borderRadius: 7, border: "none", background: "var(--accent)", color: "#0B0E11", fontWeight: 700, cursor: "pointer", fontSize: 13.5, opacity: busy ? 0.6 : 1 }}>
+          {busy ? "Signing in…" : "Sign in"}
         </button>
       </div>
 
       <div style={{ marginTop: 16, padding: 12, borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
-        Forgotten your password? Ask your Manager to look it up or reset it from Manage logins. Use the settings icon (top right) after signing in to change it yourself.
+        Forgotten your password? Ask your Manager to reset it from Manage logins — they'll send you a new one.
       </div>
-
-      {!accountsLoaded && (
-        <div style={{ marginTop: 10, fontSize: 10.5, color: "var(--text-dim)", fontFamily: "var(--mono)", textAlign: "center" }}>
-          Loading accounts…
-        </div>
-      )}
     </div>
   );
 }
@@ -786,23 +765,29 @@ function NotifBanner({ banner, onDismiss }) {
   );
 }
 
-function SettingsModal({ session, accounts, persistAccounts, onClose }) {
+function SettingsModal({ session, onClose }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   const showToast = useToast();
 
-  function submit() {
+  async function submit() {
     setError("");
-    const account = accounts.find((a) => a.loginName === session.loginName && a.role === session.role);
-    if (!account || account.password !== current) { setError("Current password is incorrect."); return; }
+    if (!current) { setError("Current password is required."); return; }
     if (next.length < 4) { setError("New password must be at least 4 characters."); return; }
     if (next !== confirm) { setError("New passwords don't match."); return; }
-    const updated = accounts.map((a) => (a.loginName === session.loginName && a.role === session.role ? { ...a, password: next } : a));
-    persistAccounts(updated);
-    onClose();
-    showToast("Password updated.");
+    setBusy(true);
+    try {
+      await apiChangeOwnPassword(current, next);
+      onClose();
+      showToast("Password updated.");
+    } catch (err) {
+      setError(err.message || "Couldn't update password.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -817,7 +802,7 @@ function SettingsModal({ session, accounts, persistAccounts, onClose }) {
           <Field label="New password"><input type="password" value={next} onChange={(e) => setNext(e.target.value)} style={selectStyle} /></Field>
           <Field label="Confirm new password"><input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} style={selectStyle} /></Field>
           {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
-          <button type="button" onClick={submit} style={{ ...primaryBtn, width: "100%", justifyContent: "center" }}>Update password</button>
+          <button type="button" disabled={busy} onClick={submit} style={{ ...primaryBtn, width: "100%", justifyContent: "center", opacity: busy ? 0.6 : 1 }}>{busy ? "Updating…" : "Update password"}</button>
         </div>
       </div>
     </div>
@@ -1967,7 +1952,7 @@ function DetailRow({ icon: Icon, label, value }) {
    MANAGER VIEW — create & manage logins
 ---------------------------------------------------------------- */
 
-function ManagerView({ session, accounts, persistAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, logoUrl, persistLogo, companyName, persistCompanyName, jobs, now }) {
+function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, logoUrl, persistLogo, companyName, persistCompanyName, jobs, now }) {
   const [tab, setTab] = useState("accounts");
   return (
     <div style={{ display: "flex", minHeight: 560 }}>
@@ -1984,8 +1969,8 @@ function ManagerView({ session, accounts, persistAccounts, zones, persistZones, 
         ))}
       </div>
       <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
-        {tab === "accounts" && <AccountsManager accounts={accounts} persistAccounts={persistAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />}
-        {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} persistAccounts={persistAccounts} />}
+        {tab === "accounts" && <AccountsManager accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />}
+        {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
         {tab === "logs" && <Logs jobs={jobs} now={now} role="manager" companyName={companyName} />}
       </div>
@@ -2001,7 +1986,7 @@ const PATROLMAN_IMPORT_FIELDS = [
   { key: "contactNumber", match: (h) => h.includes("contact") || h.includes("phone") || h.includes("mobile") || h.includes("number") },
 ];
 
-function PatrolmanRosterImport({ accounts, persistAccounts, zones }) {
+function PatrolmanRosterImport({ accounts, setAccounts, zones }) {
   const fileRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
@@ -2031,6 +2016,8 @@ function PatrolmanRosterImport({ accounts, persistAccounts, zones }) {
 
       const working = accounts.slice();
       const existingLoginNames = new Set(working.map((a) => a.loginName.toLowerCase()));
+      const apiUpdates = [];
+      const apiCreates = [];
 
       let updated = 0;
       let created = 0;
@@ -2058,31 +2045,41 @@ function PatrolmanRosterImport({ accounts, persistAccounts, zones }) {
           const patch = {};
           if (contactNumber) patch.contactNumber = contactNumber;
           if (run) patch.run = run;
-          if (Object.keys(patch).length) { working[existingIdx] = { ...working[existingIdx], ...patch }; updated++; }
+          if (Object.keys(patch).length) {
+            working[existingIdx] = { ...working[existingIdx], ...patch };
+            apiUpdates.push({ loginName: working[existingIdx].loginName, role: "patrolman", patch });
+            updated++;
+          }
         } else {
           const slug = name.replace(/[^a-zA-Z0-9]/g, "") || "Patrolman";
           let loginName = slug;
           let n = 2;
           while (existingLoginNames.has(loginName.toLowerCase())) { loginName = `${slug}${n}`; n++; }
           existingLoginNames.add(loginName.toLowerCase());
-          working.push({
+          const newAccount = {
             loginName,
-            password: "patrol123",
             role: "patrolman",
             displayName: name,
             run: run || "Unassigned",
             shift: "",
             contactNumber,
             active: true,
-          });
+          };
+          working.push(newAccount);
+          apiCreates.push({ ...newAccount, password: "patrol123" });
           created++;
         }
       });
 
-      if (updated || created) persistAccounts(working);
+      if (updated || created) {
+        await apiBulkUpdateAccounts({ creates: apiCreates, updates: apiUpdates });
+        setAccounts(working);
+      }
       setResult({ updated, created, runNotRecognized, skippedMissing, total: rows.length });
     } catch (err) {
-      setError("Couldn't read that file — make sure it's a valid .xlsx, .xls, or .csv export.");
+      setError(err?.message && err.message !== "Failed to fetch"
+        ? err.message
+        : "Couldn't read that file — make sure it's a valid .xlsx, .xls, or .csv export.");
     }
     setBusy(false);
   }
@@ -2179,7 +2176,7 @@ function LogoUploader({ logoUrl, persistLogo, companyName, persistCompanyName })
   );
 }
 
-function AccountsManager({ accounts, persistAccounts, zones, session, logoUrl, persistLogo, companyName, persistCompanyName }) {
+function AccountsManager({ accounts, setAccounts, zones, session, logoUrl, persistLogo, companyName, persistCompanyName }) {
   const [role, setRole] = useState("patrolman");
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
@@ -2188,18 +2185,33 @@ function AccountsManager({ accounts, persistAccounts, zones, session, logoUrl, p
   const [run, setRun] = useState("Unassigned");
   const [contactNumber, setContactNumber] = useState("");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  // Passwords are hashed server-side and never sent back to the client, so
+  // the only moment we ever know a plaintext password is right after we
+  // set it ourselves (creation or reset) — keyed by "role:loginName" and
+  // used by AccountRow's "Send login details" panel.
+  const [lastKnownPasswords, setLastKnownPasswords] = useState({});
   const showToast = useToast();
 
-  function createAccount() {
+  async function createAccount() {
     setError("");
     const name = loginName.trim();
     if (!name || !password) { setError("Login name and password are required."); return; }
     if (accounts.some((a) => a.loginName.toLowerCase() === name.toLowerCase())) { setError("That login name is already in use — pick a unique one."); return; }
-    const acct = { loginName: name, password, role, displayName: displayName.trim() || name, active: true, contactNumber: contactNumber.trim() };
-    if (role === "patrolman") { acct.shift = shift.trim(); acct.run = run; }
-    persistAccounts([...accounts, acct]);
-    showToast(`Login "${name}" created.`);
-    setLoginName(""); setPassword(""); setDisplayName(""); setShift(""); setRun("Unassigned"); setContactNumber("");
+    setBusy(true);
+    try {
+      const fields = { loginName: name, password, role, displayName: displayName.trim() || name, contactNumber: contactNumber.trim() };
+      if (role === "patrolman") { fields.shift = shift.trim(); fields.run = run; }
+      const newAccount = await apiCreateAccount(fields);
+      setAccounts((prev) => [...prev, newAccount]);
+      setLastKnownPasswords((prev) => ({ ...prev, [`${newAccount.role}:${newAccount.loginName}`]: password }));
+      showToast(`Login "${name}" created.`);
+      setLoginName(""); setPassword(""); setDisplayName(""); setShift(""); setRun("Unassigned"); setContactNumber("");
+    } catch (err) {
+      setError(err.message || "Couldn't create that login.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   const groups = [
@@ -2255,10 +2267,10 @@ function AccountsManager({ accounts, persistAccounts, zones, session, logoUrl, p
 
         {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
 
-        <button onClick={createAccount} style={primaryBtn}><UserPlus size={14} /> Create login</button>
+        <button onClick={createAccount} disabled={busy} style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }}><UserPlus size={14} /> {busy ? "Creating…" : "Create login"}</button>
       </div>
 
-      <PatrolmanRosterImport accounts={accounts} persistAccounts={persistAccounts} zones={zones} />
+      <PatrolmanRosterImport accounts={accounts} setAccounts={setAccounts} zones={zones} />
 
       <SectionTitle icon={Users} title="Existing logins" />
       {groups.map((g) => {
@@ -2269,7 +2281,7 @@ function AccountsManager({ accounts, persistAccounts, zones, session, logoUrl, p
             <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text-dim)", marginBottom: 8 }}>{g.title} ({list.length})</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {list.map((a) => (
-                <AccountRow key={a.role + a.loginName} account={a} accounts={accounts} persistAccounts={persistAccounts} zones={zones} isSelf={a.loginName === session.loginName && a.role === session.role} />
+                <AccountRow key={a.role + a.loginName} account={a} setAccounts={setAccounts} zones={zones} isSelf={a.loginName === session.loginName && a.role === session.role} lastKnownPassword={lastKnownPasswords[`${a.role}:${a.loginName}`]} onKnowPassword={(pw) => setLastKnownPasswords((prev) => ({ ...prev, [`${a.role}:${a.loginName}`]: pw }))} />
               ))}
             </div>
           </div>
@@ -2279,10 +2291,11 @@ function AccountsManager({ accounts, persistAccounts, zones, session, logoUrl, p
   );
 }
 
-function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
+function AccountRow({ account, setAccounts, zones, isSelf, lastKnownPassword, onKnowPassword }) {
   const [editingPw, setEditingPw] = useState(false);
   const [newPw, setNewPw] = useState("");
   const [showPw, setShowPw] = useState(false);
+  const [pwBusy, setPwBusy] = useState(false);
   const [editingContact, setEditingContact] = useState(false);
   const [newContact, setNewContact] = useState(account.contactNumber || "");
   const [showSendLogin, setShowSendLogin] = useState(false);
@@ -2290,21 +2303,49 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
   const showToast = useToast();
   const showConfirm = useConfirm();
 
-  function update(patch) {
-    persistAccounts(accounts.map((a) => (a.loginName === account.loginName && a.role === account.role ? { ...a, ...patch } : a)));
+  async function update(patch) {
+    try {
+      const updated = await apiUpdateAccount(account.loginName, account.role, patch);
+      setAccounts((prev) => prev.map((a) => (a.loginName === account.loginName && a.role === account.role ? updated : a)));
+    } catch (err) {
+      showToast(err.message || "Couldn't save that change.", "error");
+    }
   }
 
   function remove() {
     if (isSelf) { showToast("You can't delete the login you're currently signed in with.", "error"); return; }
-    showConfirm(`Delete login "${account.loginName}"? This can't be undone.`, () => {
-      persistAccounts(accounts.filter((a) => !(a.loginName === account.loginName && a.role === account.role)));
-      showToast(`Login "${account.loginName}" removed.`);
+    showConfirm(`Delete login "${account.loginName}"? This can't be undone.`, async () => {
+      try {
+        await apiDeleteAccount(account.loginName, account.role);
+        setAccounts((prev) => prev.filter((a) => !(a.loginName === account.loginName && a.role === account.role)));
+        showToast(`Login "${account.loginName}" removed.`);
+      } catch (err) {
+        showToast(err.message || "Couldn't delete that login.", "error");
+      }
     });
+  }
+
+  async function resetPassword() {
+    if (newPw.length < 4) return;
+    setPwBusy(true);
+    try {
+      await apiResetPassword(account.loginName, account.role, newPw);
+      onKnowPassword(newPw);
+      setEditingPw(false);
+      setNewPw("");
+      showToast("Password reset.");
+    } catch (err) {
+      showToast(err.message || "Couldn't reset password.", "error");
+    } finally {
+      setPwBusy(false);
+    }
   }
 
   const inactive = account.active === false;
 
-  const loginMessage = `Your Alarm Response Dispatch login\n\nLogin name: ${account.loginName}\nPassword: ${account.password}\n\nSign in at: ${window.location.origin}`;
+  const loginMessage = lastKnownPassword
+    ? `Your Alarm Response Dispatch login\n\nLogin name: ${account.loginName}\nPassword: ${lastKnownPassword}\n\nSign in at: ${window.location.origin}`
+    : `Your Alarm Response Dispatch login\n\nLogin name: ${account.loginName}\n\nSign in at: ${window.location.origin}\n\n(Password not shown — reset it below to set a new one.)`;
   const smsHref = `sms:${encodeURIComponent(account.contactNumber || "")}?body=${encodeURIComponent(loginMessage)}`;
 
   return (
@@ -2329,7 +2370,7 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
         <button onClick={() => { update({ active: inactive ? true : false }); showToast(inactive ? "Login reactivated." : "Login deactivated."); }} title={inactive ? "Reactivate login" : "Deactivate login"} style={iconBtn}>
           <Power size={13} color={inactive ? "var(--ok)" : "var(--text-dim)"} />
         </button>
-        <button onClick={() => { setNewPw(account.password || ""); setShowPw(false); setEditingPw((v) => !v); }} title="View / change password" style={iconBtn}><RotateCcw size={13} /></button>
+        <button onClick={() => { setNewPw(""); setShowPw(false); setEditingPw((v) => !v); }} title="Reset password" style={iconBtn}><RotateCcw size={13} /></button>
         <button onClick={remove} title="Delete login" style={iconBtn}><Trash2 size={13} color="var(--breach)" /></button>
       </div>
       {showSendLogin && (
@@ -2364,25 +2405,25 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
         </div>
       )}
       {editingPw && (
-        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-          <div style={{ position: "relative", flex: 1 }}>
-            <input
-              value={newPw}
-              onChange={(e) => setNewPw(e.target.value)}
-              type={showPw ? "text" : "password"}
-              placeholder="Password (min 4 chars)"
-              style={{ ...selectStyle, fontSize: 12, paddingRight: 30 }}
-            />
-            <button type="button" onClick={() => setShowPw((v) => !v)} title={showPw ? "Hide password" : "Show password"} style={{ position: "absolute", right: 6, top: 6, background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer" }}>
-              {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 6 }}>Existing passwords can't be viewed — set a new one and share it now via "Send login details".</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ position: "relative", flex: 1 }}>
+              <input
+                value={newPw}
+                onChange={(e) => setNewPw(e.target.value)}
+                type={showPw ? "text" : "password"}
+                placeholder="New password (min 4 chars)"
+                style={{ ...selectStyle, fontSize: 12, paddingRight: 30 }}
+              />
+              <button type="button" onClick={() => setShowPw((v) => !v)} title={showPw ? "Hide password" : "Show password"} style={{ position: "absolute", right: 6, top: 6, background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer" }}>
+                {showPw ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
+            <button onClick={resetPassword} disabled={pwBusy || newPw.length < 4} style={{ ...secondaryBtn, opacity: pwBusy || newPw.length < 4 ? 0.6 : 1 }}>
+              {pwBusy ? "Saving…" : "Reset"}
             </button>
           </div>
-          <button
-            onClick={() => { if (newPw.length >= 4) { update({ password: newPw }); setEditingPw(false); showToast("Password saved."); } }}
-            style={secondaryBtn}
-          >
-            Save
-          </button>
         </div>
       )}
     </div>
@@ -2393,17 +2434,17 @@ function AccountRow({ account, accounts, persistAccounts, zones, isSelf }) {
    SITES & RUNS MANAGER
 ---------------------------------------------------------------- */
 
-function SitesManager({ zones, persistZones, sites, persistSites, accounts, persistAccounts }) {
+function SitesManager({ zones, persistZones, sites, persistSites, accounts, setAccounts }) {
   return (
     <div>
-      <ZonesEditor zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} persistAccounts={persistAccounts} />
+      <ZonesEditor zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} />
       <div style={{ height: 30 }} />
       <SitesEditor zones={zones} sites={sites} persistSites={persistSites} />
     </div>
   );
 }
 
-function ZonesEditor({ zones, persistZones, sites, persistSites, accounts, persistAccounts }) {
+function ZonesEditor({ zones, persistZones, sites, persistSites, accounts, setAccounts }) {
   const [newZone, setNewZone] = useState("");
   const [error, setError] = useState("");
   const [renaming, setRenaming] = useState(null); // zone name currently being renamed
@@ -2423,30 +2464,45 @@ function ZonesEditor({ zones, persistZones, sites, persistSites, accounts, persi
 
   function startRename(z) { setRenaming(z); setRenameValue(z); }
 
-  function saveRename() {
+  async function saveRename() {
     const oldName = renaming;
     const newName = renameValue.trim();
     if (!newName || newName === oldName) { setRenaming(null); return; }
     if (zones.some((z) => z.toLowerCase() === newName.toLowerCase() && z !== oldName)) { setError("That run name already exists."); return; }
+    const affected = accounts.filter((a) => a.role === "patrolman" && a.run === oldName);
     persistZones(zones.map((z) => (z === oldName ? newName : z)));
     persistSites(sites.map((s) => (s.run === oldName ? { ...s, run: newName } : s)));
-    persistAccounts(accounts.map((a) => (a.role === "patrolman" && a.run === oldName ? { ...a, run: newName } : a)));
     setRenaming(null);
     setError("");
-    showToast(`Run renamed to "${newName}".`);
+    try {
+      if (affected.length) {
+        await apiBulkUpdateAccounts({ updates: affected.map((a) => ({ loginName: a.loginName, role: a.role, patch: { run: newName } })) });
+        setAccounts((prev) => prev.map((a) => (a.role === "patrolman" && a.run === oldName ? { ...a, run: newName } : a)));
+      }
+      showToast(`Run renamed to "${newName}".`);
+    } catch (err) {
+      showToast(err.message || "Run renamed, but patrolman logins may not have updated — refresh to check.", "error");
+    }
   }
 
   function removeZone(z) {
     const siteCount = sites.filter((s) => s.run === z).length;
-    const patrolCount = accounts.filter((a) => a.role === "patrolman" && a.run === z).length;
-    const msg = siteCount || patrolCount
-      ? `"${z}" is used by ${siteCount} site(s) and ${patrolCount} patrolman login(s). Delete anyway? They'll be set to Unassigned.`
+    const patrolAffected = accounts.filter((a) => a.role === "patrolman" && a.run === z);
+    const msg = siteCount || patrolAffected.length
+      ? `"${z}" is used by ${siteCount} site(s) and ${patrolAffected.length} patrolman login(s). Delete anyway? They'll be set to Unassigned.`
       : `Delete run "${z}"?`;
-    showConfirm(msg, () => {
+    showConfirm(msg, async () => {
       persistZones(zones.filter((r) => r !== z));
       if (siteCount) persistSites(sites.map((s) => (s.run === z ? { ...s, run: "Unassigned" } : s)));
-      if (patrolCount) persistAccounts(accounts.map((a) => (a.role === "patrolman" && a.run === z ? { ...a, run: "Unassigned" } : a)));
-      showToast(`Run "${z}" removed.`);
+      try {
+        if (patrolAffected.length) {
+          await apiBulkUpdateAccounts({ updates: patrolAffected.map((a) => ({ loginName: a.loginName, role: a.role, patch: { run: "Unassigned" } })) });
+          setAccounts((prev) => prev.map((a) => (a.role === "patrolman" && a.run === z ? { ...a, run: "Unassigned" } : a)));
+        }
+        showToast(`Run "${z}" removed.`);
+      } catch (err) {
+        showToast(err.message || "Run removed, but patrolman logins may not have updated — refresh to check.", "error");
+      }
     });
   }
 

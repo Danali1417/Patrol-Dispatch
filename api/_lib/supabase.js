@@ -1,22 +1,22 @@
-// Minimal server-side counterpart to src/storageShim.js — reads/writes the
-// same Supabase `kv_store` table, using the same REST calls the client
-// makes, just from a Vercel serverless function instead of the browser.
-// Reuses the existing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY env vars
-// (the VITE_ prefix only controls client-bundle exposure — Vercel still
-// makes them available to serverless functions via process.env).
+// Server-side Supabase access for every API function in this project.
+// Uses the SERVICE ROLE key — never the anon key, and never exposed to
+// the browser — so this is the only thing in the whole app with real
+// read/write access to the database. The client now talks exclusively
+// to our own /api endpoints, which enforce login + role checks before
+// ever touching Supabase.
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 async function sbFetch(path, opts = {}) {
-  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-    throw new Error("Missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY environment variables");
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("Missing VITE_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY environment variables");
   }
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     ...opts,
     headers: {
-      apikey: SUPABASE_ANON_KEY,
-      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
       "Content-Type": "application/json",
       ...(opts.headers || {}),
     },
