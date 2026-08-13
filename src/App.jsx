@@ -6,6 +6,11 @@ import {
   Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone, CalendarDays, Ban,
   FileText, Download
 } from "lucide-react";
+import {
+  STATUS_META, fmtTime, fmtDateTime, isoDateOnly, isoTimeOnly,
+  reportStatusLabel, REPORT_COLUMNS_BRIEF, REPORT_COLUMNS_DETAILED,
+  reportRow, patrolmanRunSummary,
+} from "./reportUtils.js";
 
 /* ---------------------------------------------------------------
    SEED / REFERENCE DATA
@@ -71,26 +76,6 @@ function todayISO() {
 function slaWindowMinutes(date) {
   const h = date.getHours();
   return h >= 6 && h < 18 ? 90 : 60;
-}
-
-function fmtTime(iso) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit", hour12: false });
-}
-
-function fmtDateTime(iso) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-AU", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
-}
-
-function isoDateOnly(iso) {
-  const d = new Date(iso);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function isoTimeOnly(iso) {
-  const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 function minutesSince(iso, now) {
@@ -843,14 +828,6 @@ function SettingsModal({ session, accounts, persistAccounts, onClose }) {
    STATUS BADGES
 ---------------------------------------------------------------- */
 
-const STATUS_META = {
-  dispatched: { label: "Dispatched", color: "var(--info)" },
-  submitted: { label: "Awaiting review", color: "var(--warn)" },
-  reviewed: { label: "Reviewed", color: "#7C3AED" },
-  emailed: { label: "Sent to client", color: "var(--ok)" },
-  cancelled: { label: "Cancelled", color: "var(--text-dim)" },
-};
-
 function StatusBadge({ status }) {
   const m = STATUS_META[status];
   return (
@@ -1536,49 +1513,6 @@ function LogsOverview({ jobs, now }) {
       )}
     </div>
   );
-}
-
-function reportStatusLabel(status) {
-  if (status === "cancelled") return "Cancelled";
-  if (status === "emailed") return "Completed";
-  return STATUS_META[status]?.label || status;
-}
-
-const REPORT_COLUMNS_BRIEF = ["Job #", "Date", "Time", "Site", "Run", "Patrolman attended", "Operator (dispatched)", "Finalized by", "Status"];
-const REPORT_COLUMNS_DETAILED = [...REPORT_COLUMNS_BRIEF, "Onsite time", "Offsite time", "Results", "Alarm description"];
-
-function reportRow(job, reportType) {
-  const base = [
-    job.jobNumber,
-    isoDateOnly(job.dispatchTime),
-    isoTimeOnly(job.dispatchTime),
-    job.siteName,
-    job.run || "—",
-    job.assigneeName || "—",
-    job.dispatchedByName || "—",
-    job.handlingName || "—",
-    reportStatusLabel(job.status),
-  ];
-  if (reportType === "brief") return base;
-  return [
-    ...base,
-    job.onsiteTime ? fmtDateTime(job.onsiteTime) : "—",
-    job.offsiteTime ? fmtDateTime(job.offsiteTime) : "—",
-    job.reviewNotes || job.outcomeNotes || "—",
-    job.description || "—",
-  ];
-}
-
-function patrolmanRunSummary(filteredJobs) {
-  const byKey = {};
-  filteredJobs.forEach((j) => {
-    const patrolman = j.assigneeName || "Unassigned";
-    const run = j.run || "Unassigned";
-    const key = `${patrolman}||${run}`;
-    byKey[key] = byKey[key] || { patrolman, run, count: 0 };
-    byKey[key].count++;
-  });
-  return Object.values(byKey).sort((a, b) => b.count - a.count || a.patrolman.localeCompare(b.patrolman));
 }
 
 function Reports({ jobs, companyName }) {
