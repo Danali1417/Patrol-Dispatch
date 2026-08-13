@@ -1455,6 +1455,16 @@ function buildAdviceEmail(job, companyName) {
   return { html, text };
 }
 
+function photoAttachments(job) {
+  return (job.photos || []).map((p, i) => {
+    const match = /^data:([^;]+);base64,(.*)$/.exec(p.dataUrl || "");
+    if (!match) return null;
+    const [, contentType, content] = match;
+    const ext = contentType.split("/")[1] || "jpg";
+    return { filename: `${job.jobNumber}-photo-${i + 1}.${ext}`, content, contentType };
+  }).filter(Boolean);
+}
+
 function EmailModal({ job, companyName, onClose, onSent }) {
   const [clientEmail, setClientEmail] = useState(job.clientEmail || job.monitoringEmail || "");
   const [busy, setBusy] = useState(false);
@@ -1472,7 +1482,7 @@ function EmailModal({ job, companyName, onClose, onSent }) {
       const res = await fetch("/api/send-client-email", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-App-Secret": import.meta.env.VITE_APP_MAIL_SECRET || "" },
-        body: JSON.stringify({ to: clientEmail.trim(), subject, text, html }),
+        body: JSON.stringify({ to: clientEmail.trim(), subject, text, html, attachments: photoAttachments(job) }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Send failed (${res.status})`);
@@ -1498,6 +1508,12 @@ function EmailModal({ job, companyName, onClose, onSent }) {
           style={{ background: "#fff", padding: 12, borderRadius: 7, maxHeight: 260, overflow: "auto", border: "1px solid var(--border)" }}
           dangerouslySetInnerHTML={{ __html: html }}
         />
+        {job.photos?.length > 0 && (
+          <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 8 }}>
+            <Camera size={12} style={{ verticalAlign: -1, marginRight: 4 }} />
+            {job.photos.length} attendance photo{job.photos.length !== 1 ? "s" : ""} will be attached.
+          </div>
+        )}
         {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 8 }}>{error}</div>}
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
           <button onClick={() => navigator.clipboard?.writeText(text)} style={secondaryBtn}><Copy size={13} /> Copy</button>

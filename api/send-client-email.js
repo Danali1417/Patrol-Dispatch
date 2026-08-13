@@ -26,7 +26,7 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: secret ? "Unauthorized" : "VITE_APP_MAIL_SECRET is not configured on the server" });
   }
 
-  const { to, subject, text, html } = req.body || {};
+  const { to, subject, text, html, attachments } = req.body || {};
   if (!to || !/\S+@\S+\.\S+/.test(to)) {
     return res.status(400).json({ error: "A valid recipient email is required" });
   }
@@ -42,7 +42,13 @@ export default async function handler(req, res) {
       service: "gmail",
       auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
     });
-    await transporter.sendMail({ from: process.env.GMAIL_USER, to, subject, text, ...(html ? { html } : {}) });
+    const mail = { from: process.env.GMAIL_USER, to, subject, text, ...(html ? { html } : {}) };
+    if (Array.isArray(attachments) && attachments.length) {
+      mail.attachments = attachments
+        .filter((a) => a && a.content && a.filename)
+        .map((a) => ({ filename: a.filename, content: a.content, encoding: "base64", ...(a.contentType ? { contentType: a.contentType } : {}) }));
+    }
+    await transporter.sendMail(mail);
     return res.status(200).json({ sent: true });
   } catch (err) {
     console.error("send-client-email failed:", err);
