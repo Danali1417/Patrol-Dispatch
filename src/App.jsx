@@ -216,7 +216,7 @@ export default function SentrylinePrototype() {
   const showToast = useCallback((text, type = "success") => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToast({ text, type });
-    toastTimerRef.current = setTimeout(() => setToast(null), 10000); // TEMPORARY: extended for push-delivery debugging, revert to 2200
+    toastTimerRef.current = setTimeout(() => setToast(null), 2200);
   }, []);
 
   useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
@@ -1171,10 +1171,11 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       title: `New job — ${job.jobNumber}`,
       body: `${job.siteName} — tap Acknowledge to confirm receipt.`,
     }).then((result) => {
-      // TEMPORARY: always show the raw result while diagnosing live
-      // push-delivery reports of "notify-job says success but nothing
-      // arrives" — revert to only-show-on-failure once root-caused.
-      showToast(`Push debug — sent ${result.sent}/${result.total}${result.error ? ` — ${result.error}` : ""}`, result.sent > 0 ? "info" : "error");
+      if (result.total === 0) {
+        showToast("Job dispatched, but that patrolman hasn't turned on job alerts.", "error");
+      } else if (result.sent === 0) {
+        showToast("Job dispatched, but the push alert failed to deliver.", "error");
+      }
     });
     setSiteId(""); setSiteQuery(""); setDescription(""); setAssigneeId(""); setKeyInfo(""); setAlarmCode(""); setOrderNo("");
     setJobNumber(`JB-${String(jobs.length + 2).padStart(4, "0")}`);
@@ -1361,9 +1362,11 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       title: `Job reassigned to you — ${job.jobNumber}`,
       body: `${job.siteName} — tap Acknowledge to confirm receipt.`,
     }).then((result) => {
-      // TEMPORARY: always show the raw result — see matching comment
-      // in NewJobForm.dispatch().
-      showToast(`Push debug — sent ${result.sent}/${result.total}${result.error ? ` — ${result.error}` : ""}`, result.sent > 0 ? "info" : "error");
+      if (result.total === 0) {
+        showToast("Reassigned, but that patrolman hasn't turned on job alerts.", "error");
+      } else if (result.sent === 0) {
+        showToast("Reassigned, but the push alert failed to deliver.", "error");
+      }
     });
   }
 
