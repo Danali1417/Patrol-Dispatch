@@ -44,12 +44,31 @@ export default async function handler(req, res) {
         try {
           const sendResult = await webpush.sendNotification(
             sub,
-            JSON.stringify({ title: "Push debug test", body: "If you can see this, delivery works.", jobId: null, ackToken: null }),
+            JSON.stringify({ title: "Push debug test (plain)", body: "If you can see this, delivery works.", jobId: null, ackToken: null }),
             { urgency: "high", TTL: 60 }
           );
-          entry.testSend = { ok: true, statusCode: sendResult.statusCode };
+          entry.plainTestSend = { ok: true, statusCode: sendResult.statusCode };
         } catch (err) {
-          entry.testSend = { ok: false, statusCode: err.statusCode, headers: err.headers, body: err.body, message: err.message };
+          entry.plainTestSend = { ok: false, statusCode: err.statusCode, headers: err.headers, body: err.body, message: err.message };
+        }
+        // Same shape a real dispatch sends — job id, ack token, and the
+        // Acknowledge action button — to test whether that specific
+        // shape is what's actually failing to display.
+        try {
+          const sendResult2 = await webpush.sendNotification(
+            sub,
+            JSON.stringify({
+              title: "Push debug test (realistic)",
+              body: "Same shape as a real dispatch — action button included.",
+              jobId: "debug-job-id",
+              ackToken: "debug-token",
+              url: "/",
+            }),
+            { urgency: "high", TTL: 60 }
+          );
+          entry.realisticTestSend = { ok: true, statusCode: sendResult2.statusCode };
+        } catch (err) {
+          entry.realisticTestSend = { ok: false, statusCode: err.statusCode, headers: err.headers, body: err.body, message: err.message };
         }
       }
       results.push(entry);
