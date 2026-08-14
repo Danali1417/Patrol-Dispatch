@@ -17,6 +17,7 @@ import {
   resetPassword as apiResetPassword, changeOwnPassword as apiChangeOwnPassword,
   deleteAccount as apiDeleteAccount, bulkUpdateAccounts as apiBulkUpdateAccounts,
 } from "./accountsApi.js";
+import { getPushStatus, enableJobAlerts, notifyJobDispatch } from "./push.js";
 
 /* ---------------------------------------------------------------
    SEED / REFERENCE DATA
@@ -1162,6 +1163,13 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       emailSentByApp: false,
     };
     await persist([...jobs, job]);
+    notifyJobDispatch({
+      jobId: job.id,
+      loginName: assignee.loginName,
+      role: "patrolman",
+      title: `New job — ${job.jobNumber}`,
+      body: `${job.siteName} — tap Acknowledge to confirm receipt.`,
+    });
     setSiteId(""); setSiteQuery(""); setDescription(""); setAssigneeId(""); setKeyInfo(""); setAlarmCode(""); setOrderNo("");
     setJobNumber(`JB-${String(jobs.length + 2).padStart(4, "0")}`);
     onCreated(job.id);
@@ -1340,6 +1348,13 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
     if (!p) return;
     const todaysEntry = roster.find((r) => r.date === todayISO() && r.patrolmanLoginName === loginName);
     update({ assigneeId: p.loginName, assigneeName: p.displayName, run: (todaysEntry ? todaysEntry.run : p.run) || job.run });
+    notifyJobDispatch({
+      jobId: job.id,
+      loginName: p.loginName,
+      role: "patrolman",
+      title: `Job reassigned to you — ${job.jobNumber}`,
+      body: `${job.siteName} — tap Acknowledge to confirm receipt.`,
+    });
   }
 
   function confirmCancel() {
@@ -1974,6 +1989,50 @@ function Stat({ label, value, accent }) {
    PATROLMAN VIEW
 ---------------------------------------------------------------- */
 
+function JobAlertsBanner() {
+  const [status, setStatus] = useState({ supported: true, permission: "default", subscribed: false });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const showToast = useToast();
+
+  useEffect(() => { getPushStatus().then(setStatus); }, []);
+
+  async function enable() {
+    setBusy(true);
+    setError("");
+    try {
+      await enableJobAlerts();
+      setStatus(await getPushStatus());
+      showToast("Job alerts turned on for this phone.");
+    } catch (e) {
+      setError(e.message || "Couldn't turn on job alerts.");
+    }
+    setBusy(false);
+  }
+
+  if (!status.supported || status.subscribed) return null;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: "var(--panel)", border: "1px solid var(--border)", marginBottom: 16, flexWrap: "wrap" }}>
+      <Bell size={15} color="var(--accent)" style={{ flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 200 }}>
+        <div style={{ fontSize: 12.5, fontWeight: 600 }}>Get notified the moment a job is dispatched to you</div>
+        <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
+          {status.permission === "denied"
+            ? "Notifications are blocked for this site — enable them in your phone/browser settings, then reload this page."
+            : "Even with your phone locked — tap Acknowledge right from the notification."}
+        </div>
+        {error && <div style={{ fontSize: 11, color: "var(--breach)", marginTop: 4 }}>{error}</div>}
+      </div>
+      {status.permission !== "denied" && (
+        <button onClick={enable} disabled={busy} style={{ ...primaryBtn, flexShrink: 0, opacity: busy ? 0.6 : 1 }}>
+          {busy ? "Turning on…" : "Turn on job alerts"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function PatrolmanView({ session, roster, jobs, persist, now }) {
   const [selectedId, setSelectedId] = useState(null);
   const mine = jobs.filter((j) => j.assigneeId === session.id).sort((a, b) => new Date(b.dispatchTime) - new Date(a.dispatchTime));
@@ -1986,6 +2045,7 @@ function PatrolmanView({ session, roster, jobs, persist, now }) {
 
   return (
     <div style={{ padding: 20 }}>
+      <JobAlertsBanner />
       <SectionTitle icon={ShieldAlert} title={`My jobs — ${todaysRun}`} />
       {mine.length === 0 ? (
         <Empty text="No jobs dispatched to you yet. New jobs will alert this device the moment control room sends one." />

@@ -165,6 +165,40 @@ runs, or when adding a site from the New Job screen) so it's pre-filled
 every time a job at that site is emailed — otherwise just type it in on
 the day.
 
+## 6. Job-dispatch push notifications for patrolmen (optional)
+
+A patrolman can turn on push notifications from their own "My jobs"
+screen ("Turn on job alerts"). Once enabled, dispatching or reassigning
+a job to them sends a notification straight to their phone's lock
+screen — with an **Acknowledge** button on the notification itself, so
+they can confirm receipt with one tap while driving, without unlocking
+the phone or opening the app.
+
+1. In Vercel → **Settings → Environment Variables**, add:
+
+   | Name | Value |
+   |---|---|
+   | `VITE_VAPID_PUBLIC_KEY` | a VAPID public key — see below |
+   | `VAPID_PRIVATE_KEY` | the matching VAPID private key — server-only, do not prefix with `VITE_` |
+   | `VAPID_SUBJECT` | `mailto:` followed by a contact email address (required by the push standard, not shown to patrolmen) |
+
+   Generate a key pair by running this once, anywhere Node is
+   installed (it's a one-line local command, nothing gets sent
+   anywhere):
+
+   ```
+   npx web-push generate-vapid-keys
+   ```
+
+2. Redeploy so the new variables take effect.
+
+**iPhone note:** push notifications only work on iOS if the patrolman
+first taps Share → **Add to Home Screen** in Safari and opens the app
+from that home screen icon — a normal Safari tab can't receive push at
+all on iOS. Android works from a normal browser tab, no install step
+needed, though "Add to Home Screen" still gives a nicer full-screen
+experience.
+
 ## Updating it later
 
 Whenever you want to change something, edit the files in this project and
