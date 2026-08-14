@@ -879,6 +879,8 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
         {[
           { id: "board", label: "Dispatch board", icon: ShieldAlert },
           { id: "new", label: "New job", icon: Send },
+          { id: "cancelled", label: "Cancelled jobs", icon: Ban },
+          { id: "closed", label: "Closed jobs", icon: CheckCircle2 },
           { id: "roster", label: "Roster", icon: CalendarDays },
           { id: "logs", label: "Logs & analysis", icon: BarChart3 },
         ].map((t) => (
@@ -890,7 +892,9 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
 
       <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
         {tab === "board" && !selected && <Board jobs={jobs} now={now} onSelect={setSelectedId} />}
-        {tab === "board" && selected && (
+        {tab === "cancelled" && !selected && <Board jobs={jobs} now={now} onSelect={setSelectedId} lockedStatus="cancelled" />}
+        {tab === "closed" && !selected && <Board jobs={jobs} now={now} onSelect={setSelectedId} lockedStatus="emailed" />}
+        {(tab === "board" || tab === "cancelled" || tab === "closed") && selected && (
           <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} roster={roster} persist={persist} now={now} session={session} companyName={companyName} onBack={() => setSelectedId(null)} />
         )}
         {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} roster={roster} session={session} persist={persist} onCreated={(id) => { setTab("board"); setSelectedId(id); }} />}
@@ -901,24 +905,43 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
   );
 }
 
-function Board({ jobs, now, onSelect }) {
+const BOARD_GROUPS = [
+  { key: "dispatched", title: "Out with patrolmen" },
+  { key: "submitted", title: "Awaiting your review" },
+  { key: "reviewed", title: "Reviewed — ready to send" },
+  { key: "emailed", title: "Closed out" },
+  { key: "cancelled", title: "Cancelled / stood down" },
+];
+const BOARD_ACTIVE_KEYS = new Set(["dispatched", "submitted", "reviewed"]);
+const BOARD_STATUS_OPTIONS = [
+  { value: "active", label: "Active jobs" },
+  { value: "cancelled", label: "Cancelled / stood down" },
+  { value: "emailed", label: "Closed out" },
+  { value: "all", label: "All statuses" },
+];
+
+// lockedStatus pins the board to one status with no picker — used by the
+// dedicated "Cancelled jobs" / "Closed jobs" tabs. Left unset on the main
+// Dispatch board, which defaults to active jobs only and lets Control
+// Room widen the view (or search for anything by number/site/date).
+function Board({ jobs, now, onSelect, lockedStatus }) {
   const [search, setSearch] = useState("");
   const [dateFilter, setDateFilter] = useState("");
   const [timeFrom, setTimeFrom] = useState("");
   const [timeTo, setTimeTo] = useState("");
-
-  const groups = [
-    { key: "dispatched", title: "Out with patrolmen" },
-    { key: "submitted", title: "Awaiting your review" },
-    { key: "reviewed", title: "Reviewed — ready to send" },
-    { key: "emailed", title: "Closed out" },
-    { key: "cancelled", title: "Cancelled / stood down" },
-  ];
+  const [statusFilter, setStatusFilter] = useState(lockedStatus || "active");
 
   if (jobs.length === 0) return <Empty text="No jobs dispatched yet. Use “New job” to send the first alarm response." />;
 
+  const groups = statusFilter === "all"
+    ? BOARD_GROUPS
+    : statusFilter === "active"
+    ? BOARD_GROUPS.filter((g) => BOARD_ACTIVE_KEYS.has(g.key))
+    : BOARD_GROUPS.filter((g) => g.key === statusFilter);
+  const groupKeys = new Set(groups.map((g) => g.key));
+
   const q = search.trim().toLowerCase();
-  const hasFilter = q || dateFilter || timeFrom || timeTo;
+  const hasFilter = q || dateFilter || timeFrom || timeTo || (!lockedStatus && statusFilter !== "active");
   const filtered = jobs.filter((j) => {
     if (q && !j.jobNumber.toLowerCase().includes(q) && !j.siteName.toLowerCase().includes(q)) return false;
     if (dateFilter && isoDateOnly(j.dispatchTime) !== dateFilter) return false;
@@ -929,8 +952,12 @@ function Board({ jobs, now, onSelect }) {
     }
     return true;
   });
+  const visible = filtered.filter((j) => groupKeys.has(j.status));
 
-  function clearFilters() { setSearch(""); setDateFilter(""); setTimeFrom(""); setTimeTo(""); }
+  function clearFilters() {
+    setSearch(""); setDateFilter(""); setTimeFrom(""); setTimeTo("");
+    if (!lockedStatus) setStatusFilter("active");
+  }
 
   return (
     <div>
@@ -938,6 +965,13 @@ function Board({ jobs, now, onSelect }) {
         <Field label="Job number or site" style={{ marginBottom: 0, flex: "1 1 200px" }}>
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="e.g. JB-0002 or Northgate" style={{ ...selectStyle, background: "var(--panel)" }} />
         </Field>
+        {!lockedStatus && (
+          <Field label="Status" style={{ marginBottom: 0 }}>
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 180 }}>
+              {BOARD_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </Field>
+        )}
         <Field label="Date" style={{ marginBottom: 0 }}>
           <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
         </Field>
@@ -950,7 +984,13 @@ function Board({ jobs, now, onSelect }) {
         {hasFilter && <button onClick={clearFilters} style={{ ...secondaryBtn, marginBottom: 0 }}><X size={13} /> Clear filters</button>}
       </div>
 
-      {hasFilter && filtered.length === 0 && <Empty text="No jobs match these filters." />}
+      {visible.length === 0 && (
+        <Empty text={
+          hasFilter ? "No jobs match these filters."
+          : lockedStatus ? "Nothing here yet."
+          : "No active jobs right now — check Cancelled jobs or Closed jobs for past activity."
+        } />
+      )}
 
       {groups.map((g) => {
         const meta = STATUS_META[g.key];
