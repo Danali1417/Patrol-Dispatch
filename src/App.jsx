@@ -472,7 +472,7 @@ export default function SentrylinePrototype() {
     <ToastContext.Provider value={showToast}>
       <ConfirmContext.Provider value={showConfirm}>
         <Shell>
-          <TopBar session={session} onSignOut={handleSignOut} onOpenSettings={() => setShowSettings(true)} now={now} logoUrl={logoUrl} companyName={companyName} />
+          <TopBar session={session} roster={roster} onSignOut={handleSignOut} onOpenSettings={() => setShowSettings(true)} now={now} logoUrl={logoUrl} companyName={companyName} />
           {banner && <NotifBanner banner={banner} onDismiss={() => setBanner(null)} />}
           {showSettings && (
             <SettingsModal session={session} onClose={() => setShowSettings(false)} />
@@ -484,7 +484,7 @@ export default function SentrylinePrototype() {
           ) : session.role === "operator" ? (
             <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} />
           ) : (
-            <PatrolmanView session={session} jobs={jobs} persist={persistJobs} now={now} />
+            <PatrolmanView session={session} roster={roster} jobs={jobs} persist={persistJobs} now={now} />
           )}
           <ToastOverlay toast={toast} />
           <ConfirmDialog confirmState={confirmState} onClose={() => setConfirmState(null)} />
@@ -747,7 +747,11 @@ const roleCardStyle = {
    TOP BAR / NOTIF BANNER / SETTINGS
 ---------------------------------------------------------------- */
 
-function TopBar({ session, onSignOut, onOpenSettings, now, logoUrl, companyName }) {
+function TopBar({ session, roster, onSignOut, onOpenSettings, now, logoUrl, companyName }) {
+  // The session's own "run" is a snapshot of the account's default run
+  // taken at login — if today's roster puts this patrolman on a
+  // different run, show that instead so it matches what's on their jobs.
+  const todaysRun = roster?.find((r) => r.date === todayISO() && r.patrolmanLoginName === session.loginName)?.run || session.run;
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", rowGap: 10, padding: "12px 20px", borderBottom: "1px solid var(--border)", background: "var(--panel)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
@@ -761,7 +765,7 @@ function TopBar({ session, onSignOut, onOpenSettings, now, logoUrl, companyName 
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 12.5, fontWeight: 600 }}>{session.displayName} <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>({session.loginName})</span></div>
           <div style={{ fontSize: 10.5, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.5 }}>
-            {session.role === "operator" ? "Control Room" : session.role === "manager" ? "Manager" : `Patrolman · ${session.run}`}
+            {session.role === "operator" ? "Control Room" : session.role === "manager" ? "Manager" : `Patrolman · ${todaysRun}`}
           </div>
         </div>
         <button onClick={onOpenSettings} title="Change password" style={{ background: "none", border: "1px solid var(--border)", borderRadius: 6, padding: 7, cursor: "pointer", color: "var(--text-dim)" }}>
@@ -1930,10 +1934,11 @@ function Stat({ label, value, accent }) {
    PATROLMAN VIEW
 ---------------------------------------------------------------- */
 
-function PatrolmanView({ session, jobs, persist, now }) {
+function PatrolmanView({ session, roster, jobs, persist, now }) {
   const [selectedId, setSelectedId] = useState(null);
   const mine = jobs.filter((j) => j.assigneeId === session.id).sort((a, b) => new Date(b.dispatchTime) - new Date(a.dispatchTime));
   const selected = mine.find((j) => j.id === selectedId);
+  const todaysRun = roster?.find((r) => r.date === todayISO() && r.patrolmanLoginName === session.loginName)?.run || session.run;
 
   if (selected) {
     return <div style={{ padding: 20, maxWidth: 520 }}><JobDetailPatrolman job={selected} jobs={jobs} persist={persist} now={now} onBack={() => setSelectedId(null)} /></div>;
@@ -1941,7 +1946,7 @@ function PatrolmanView({ session, jobs, persist, now }) {
 
   return (
     <div style={{ padding: 20 }}>
-      <SectionTitle icon={ShieldAlert} title={`My jobs — ${session.run}`} />
+      <SectionTitle icon={ShieldAlert} title={`My jobs — ${todaysRun}`} />
       {mine.length === 0 ? (
         <Empty text="No jobs dispatched to you yet. New jobs will alert this device the moment control room sends one." />
       ) : (
