@@ -216,7 +216,7 @@ export default function SentrylinePrototype() {
   const showToast = useCallback((text, type = "success") => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToast({ text, type });
-    toastTimerRef.current = setTimeout(() => setToast(null), 2200);
+    toastTimerRef.current = setTimeout(() => setToast(null), 10000); // TEMPORARY: extended for push-delivery debugging, revert to 2200
   }, []);
 
   useEffect(() => () => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); }, []);
