@@ -1171,8 +1171,10 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       title: `New job — ${job.jobNumber}`,
       body: `${job.siteName} — tap Acknowledge to confirm receipt.`,
     }).then((result) => {
-      if (result.total === 0) showToast(`${assignee.displayName} hasn't turned on job alerts.`, "error");
-      else if (result.sent === 0) showToast(`Push alert to ${assignee.displayName} failed to deliver.`, "error");
+      // TEMPORARY: always show the raw result while diagnosing live
+      // push-delivery reports of "notify-job says success but nothing
+      // arrives" — revert to only-show-on-failure once root-caused.
+      showToast(`Push debug — sent ${result.sent}/${result.total}${result.error ? ` — ${result.error}` : ""}`, result.sent > 0 ? "info" : "error");
     });
     setSiteId(""); setSiteQuery(""); setDescription(""); setAssigneeId(""); setKeyInfo(""); setAlarmCode(""); setOrderNo("");
     setJobNumber(`JB-${String(jobs.length + 2).padStart(4, "0")}`);
@@ -1359,8 +1361,9 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       title: `Job reassigned to you — ${job.jobNumber}`,
       body: `${job.siteName} — tap Acknowledge to confirm receipt.`,
     }).then((result) => {
-      if (result.total === 0) showToast(`${p.displayName} hasn't turned on job alerts.`, "error");
-      else if (result.sent === 0) showToast(`Push alert to ${p.displayName} failed to deliver.`, "error");
+      // TEMPORARY: always show the raw result — see matching comment
+      // in NewJobForm.dispatch().
+      showToast(`Push debug — sent ${result.sent}/${result.total}${result.error ? ` — ${result.error}` : ""}`, result.sent > 0 ? "info" : "error");
     });
   }
 
