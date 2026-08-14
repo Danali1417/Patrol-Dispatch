@@ -749,12 +749,12 @@ const roleCardStyle = {
 
 function TopBar({ session, onSignOut, onOpenSettings, now, logoUrl, companyName }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 20px", borderBottom: "1px solid var(--border)", background: "var(--panel)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", rowGap: 10, padding: "12px 20px", borderBottom: "1px solid var(--border)", background: "var(--panel)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
         <Logo src={logoUrl} />
         <div style={{ fontSize: 13.5, fontWeight: 700 }}>{companyName} Alarm Response Dispatch</div>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", justifyContent: "flex-end" }}>
         <div style={{ fontFamily: "var(--mono)", fontSize: 12.5, color: "var(--text-dim)" }}>
           {new Date(now).toLocaleTimeString("en-AU", { hour12: false })}
         </div>
@@ -972,24 +972,28 @@ function JobCard({ job, now, onClick }) {
   const t = jobTiming(job, now);
   const borderColor = job.status === "dispatched" ? (t.level === "breach" ? "var(--breach)" : t.level === "warn" ? "var(--warn)" : "var(--border)") : "var(--border)";
   return (
-    <div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 14, padding: "12px 14px", borderRadius: 8, background: "var(--panel)", border: `1px solid ${borderColor}`, cursor: "pointer" }}>
-      <div style={{ fontFamily: "var(--mono)", fontSize: 11.5, color: "var(--text-dim)", width: 96 }}>
-        <div>{job.jobNumber}</div>
-        <div style={{ fontSize: 10, marginTop: 2 }}>{fmtDateTime(job.dispatchTime)}</div>
+    <div onClick={onClick} style={{ padding: "12px 14px", borderRadius: 8, background: "var(--panel)", border: `1px solid ${borderColor}`, cursor: "pointer" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+        <div style={{ fontFamily: "var(--mono)", fontSize: 11.5, color: "var(--text-dim)", width: 96, flexShrink: 0 }}>
+          <div>{job.jobNumber}</div>
+          <div style={{ fontSize: 10, marginTop: 2 }}>{fmtDateTime(job.dispatchTime)}</div>
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.siteName}</div>
+        </div>
+        <StatusBadge status={job.status} />
+        <ChevronRight size={15} color="var(--text-dim)" style={{ flexShrink: 0 }} />
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.siteName}</div>
-        <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{job.run} · {job.monitoringCo} · assigned {job.assigneeName}{job.handlingName ? ` · handled by ${job.handlingName}` : ""}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+        <span style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{job.run} · {job.monitoringCo} · assigned {job.assigneeName}{job.handlingName ? ` · handled by ${job.handlingName}` : ""}</span>
+        {job.delayReason && <span title={job.delayReason}><AlertTriangle size={14} color="var(--warn)" /></span>}
+        {job.status === "dispatched" && !job.onsiteTime && (
+          job.acknowledgedAt
+            ? <span title={`Acknowledged by ${job.assigneeName} at ${fmtTime(job.acknowledgedAt)}`}><CheckCircle2 size={14} color="var(--ok)" /></span>
+            : <span title="Not yet acknowledged by the patrolman"><Bell size={14} color="var(--warn)" /></span>
+        )}
+        <SlaChip job={job} now={now} />
       </div>
-      {job.delayReason && <span title={job.delayReason}><AlertTriangle size={14} color="var(--warn)" /></span>}
-      {job.status === "dispatched" && !job.onsiteTime && (
-        job.acknowledgedAt
-          ? <span title={`Acknowledged by ${job.assigneeName} at ${fmtTime(job.acknowledgedAt)}`}><CheckCircle2 size={14} color="var(--ok)" /></span>
-          : <span title="Not yet acknowledged by the patrolman"><Bell size={14} color="var(--warn)" /></span>
-      )}
-      <SlaChip job={job} now={now} />
-      <StatusBadge status={job.status} />
-      <ChevronRight size={15} color="var(--text-dim)" />
     </div>
   );
 }
