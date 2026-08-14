@@ -87,16 +87,21 @@ export async function disableJobAlerts() {
   } catch (e) { /* best-effort */ }
 }
 
-// Best-effort — a failed push should never block dispatching a job, so
-// callers should not await this in a way that surfaces errors to the
-// dispatch flow itself.
+// Best-effort — a failed push should never block dispatching a job.
+// Returns a result so the caller can tell Control Room what happened
+// (no subscribed device, delivery failed, or delivered) rather than
+// dispatching blind — resolves rather than throws even on failure.
 export async function notifyJobDispatch({ jobId, loginName, role, title, body }) {
   try {
-    await apiFetch("/api/notify-job", {
+    const res = await apiFetch("/api/notify-job", {
       method: "POST",
       body: JSON.stringify({ jobId, loginName, role, title, body }),
     });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, sent: 0, total: 0, error: data.error || `Failed (${res.status})` };
+    return { ok: true, sent: data.sent ?? 0, total: data.total ?? 0 };
   } catch (e) {
     console.error("notifyJobDispatch failed:", e);
+    return { ok: false, sent: 0, total: 0, error: e.message || String(e) };
   }
 }

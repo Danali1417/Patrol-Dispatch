@@ -1050,6 +1050,7 @@ function Empty({ text }) {
 /* ---------------------- New job form ---------------------- */
 
 function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, session, persist, onCreated }) {
+  const showToast = useToast();
   const [siteId, setSiteId] = useState("");
   const [siteQuery, setSiteQuery] = useState("");
   const [jobNumber, setJobNumber] = useState(() => `JB-${String(jobs.length + 1).padStart(4, "0")}`);
@@ -1169,6 +1170,9 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       role: "patrolman",
       title: `New job — ${job.jobNumber}`,
       body: `${job.siteName} — tap Acknowledge to confirm receipt.`,
+    }).then((result) => {
+      if (result.total === 0) showToast(`${assignee.displayName} hasn't turned on job alerts.`, "error");
+      else if (result.sent === 0) showToast(`Push alert to ${assignee.displayName} failed to deliver.`, "error");
     });
     setSiteId(""); setSiteQuery(""); setDescription(""); setAssigneeId(""); setKeyInfo(""); setAlarmCode(""); setOrderNo("");
     setJobNumber(`JB-${String(jobs.length + 2).padStart(4, "0")}`);
@@ -1354,6 +1358,9 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       role: "patrolman",
       title: `Job reassigned to you — ${job.jobNumber}`,
       body: `${job.siteName} — tap Acknowledge to confirm receipt.`,
+    }).then((result) => {
+      if (result.total === 0) showToast(`${p.displayName} hasn't turned on job alerts.`, "error");
+      else if (result.sent === 0) showToast(`Push alert to ${p.displayName} failed to deliver.`, "error");
     });
   }
 
