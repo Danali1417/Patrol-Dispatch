@@ -59,7 +59,11 @@ export async function sendPushToPatrolman(loginName, role, payload) {
   await Promise.all(
     list.map(async (sub) => {
       try {
-        await webpush.sendNotification(sub, JSON.stringify(payload));
+        // urgency:"high" tells the push service (FCM on Android) to
+        // wake the device out of Doze/battery-saving states for timely
+        // delivery — without it, Android can silently hold a "normal"
+        // priority push for a long time with no visible failure.
+        await webpush.sendNotification(sub, JSON.stringify(payload), { urgency: "high", TTL: 3600 });
         sent++;
         survivors.push(sub);
       } catch (err) {
