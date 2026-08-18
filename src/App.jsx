@@ -1828,8 +1828,9 @@ async function downloadJobAttendancePdf(job, companyName, now) {
     y += 16;
 
     const mapMaps = await Promise.all(locationEntries.map((e) => fetchStaticMap(e.loc.lat, e.loc.lon)));
-    const mapW = 200;
-    const mapH = 125;
+    // api/static-map.js returns a single 256x256 OSM tile — keep it square.
+    const mapW = 150;
+    const mapH = 150;
     if (y + mapH + 26 > pageH - 40) { doc.addPage(); y = 44; }
     let x = marginX;
     locationEntries.forEach((e, i) => {
