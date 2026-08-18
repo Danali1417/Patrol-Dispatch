@@ -1831,7 +1831,13 @@ async function downloadJobAttendancePdf(job, companyName, now) {
     // api/static-map.js returns a single 256x256 OSM tile — keep it square.
     const mapW = 150;
     const mapH = 150;
-    if (y + mapH + 26 > pageH - 40) { doc.addPage(); y = 44; }
+    const colGap = 30;
+    if (y + mapH + 40 > pageH - 40) { doc.addPage(); y = 44; }
+
+    doc.setFontSize(9);
+    const captions = locationEntries.map((e) => doc.splitTextToSize(`${e.label} — ${e.name || formatLocation(e.loc)}`, mapW));
+    const captionLines = Math.max(...captions.map((c) => c.length));
+
     let x = marginX;
     locationEntries.forEach((e, i) => {
       const dataUrl = mapMaps[i];
@@ -1840,10 +1846,10 @@ async function downloadJobAttendancePdf(job, companyName, now) {
       }
       doc.setFontSize(9);
       doc.setTextColor(110);
-      doc.text(`${e.label} — ${e.name || formatLocation(e.loc)}`, x, y + mapH + 12);
-      x += mapW + 20;
+      doc.text(captions[i], x, y + mapH + 12);
+      x += mapW + colGap;
     });
-    y += mapH + 30;
+    y += mapH + 16 + captionLines * 11;
   }
 
   if (job.photos?.length) {
