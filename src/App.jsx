@@ -47,6 +47,19 @@ const ROSTER_KEY = "ops:roster";
 const LOGO_KEY = "ops:logo";
 const COMPANY_NAME_KEY = "ops:companyName";
 const DEFAULT_COMPANY_NAME = "Ausgroup";
+const OUTCOME_PHRASES_KEY = "ops:outcomePhrases";
+
+// Seed list — editable afterwards from Manager > Manage logins.
+const DEFAULT_OUTCOME_PHRASES = [
+  "All secure, nothing to report.",
+  "Premises secure, false alarm — sensor fault suspected.",
+  "No sign of forced entry, premises secure on departure.",
+  "Door/window found open — secured on departure.",
+  "Alarm reset, premises secure on departure.",
+  "Client/keyholder attended and secured premises.",
+  "Unable to gain access — keyholder not contactable.",
+  "Police attended — no further action required.",
+];
 
 function todayISO() {
   const d = new Date();
@@ -246,6 +259,7 @@ export default function SentrylinePrototype() {
   const [sites, setSites] = useState([]);
   const [sitesLoaded, setSitesLoaded] = useState(false);
   const [roster, setRoster] = useState([]);
+  const [outcomePhrases, setOutcomePhrases] = useState([]);
   const [logoUrl, setLogoUrl] = useState("");
   const [companyName, setCompanyName] = useState(DEFAULT_COMPANY_NAME);
   const [now, setNow] = useState(Date.now());
@@ -379,6 +393,24 @@ export default function SentrylinePrototype() {
     })();
   }, [session]);
 
+  // Load or seed the outcome quick-phrases patrolmen pick from when
+  // submitting a job outcome (editable afterwards from Manager > Manage logins)
+  useEffect(() => {
+    if (!session) return;
+    (async () => {
+      let p = [];
+      try {
+        const res = await window.storage.get(OUTCOME_PHRASES_KEY, true);
+        if (res && res.value) p = JSON.parse(res.value);
+      } catch (e) { /* nothing stored yet */ }
+      if (p.length === 0) {
+        p = DEFAULT_OUTCOME_PHRASES;
+        try { await window.storage.set(OUTCOME_PHRASES_KEY, JSON.stringify(p), true); } catch (e) { /* ignore */ }
+      }
+      setOutcomePhrases(p);
+    })();
+  }, [session]);
+
   // Load company logo (uploaded by a Manager, shown on every login type —
   // stays public/unauthenticated so it renders before anyone signs in)
   useEffect(() => {
@@ -419,6 +451,11 @@ export default function SentrylinePrototype() {
   const persistRoster = useCallback(async (updated) => {
     setRoster(updated);
     try { await window.storage.set(ROSTER_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
+  }, []);
+
+  const persistOutcomePhrases = useCallback(async (updated) => {
+    setOutcomePhrases(updated);
+    try { await window.storage.set(OUTCOME_PHRASES_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
   }, []);
 
   const persistLogo = useCallback(async (dataUrl) => {
@@ -526,11 +563,11 @@ export default function SentrylinePrototype() {
           {!accountsLoaded || !sitesLoaded ? (
             <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
           ) : session.role === "manager" ? (
-            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} now={now} />
+            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} now={now} />
           ) : session.role === "operator" ? (
             <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} />
           ) : (
-            <PatrolmanView session={session} roster={roster} jobs={jobs} persist={persistJobs} now={now} />
+            <PatrolmanView session={session} roster={roster} jobs={jobs} persist={persistJobs} outcomePhrases={outcomePhrases} now={now} />
           )}
           <ToastOverlay toast={toast} />
           <ConfirmDialog confirmState={confirmState} onClose={() => setConfirmState(null)} />
@@ -2243,14 +2280,14 @@ function JobAlertsBanner() {
   );
 }
 
-function PatrolmanView({ session, roster, jobs, persist, now }) {
+function PatrolmanView({ session, roster, jobs, persist, outcomePhrases, now }) {
   const [selectedId, setSelectedId] = useState(null);
   const mine = jobs.filter((j) => j.assigneeId === session.id).sort((a, b) => new Date(b.dispatchTime) - new Date(a.dispatchTime));
   const selected = mine.find((j) => j.id === selectedId);
   const todaysRun = roster?.find((r) => r.date === todayISO() && r.patrolmanLoginName === session.loginName)?.run || session.run;
 
   if (selected) {
-    return <div style={{ padding: 20, maxWidth: 520 }}><JobDetailPatrolman job={selected} jobs={jobs} persist={persist} now={now} onBack={() => setSelectedId(null)} /></div>;
+    return <div style={{ padding: 20, maxWidth: 520 }}><JobDetailPatrolman job={selected} jobs={jobs} persist={persist} outcomePhrases={outcomePhrases} now={now} onBack={() => setSelectedId(null)} /></div>;
   }
 
   return (
@@ -2268,7 +2305,7 @@ function PatrolmanView({ session, roster, jobs, persist, now }) {
   );
 }
 
-function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
+function JobDetailPatrolman({ job, jobs, persist, outcomePhrases, now, onBack }) {
   const [outcome, setOutcome] = useState(job.outcomeNotes || "");
   const [docketNo, setDocketNo] = useState(job.docketNo || "");
   const [photos, setPhotos] = useState(job.photos || []);
@@ -2279,6 +2316,12 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
   const isCancelled = job.status === "cancelled";
   const submitted = job.status !== "dispatched" && !isCancelled;
   const isOnsite = !!job.onsiteTime;
+
+  // Quick-phrases just fill in a starting point — always appended (not
+  // replacing anything already typed) so the field stays fully editable.
+  function applyPhrase(text) {
+    setOutcome((prev) => (prev.trim() ? `${prev.trim()} ${text}`.toUpperCase() : text.toUpperCase()));
+  }
 
   async function handleFiles(e) {
     const files = Array.from(e.target.files || []);
@@ -2387,6 +2430,15 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
         <div style={{ marginTop: 20 }}>
           <div style={{ fontSize: 11.5, color: "var(--ok)", marginBottom: 10 }}>Onsite at {fmtTime(job.onsiteTime)}</div>
           <SectionTitle icon={CheckCircle2} title="Submit outcome" small />
+          {outcomePhrases?.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+              {outcomePhrases.map((p) => (
+                <button key={p} onClick={() => applyPhrase(p)} style={{ padding: "5px 10px", borderRadius: 14, border: "1px solid var(--border)", background: "var(--panel)", color: "var(--text-dim)", fontSize: 11.5, cursor: "pointer", textAlign: "left" }}>
+                  {p}
+                </button>
+              ))}
+            </div>
+          )}
           <textarea rows={4} value={outcome} onChange={(e) => setOutcome(e.target.value.toUpperCase())} placeholder="What did you find on attendance? e.g. Premises secure, false alarm — sensor fault suspected." style={{ ...selectStyle, resize: "vertical" }} />
           <Field label="Docket number (optional)">
             <input value={docketNo} onChange={(e) => setDocketNo(e.target.value)} placeholder="Your patrol docket / report number" style={selectStyle} />
@@ -2452,7 +2504,7 @@ function DetailRow({ icon: Icon, label, value }) {
    MANAGER VIEW — create & manage logins
 ---------------------------------------------------------------- */
 
-function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, logoUrl, persistLogo, companyName, persistCompanyName, jobs, now }) {
+function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, logoUrl, persistLogo, companyName, persistCompanyName, jobs, now }) {
   const [tab, setTab] = useState("accounts");
   return (
     <div style={{ display: "flex", minHeight: 560 }}>
@@ -2469,7 +2521,7 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
         ))}
       </div>
       <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
-        {tab === "accounts" && <AccountsManager accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />}
+        {tab === "accounts" && <AccountsManager accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} />}
         {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
         {tab === "logs" && <Logs jobs={jobs} now={now} role="manager" companyName={companyName} />}
@@ -2610,6 +2662,52 @@ function PatrolmanRosterImport({ accounts, setAccounts, zones }) {
   );
 }
 
+function OutcomePhrasesEditor({ outcomePhrases, persistOutcomePhrases }) {
+  const [newPhrase, setNewPhrase] = useState("");
+  const [error, setError] = useState("");
+  const showToast = useToast();
+  const showConfirm = useConfirm();
+
+  function addPhrase() {
+    setError("");
+    const text = newPhrase.trim();
+    if (!text) return;
+    if (outcomePhrases.some((p) => p.toLowerCase() === text.toLowerCase())) { setError("That phrase already exists."); return; }
+    persistOutcomePhrases([...outcomePhrases, text]);
+    setNewPhrase("");
+    showToast("Outcome phrase added.");
+  }
+
+  function removePhrase(text) {
+    showConfirm(`Remove this outcome phrase?\n\n"${text}"`, () => {
+      persistOutcomePhrases(outcomePhrases.filter((p) => p !== text));
+      showToast("Outcome phrase removed.");
+    });
+  }
+
+  return (
+    <div style={{ marginBottom: 30 }}>
+      <SectionTitle icon={CheckCircle2} title="Outcome quick-phrases" />
+      <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, maxWidth: 560 }}>
+        Patrolmen can tap one of these to fill in their outcome notes, then edit or add to it before submitting.
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12, maxWidth: 560 }}>
+        {outcomePhrases.map((p) => (
+          <div key={p} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)" }}>
+            <span style={{ flex: 1, fontSize: 13 }}>{p}</span>
+            <button onClick={() => removePhrase(p)} title="Delete" style={iconBtn}><Trash2 size={13} color="var(--breach)" /></button>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 8, maxWidth: 560 }}>
+        <input value={newPhrase} onChange={(e) => setNewPhrase(e.target.value)} placeholder="e.g. Alarm reset, premises secure on departure." style={selectStyle} onKeyDown={(e) => e.key === "Enter" && addPhrase()} />
+        <button onClick={addPhrase} style={secondaryBtn}>Add phrase</button>
+      </div>
+      {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 8 }}>{error}</div>}
+    </div>
+  );
+}
+
 function LogoUploader({ logoUrl, persistLogo, companyName, persistCompanyName }) {
   const fileRef = useRef(null);
   const [busy, setBusy] = useState(false);
@@ -2676,7 +2774,7 @@ function LogoUploader({ logoUrl, persistLogo, companyName, persistCompanyName })
   );
 }
 
-function AccountsManager({ accounts, setAccounts, zones, session, logoUrl, persistLogo, companyName, persistCompanyName }) {
+function AccountsManager({ accounts, setAccounts, zones, session, logoUrl, persistLogo, companyName, persistCompanyName, outcomePhrases, persistOutcomePhrases }) {
   const [role, setRole] = useState("patrolman");
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
@@ -2723,6 +2821,8 @@ function AccountsManager({ accounts, setAccounts, zones, session, logoUrl, persi
   return (
     <div>
       <LogoUploader logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />
+
+      <OutcomePhrasesEditor outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} />
 
       <SectionTitle icon={UserPlus} title="Create a login" />
       <div style={{ maxWidth: 560, marginBottom: 30 }}>
