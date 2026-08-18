@@ -18,6 +18,7 @@ import {
   deleteAccount as apiDeleteAccount, bulkUpdateAccounts as apiBulkUpdateAccounts,
 } from "./accountsApi.js";
 import { getPushStatus, enableJobAlerts, notifyJobDispatch } from "./push.js";
+import { reverseGeocode } from "./geocode.js";
 
 /* ---------------------------------------------------------------
    SEED / REFERENCE DATA
@@ -67,6 +68,16 @@ function minutesSince(iso, now) {
 
 function mapsUrl(address) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+}
+
+function mapsUrlLatLon(lat, lon) {
+  return `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
+}
+
+// Appended to job.activityLog by every Control Room action so there's a
+// full audit trail of who did what and when.
+function logEntry(session, action, detail = "") {
+  return { ts: new Date().toISOString(), actorLoginName: session.loginName, actorName: session.displayName, action, detail };
 }
 
 function jobTiming(job, now) {
@@ -122,7 +133,7 @@ function formatLocation(loc) {
   return `${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)}`;
 }
 
-function watermarkPhoto(file, label, location) {
+function watermarkPhoto(file, label, location, locationName) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -137,7 +148,7 @@ function watermarkPhoto(file, label, location) {
         canvas.height = h;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0, w, h);
-        const locationText = formatLocation(location);
+        const locationText = locationName || formatLocation(location);
         const lines = [
           `${label}  ·  ${new Date().toLocaleString("en-AU", { hour12: false })}`,
           locationText ? `📍 ${locationText}` : "📍 Location unavailable",
@@ -153,6 +164,7 @@ function watermarkPhoto(file, label, location) {
           dataUrl: canvas.toDataURL("image/jpeg", 0.72),
           ts: new Date().toISOString(),
           location: location ? { lat: location.lat, lon: location.lon } : null,
+          locationName: locationName || null,
         });
       };
       img.onerror = reject;
@@ -1162,6 +1174,11 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       emailedAt: null,
       clientEmail: "",
       emailSentByApp: false,
+      onsiteLocation: null,
+      onsiteLocationName: null,
+      offsiteLocation: null,
+      offsiteLocationName: null,
+      activityLog: [logEntry(session, "Dispatched", `Assigned to ${assignee.displayName}`)],
     };
     await persist([...jobs, job]);
     notifyJobDispatch({
@@ -1350,11 +1367,18 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
     persist(updated);
   }
 
+  // Merges a new entry into the job's activity log alongside whatever
+  // else the patch is changing, so every operator action lands in one
+  // persisted update rather than a separate round trip.
+  function logAction(action, detail, patch = {}) {
+    update({ ...patch, activityLog: [...(job.activityLog || []), logEntry(session, action, detail)] });
+  }
+
   function reassign(loginName) {
     const p = patrolmen.find((a) => a.loginName === loginName);
     if (!p) return;
     const todaysEntry = roster.find((r) => r.date === todayISO() && r.patrolmanLoginName === loginName);
-    update({ assigneeId: p.loginName, assigneeName: p.displayName, run: (todaysEntry ? todaysEntry.run : p.run) || job.run });
+    logAction("Reassigned", `To ${p.displayName}`, { assigneeId: p.loginName, assigneeName: p.displayName, run: (todaysEntry ? todaysEntry.run : p.run) || job.run });
     notifyJobDispatch({
       jobId: job.id,
       loginName: p.loginName,
@@ -1371,13 +1395,13 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   }
 
   function confirmCancel() {
-    update({ status: "cancelled", cancelReason: cancelReason.trim(), cancelledAt: new Date().toISOString() });
+    logAction("Cancelled", cancelReason.trim(), { status: "cancelled", cancelReason: cancelReason.trim(), cancelledAt: new Date().toISOString() });
     setShowCancelForm(false);
     showToast("Job cancelled.");
   }
 
   function takeJob() {
-    update({ handlingLoginName: session.loginName, handlingName: session.displayName });
+    logAction("Took handling of job", "", { handlingLoginName: session.loginName, handlingName: session.displayName });
     showToast("You're now handling this job.");
   }
 
@@ -1455,7 +1479,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
             <AlertTriangle size={14} /> Response time exceeded — log a reason and advise the client
           </div>
           <textarea rows={2} value={delayText} onChange={(e) => setDelayText(e.target.value)} placeholder="e.g. Traffic incident on route, ETA 15 min — client notified by phone at 21:42" style={{ ...selectStyle, resize: "vertical" }} />
-          <button disabled={!delayText.trim()} onClick={() => update({ delayReason: delayText.trim(), delayLoggedAt: new Date().toISOString() })} style={{ ...primaryBtn, marginTop: 8, opacity: delayText.trim() ? 1 : 0.4 }}>
+          <button disabled={!delayText.trim()} onClick={() => logAction("Delay logged", delayText.trim(), { delayReason: delayText.trim(), delayLoggedAt: new Date().toISOString() })} style={{ ...primaryBtn, marginTop: 8, opacity: delayText.trim() ? 1 : 0.4 }}>
             Save delay reason
           </button>
         </div>
@@ -1469,6 +1493,26 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
 
       {job.status === "dispatched" && !job.onsiteTime && <div style={{ marginTop: 18, color: "var(--text-dim)", fontSize: 13 }}>Waiting on patrolman to arrive onsite.</div>}
       {job.status === "dispatched" && job.onsiteTime && <div style={{ marginTop: 18, color: "var(--text-dim)", fontSize: 13 }}>Patrolman marked onsite at {fmtTime(job.onsiteTime)} — awaiting outcome submission.</div>}
+
+      {(job.onsiteLocation || job.offsiteLocation) && (
+        <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 6 }}>
+          <SectionTitle icon={MapPin} title="Patrolman location" small />
+          {job.onsiteLocation && (
+            <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+              Onsite: <a href={mapsUrlLatLon(job.onsiteLocation.lat, job.onsiteLocation.lon)} target="_blank" rel="noopener noreferrer" style={{ color: "var(--info)", textDecoration: "none" }}>
+                {job.onsiteLocationName || formatLocation(job.onsiteLocation)} ↗
+              </a>
+            </div>
+          )}
+          {job.offsiteLocation && (
+            <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
+              Offsite: <a href={mapsUrlLatLon(job.offsiteLocation.lat, job.offsiteLocation.lon)} target="_blank" rel="noopener noreferrer" style={{ color: "var(--info)", textDecoration: "none" }}>
+                {job.offsiteLocationName || formatLocation(job.offsiteLocation)} ↗
+              </a>
+            </div>
+          )}
+        </div>
+      )}
 
       {job.status !== "dispatched" && job.status !== "cancelled" && (
         <div style={{ marginTop: 18 }}>
@@ -1486,15 +1530,26 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
                 <div key={i} style={{ width: 100 }}>
                   <img src={p.dataUrl} alt="attendance evidence" style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }} />
                   <div style={{ fontSize: 9.5, color: "var(--text-dim)", marginTop: 3, lineHeight: 1.3 }}>
-                    {p.ts ? fmtDateTime(p.ts) : ""}{p.location ? ` · ${formatLocation(p.location)}` : ""}
+                    {p.ts ? fmtDateTime(p.ts) : ""}
+                    {p.location && (
+                      <>
+                        {" · "}
+                        <a href={mapsUrlLatLon(p.location.lat, p.location.lon)} target="_blank" rel="noopener noreferrer" style={{ color: "var(--info)", textDecoration: "none" }}>
+                          {p.locationName || formatLocation(p.location)}
+                        </a>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
           )}
-          <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-            {job.status === "submitted" && <button onClick={() => update({ status: "reviewed", reviewNotes: notes })} style={secondaryBtn}><CheckCircle2 size={14} /> Mark reviewed</button>}
-            {(job.status === "reviewed" || job.status === "submitted") && <button onClick={() => { update({ reviewNotes: notes }); setShowEmail(true); }} style={primaryBtn}><Mail size={14} /> Prepare client email</button>}
+          <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+            {notes !== (job.reviewNotes || job.outcomeNotes) && (
+              <button onClick={() => logAction("Results updated", notes.trim(), { reviewNotes: notes })} style={primaryBtn}><CheckCircle2 size={14} /> Save changes</button>
+            )}
+            {job.status === "submitted" && <button onClick={() => logAction("Marked reviewed", "", { status: "reviewed", reviewNotes: notes })} style={secondaryBtn}><CheckCircle2 size={14} /> Mark reviewed</button>}
+            {(job.status === "reviewed" || job.status === "submitted") && <button onClick={() => { logAction("Prepared client email", "", { reviewNotes: notes }); setShowEmail(true); }} style={primaryBtn}><Mail size={14} /> Prepare client email</button>}
             {job.status === "emailed" && (
               <span style={{ color: "var(--ok)", fontSize: 12.5, display: "flex", alignItems: "center", gap: 6 }}>
                 <CheckCircle2 size={14} /> {job.emailSentByApp ? `Emailed to client ${fmtDateTime(job.emailedAt)}` : `Marked sent ${fmtDateTime(job.emailedAt)}`}
@@ -1504,16 +1559,43 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
         </div>
       )}
 
+      <ActivityLogSection log={job.activityLog} />
+
       {showEmail && (
         <EmailModal
           job={{ ...job, reviewNotes: notes }}
           companyName={companyName}
           onClose={() => setShowEmail(false)}
           onSent={({ clientEmail, emailSentByApp }) => {
-            update({ status: "emailed", emailedAt: new Date().toISOString(), reviewNotes: notes, clientEmail, emailSentByApp });
+            logAction(emailSentByApp ? "Client email sent" : "Client email marked sent", clientEmail, {
+              status: "emailed", emailedAt: new Date().toISOString(), reviewNotes: notes, clientEmail, emailSentByApp,
+            });
             setShowEmail(false);
           }}
         />
+      )}
+    </div>
+  );
+}
+
+function ActivityLogSection({ log }) {
+  const [open, setOpen] = useState(false);
+  if (!log || log.length === 0) return null;
+  const entries = [...log].reverse();
+  return (
+    <div style={{ marginTop: 18 }}>
+      <button onClick={() => setOpen((v) => !v)} style={{ ...secondaryBtn, fontSize: 12 }}>
+        <FileText size={13} /> {open ? "Hide" : "Show"} activity log ({log.length})
+      </button>
+      {open && (
+        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8, maxHeight: 260, overflowY: "auto", padding: 12, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel)" }}>
+          {entries.map((e, i) => (
+            <div key={i} style={{ fontSize: 12, color: "var(--text-dim)" }}>
+              <span style={{ color: "var(--text)", fontWeight: 600 }}>{fmtDateTime(e.ts)}</span> — <b style={{ color: "var(--text)" }}>{e.action}</b> by {e.actorName}
+              {e.detail ? <div style={{ marginTop: 2 }}>{e.detail}</div> : null}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -1639,7 +1721,9 @@ async function downloadJobAttendancePdf(job, companyName, now) {
     ["Dispatched", fmtDateTime(job.dispatchTime)],
     ["Acknowledged", job.acknowledgedAt ? fmtDateTime(job.acknowledgedAt) : "—"],
     ["Onsite", job.onsiteTime ? fmtDateTime(job.onsiteTime) : "—"],
+    ["Onsite location", job.onsiteLocation ? (job.onsiteLocationName || formatLocation(job.onsiteLocation)) : "—"],
     ["Offsite", job.offsiteTime ? fmtDateTime(job.offsiteTime) : "—"],
+    ["Offsite location", job.offsiteLocation ? (job.offsiteLocationName || formatLocation(job.offsiteLocation)) : "—"],
     ["Response time", job.onsiteTime ? `${t.elapsed}m (SLA ${t.slaMin}m)` : "—"],
     ["Outcome / notes", job.reviewNotes || job.outcomeNotes || "—"],
   ];
@@ -1672,7 +1756,7 @@ async function downloadJobAttendancePdf(job, companyName, now) {
       doc.addImage(p.dataUrl, "JPEG", marginX, y, imgW, imgH);
       doc.setFontSize(9);
       doc.setTextColor(110);
-      const caption = `Photo ${i + 1} — ${p.ts ? fmtDateTime(p.ts) : "time unknown"}${p.location ? ` — ${formatLocation(p.location)}` : ""}`;
+      const caption = `Photo ${i + 1} — ${p.ts ? fmtDateTime(p.ts) : "time unknown"}${p.location ? ` — ${p.locationName || formatLocation(p.location)}` : ""}`;
       doc.text(caption, marginX, y + imgH + 14);
       y += imgH + 28;
     }
@@ -2076,6 +2160,7 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
   const [docketNo, setDocketNo] = useState(job.docketNo || "");
   const [photos, setPhotos] = useState(job.photos || []);
   const [busy, setBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
   const fileRef = useRef(null);
   const showToast = useToast();
   const isCancelled = job.status === "cancelled";
@@ -2086,9 +2171,10 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
     const files = Array.from(e.target.files || []);
     setBusy(true);
     const location = await getCurrentLocation();
+    const locationName = location ? await reverseGeocode(location.lat, location.lon) : null;
     const results = [];
     for (const f of files.slice(0, 4 - photos.length)) {
-      try { results.push(await watermarkPhoto(f, job.jobNumber, location)); } catch (err) { /* skip bad file */ }
+      try { results.push(await watermarkPhoto(f, job.jobNumber, location, locationName)); } catch (err) { /* skip bad file */ }
     }
     setPhotos((p) => [...p, ...results]);
     setBusy(false);
@@ -2102,12 +2188,34 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
   }
 
   async function markOnsite() {
-    const updated = jobs.map((j) => (j.id === job.id ? { ...j, acknowledgedAt: j.acknowledgedAt || new Date().toISOString(), onsiteTime: new Date().toISOString() } : j));
+    setActionBusy(true);
+    const location = await getCurrentLocation();
+    const locationName = location ? await reverseGeocode(location.lat, location.lon) : null;
+    const updated = jobs.map((j) => (j.id === job.id ? {
+      ...j,
+      acknowledgedAt: j.acknowledgedAt || new Date().toISOString(),
+      onsiteTime: new Date().toISOString(),
+      onsiteLocation: location ? { lat: location.lat, lon: location.lon } : null,
+      onsiteLocationName: locationName,
+    } : j));
     await persist(updated);
+    setActionBusy(false);
   }
 
   async function submit() {
-    const updated = jobs.map((j) => (j.id === job.id ? { ...j, status: "submitted", outcomeNotes: outcome.trim(), docketNo: docketNo.trim(), photos, offsiteTime: new Date().toISOString() } : j));
+    setActionBusy(true);
+    const location = await getCurrentLocation();
+    const locationName = location ? await reverseGeocode(location.lat, location.lon) : null;
+    const updated = jobs.map((j) => (j.id === job.id ? {
+      ...j,
+      status: "submitted",
+      outcomeNotes: outcome.trim(),
+      docketNo: docketNo.trim(),
+      photos,
+      offsiteTime: new Date().toISOString(),
+      offsiteLocation: location ? { lat: location.lat, lon: location.lon } : null,
+      offsiteLocationName: locationName,
+    } : j));
     await persist(updated);
     onBack();
   }
@@ -2156,8 +2264,8 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
           <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 12 }}>
             Mark onsite the moment you arrive — this records your response time and unlocks the outcome form.
           </div>
-          <button onClick={markOnsite} style={{ ...primaryBtn, width: "100%", justifyContent: "center" }}>
-            <MapPin size={14} /> Mark onsite
+          <button onClick={markOnsite} disabled={actionBusy} style={{ ...primaryBtn, width: "100%", justifyContent: "center", opacity: actionBusy ? 0.6 : 1 }}>
+            <MapPin size={14} /> {actionBusy ? "Getting your location…" : "Mark onsite"}
           </button>
         </div>
       )}
@@ -2185,8 +2293,8 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
             <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple hidden onChange={handleFiles} />
           </div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 6 }}>Photos are timestamped automatically on capture.</div>
-          <button disabled={!outcome.trim()} onClick={submit} style={{ ...primaryBtn, width: "100%", marginTop: 16, justifyContent: "center", opacity: outcome.trim() ? 1 : 0.4 }}>
-            <Send size={14} /> Mark offsite &amp; submit
+          <button disabled={!outcome.trim() || actionBusy} onClick={submit} style={{ ...primaryBtn, width: "100%", marginTop: 16, justifyContent: "center", opacity: outcome.trim() && !actionBusy ? 1 : 0.4 }}>
+            <Send size={14} /> {actionBusy ? "Getting your location…" : "Mark offsite & submit"}
           </button>
         </div>
       )}
