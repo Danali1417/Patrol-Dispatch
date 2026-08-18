@@ -74,6 +74,26 @@ function mapsUrlLatLon(lat, lon) {
   return `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
 }
 
+// Free, key-less embedded map snapshot (OpenStreetMap's own official
+// embed endpoint) showing a pin at the given point — used for the
+// onsite/offsite "map snap" in Control Room. The Google Maps link next
+// to it is still there for turn-by-turn / satellite view.
+function osmEmbedUrl(lat, lon, delta = 0.006) {
+  const bbox = [lon - delta, lat - delta, lon + delta, lat + delta].join("%2C");
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat}%2C${lon}`;
+}
+
+function MapSnap({ lat, lon }) {
+  return (
+    <iframe
+      title="Location map"
+      src={osmEmbedUrl(lat, lon)}
+      style={{ width: 260, height: 150, border: "1px solid var(--border)", borderRadius: 6 }}
+      loading="lazy"
+    />
+  );
+}
+
 // Appended to job.activityLog by every Control Room action so there's a
 // full audit trail of who did what and when.
 function logEntry(session, action, detail = "") {
@@ -1272,7 +1292,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       </div>
 
       <Field label="Alarm description / area(s) in alarm">
-        <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="e.g. Zone 4 motion sensor — loading dock" style={{ ...selectStyle, resize: "vertical", fontFamily: "var(--sans)" }} />
+        <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value.toUpperCase())} placeholder="e.g. Zone 4 motion sensor — loading dock" style={{ ...selectStyle, resize: "vertical", fontFamily: "var(--sans)" }} />
       </Field>
 
       <div style={{ display: "flex", gap: 12 }}>
@@ -1527,22 +1547,32 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       {job.status === "dispatched" && job.onsiteTime && <div style={{ marginTop: 18, color: "var(--text-dim)", fontSize: 13 }}>Patrolman marked onsite at {fmtTime(job.onsiteTime)} — awaiting outcome submission.</div>}
 
       {(job.onsiteLocation || job.offsiteLocation) && (
-        <div style={{ marginTop: 18, display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ marginTop: 18 }}>
           <SectionTitle icon={MapPin} title="Patrolman location" small />
-          {job.onsiteLocation && (
-            <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
-              Onsite: <a href={mapsUrlLatLon(job.onsiteLocation.lat, job.onsiteLocation.lon)} target="_blank" rel="noopener noreferrer" style={{ color: "var(--info)", textDecoration: "none" }}>
-                {job.onsiteLocationName || formatLocation(job.onsiteLocation)} ↗
-              </a>
-            </div>
-          )}
-          {job.offsiteLocation && (
-            <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>
-              Offsite: <a href={mapsUrlLatLon(job.offsiteLocation.lat, job.offsiteLocation.lon)} target="_blank" rel="noopener noreferrer" style={{ color: "var(--info)", textDecoration: "none" }}>
-                {job.offsiteLocationName || formatLocation(job.offsiteLocation)} ↗
-              </a>
-            </div>
-          )}
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 8 }}>
+            {job.onsiteLocation && (
+              <div>
+                <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Onsite</div>
+                <MapSnap lat={job.onsiteLocation.lat} lon={job.onsiteLocation.lon} />
+                <div style={{ fontSize: 12, marginTop: 4 }}>
+                  <a href={mapsUrlLatLon(job.onsiteLocation.lat, job.onsiteLocation.lon)} target="_blank" rel="noopener noreferrer" style={{ color: "var(--info)", textDecoration: "none" }}>
+                    {job.onsiteLocationName || formatLocation(job.onsiteLocation)} ↗
+                  </a>
+                </div>
+              </div>
+            )}
+            {job.offsiteLocation && (
+              <div>
+                <div style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Offsite</div>
+                <MapSnap lat={job.offsiteLocation.lat} lon={job.offsiteLocation.lon} />
+                <div style={{ fontSize: 12, marginTop: 4 }}>
+                  <a href={mapsUrlLatLon(job.offsiteLocation.lat, job.offsiteLocation.lon)} target="_blank" rel="noopener noreferrer" style={{ color: "var(--info)", textDecoration: "none" }}>
+                    {job.offsiteLocationName || formatLocation(job.offsiteLocation)} ↗
+                  </a>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -2319,7 +2349,7 @@ function JobDetailPatrolman({ job, jobs, persist, now, onBack }) {
         <div style={{ marginTop: 20 }}>
           <div style={{ fontSize: 11.5, color: "var(--ok)", marginBottom: 10 }}>Onsite at {fmtTime(job.onsiteTime)}</div>
           <SectionTitle icon={CheckCircle2} title="Submit outcome" small />
-          <textarea rows={4} value={outcome} onChange={(e) => setOutcome(e.target.value)} placeholder="What did you find on attendance? e.g. Premises secure, false alarm — sensor fault suspected." style={{ ...selectStyle, resize: "vertical" }} />
+          <textarea rows={4} value={outcome} onChange={(e) => setOutcome(e.target.value.toUpperCase())} placeholder="What did you find on attendance? e.g. Premises secure, false alarm — sensor fault suspected." style={{ ...selectStyle, resize: "vertical" }} />
           <Field label="Docket number (optional)">
             <input value={docketNo} onChange={(e) => setDocketNo(e.target.value)} placeholder="Your patrol docket / report number" style={selectStyle} />
           </Field>
