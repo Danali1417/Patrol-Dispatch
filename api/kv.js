@@ -9,9 +9,9 @@ import { getSession, requireRole } from "./_lib/auth.js";
 import { kvGet, kvSet } from "./_lib/supabase.js";
 
 const PUBLIC_READ_KEYS = new Set(["ops:logo", "ops:companyName"]);
-const MANAGER_ONLY_WRITE_KEYS = new Set(["ops:logo", "ops:companyName"]);
+const MANAGER_ONLY_WRITE_KEYS = new Set(["ops:logo", "ops:companyName", "ops:outcomePhrases"]);
 const OPERATOR_UP_WRITE_KEYS = new Set(["ops:sites", "ops:zones", "ops:roster"]);
-const KNOWN_KEYS = new Set(["ops:jobs", "ops:sites", "ops:zones", "ops:roster", "ops:logo", "ops:companyName"]);
+const KNOWN_KEYS = new Set(["ops:jobs", "ops:sites", "ops:zones", "ops:roster", "ops:logo", "ops:companyName", "ops:outcomePhrases"]);
 
 export default async function handler(req, res) {
   const key = req.method === "GET" ? req.query?.key : req.body?.key;
