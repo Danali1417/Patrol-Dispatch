@@ -18,7 +18,7 @@ import {
   deleteAccount as apiDeleteAccount, bulkUpdateAccounts as apiBulkUpdateAccounts,
 } from "./accountsApi.js";
 import { getPushStatus, enableJobAlerts, notifyJobDispatch } from "./push.js";
-import { reverseGeocode } from "./geocode.js";
+import { reverseGeocode, fetchStaticMap } from "./geocode.js";
 
 /* ---------------------------------------------------------------
    SEED / REFERENCE DATA
@@ -1813,6 +1813,37 @@ async function downloadJobAttendancePdf(job, companyName, now) {
     y += Math.max(14, lines.length * 12) + 4;
     if (y > pageH - 60) { doc.addPage(); y = 44; }
   });
+
+  const locationEntries = [
+    job.onsiteLocation ? { label: "Onsite", loc: job.onsiteLocation, name: job.onsiteLocationName } : null,
+    job.offsiteLocation ? { label: "Offsite", loc: job.offsiteLocation, name: job.offsiteLocationName } : null,
+  ].filter(Boolean);
+
+  if (locationEntries.length) {
+    y += 12;
+    if (y > pageH - 200) { doc.addPage(); y = 44; }
+    doc.setFontSize(12);
+    doc.setTextColor(20);
+    doc.text("Patrolman location", marginX, y);
+    y += 16;
+
+    const mapMaps = await Promise.all(locationEntries.map((e) => fetchStaticMap(e.loc.lat, e.loc.lon)));
+    const mapW = 200;
+    const mapH = 125;
+    if (y + mapH + 26 > pageH - 40) { doc.addPage(); y = 44; }
+    let x = marginX;
+    locationEntries.forEach((e, i) => {
+      const dataUrl = mapMaps[i];
+      if (dataUrl) {
+        try { doc.addImage(dataUrl, "PNG", x, y, mapW, mapH); } catch (err) { /* skip if the fetched image is malformed */ }
+      }
+      doc.setFontSize(9);
+      doc.setTextColor(110);
+      doc.text(`${e.label} — ${e.name || formatLocation(e.loc)}`, x, y + mapH + 12);
+      x += mapW + 20;
+    });
+    y += mapH + 30;
+  }
 
   if (job.photos?.length) {
     y += 12;

@@ -26,3 +26,28 @@ export async function reverseGeocode(lat, lon, timeoutMs = 5000) {
     clearTimeout(timer);
   }
 }
+
+// Fetches a small static map image (data URL) with a pin at {lat, lon},
+// for embedding in the attendance PDF. Best-effort — resolves null on
+// any failure/timeout so a slow/unreachable map service never blocks a
+// PDF download.
+export async function fetchStaticMap(lat, lon, timeoutMs = 8000) {
+  if (typeof lat !== "number" || typeof lon !== "number") return null;
+  const token = getToken();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`/api/static-map?lat=${lat}&lon=${lon}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: controller.signal,
+    });
+    if (res.status === 401) { reportUnauthorized(); return null; }
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.dataUrl || null;
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
