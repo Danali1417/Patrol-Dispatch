@@ -49,17 +49,31 @@ const COMPANY_NAME_KEY = "ops:companyName";
 const DEFAULT_COMPANY_NAME = "Ausgroup";
 const OUTCOME_PHRASES_KEY = "ops:outcomePhrases";
 
-// Seed list — editable afterwards from Manager > Manage logins.
+// Each phrase has a short `name` (what patrolmen see on the tappable
+// chip — easy to scan/judge at a glance) and the full `text` that's
+// actually inserted into the outcome field. Seed list is editable
+// afterwards from Manager > Standard Phrases.
 const DEFAULT_OUTCOME_PHRASES = [
-  "All secure, nothing to report.",
-  "Premises secure, false alarm — sensor fault suspected.",
-  "No sign of forced entry, premises secure on departure.",
-  "Door/window found open — secured on departure.",
-  "Alarm reset, premises secure on departure.",
-  "Client/keyholder attended and secured premises.",
-  "Unable to gain access — keyholder not contactable.",
-  "Police attended — no further action required.",
+  { id: "p1", name: "All secure", text: "All secure, nothing to report." },
+  { id: "p2", name: "False alarm — sensor fault", text: "Premises secure, false alarm — sensor fault suspected." },
+  { id: "p3", name: "No forced entry", text: "No sign of forced entry, premises secure on departure." },
+  { id: "p4", name: "Door/window open — secured", text: "Door/window found open — secured on departure." },
+  { id: "p5", name: "Alarm reset", text: "Alarm reset, premises secure on departure." },
+  { id: "p6", name: "Keyholder attended", text: "Client/keyholder attended and secured premises." },
+  { id: "p7", name: "No access — keyholder unreachable", text: "Unable to gain access — keyholder not contactable." },
+  { id: "p8", name: "Police attended", text: "Police attended — no further action required." },
 ];
+
+function makePhraseId() {
+  return `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// Loaded phrases might still be in the old plain-string format from
+// before names existed — upgrade them on the fly rather than losing them.
+function normalizePhrase(p) {
+  if (typeof p === "string") return { id: makePhraseId(), name: p.length > 40 ? `${p.slice(0, 40)}…` : p, text: p };
+  return p;
+}
 
 function todayISO() {
   const d = new Date();
@@ -394,18 +408,26 @@ export default function SentrylinePrototype() {
   }, [session]);
 
   // Load or seed the outcome quick-phrases patrolmen pick from when
-  // submitting a job outcome (editable afterwards from Manager > Manage logins)
+  // submitting a job outcome (editable afterwards from Manager > Standard Phrases)
   useEffect(() => {
     if (!session) return;
     (async () => {
       let p = [];
+      let needsResave = false;
       try {
         const res = await window.storage.get(OUTCOME_PHRASES_KEY, true);
-        if (res && res.value) p = JSON.parse(res.value);
+        if (res && res.value) {
+          const raw = JSON.parse(res.value);
+          needsResave = raw.some((x) => typeof x === "string");
+          p = raw.map(normalizePhrase);
+        }
       } catch (e) { /* nothing stored yet */ }
       if (p.length === 0) {
         p = DEFAULT_OUTCOME_PHRASES;
-        try { await window.storage.set(OUTCOME_PHRASES_KEY, JSON.stringify(p), true); } catch (e) { /* ignore */ }
+        needsResave = true;
+      }
+      if (needsResave) {
+        try { await window.storage.set(OUTCOME_PHRASES_KEY, JSON.stringify(p), true); } catch (e) { /* ignore — will retry migrating next load */ }
       }
       setOutcomePhrases(p);
     })();
@@ -946,6 +968,54 @@ function SlaChip({ job, now }) {
   );
 }
 
+// Six-step lifecycle used by JobProgressBar. Returns null for cancelled
+// jobs (they don't have a meaningful "next milestone" to show progress
+// toward — the cancelled banner shown elsewhere covers that case).
+function jobMilestones(job) {
+  if (job.status === "cancelled") return null;
+  const submitted = job.status !== "dispatched";
+  const resultDone = job.status === "reviewed" || job.status === "emailed";
+  const resultLabel = job.status === "emailed" ? "Sent" : job.status === "reviewed" ? "Closed" : "Result";
+  return [
+    { key: "dispatched", label: "Dispatched", done: true, ts: job.dispatchTime },
+    { key: "acknowledged", label: "Acknowledged", done: !!job.acknowledgedAt, ts: job.acknowledgedAt },
+    { key: "onsite", label: "Onsite", done: !!job.onsiteTime, ts: job.onsiteTime },
+    { key: "submitted", label: "Submitted", done: submitted, ts: job.offsiteTime },
+    { key: "offsite", label: "Offsite", done: !!job.offsiteTime, ts: job.offsiteTime },
+    { key: "result", label: resultLabel, done: resultDone, ts: job.status === "emailed" ? job.emailedAt : null },
+  ];
+}
+
+function JobProgressBar({ job, compact }) {
+  const milestones = jobMilestones(job);
+  if (!milestones) {
+    return compact ? null : (
+      <div style={{ fontSize: 11.5, color: "var(--breach)", fontWeight: 600 }}>Cancelled</div>
+    );
+  }
+  const dotSize = compact ? 7 : 20;
+  return (
+    <div style={{ display: "flex", alignItems: "center" }}>
+      {milestones.map((m, i) => (
+        <React.Fragment key={m.key}>
+          {i > 0 && <div style={{ width: compact ? 8 : 18, height: 2, background: m.done ? "var(--ok)" : "var(--border)", flexShrink: 0 }} />}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }} title={`${m.label}${m.ts ? ` — ${fmtDateTime(m.ts)}` : ""}`}>
+            <div style={{
+              width: dotSize, height: dotSize, borderRadius: "50%", flexShrink: 0,
+              background: m.done ? "var(--ok)" : "var(--panel)",
+              border: `1px solid ${m.done ? "var(--ok)" : "var(--border)"}`,
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              {!compact && m.done && <CheckCircle2 size={13} color="#fff" />}
+            </div>
+            {!compact && <div style={{ fontSize: 9.5, color: m.done ? "var(--text)" : "var(--text-dim)", marginTop: 4, whiteSpace: "nowrap" }}>{m.label}</div>}
+          </div>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
 /* ---------------------------------------------------------------
    OPERATOR VIEW
 ---------------------------------------------------------------- */
@@ -1120,6 +1190,9 @@ function JobCard({ job, now, onClick }) {
             : <span title="Not yet acknowledged by the patrolman"><Bell size={14} color="var(--warn)" /></span>
         )}
         <SlaChip job={job} now={now} />
+      </div>
+      <div style={{ marginTop: 8 }}>
+        <JobProgressBar job={job} compact />
       </div>
     </div>
   );
@@ -1505,6 +1578,10 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
         </button>
       </div>
       <JobHeader job={job} />
+
+      <div style={{ marginTop: 16, overflowX: "auto", paddingBottom: 4 }}>
+        <JobProgressBar job={job} />
+      </div>
 
       {job.dispatchedByName && (
         <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 12, color: "var(--text-dim)" }}>
@@ -2433,8 +2510,8 @@ function JobDetailPatrolman({ job, jobs, persist, outcomePhrases, now, onBack })
           {outcomePhrases?.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
               {outcomePhrases.map((p) => (
-                <button key={p} onClick={() => applyPhrase(p)} style={{ padding: "5px 10px", borderRadius: 14, border: "1px solid var(--border)", background: "var(--panel)", color: "var(--text-dim)", fontSize: 11.5, cursor: "pointer", textAlign: "left" }}>
-                  {p}
+                <button key={p.id} onClick={() => applyPhrase(p.text)} title={p.text} style={{ padding: "5px 10px", borderRadius: 14, border: "1px solid var(--border)", background: "var(--panel)", color: "var(--text-dim)", fontSize: 11.5, cursor: "pointer", textAlign: "left" }}>
+                  {p.name}
                 </button>
               ))}
             </div>
@@ -2665,56 +2742,87 @@ function PatrolmanRosterImport({ accounts, setAccounts, zones }) {
 }
 
 function OutcomePhrasesEditor({ outcomePhrases, persistOutcomePhrases }) {
-  const [newPhrase, setNewPhrase] = useState("");
+  const [name, setName] = useState("");
+  const [text, setText] = useState("");
   const [error, setError] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editText, setEditText] = useState("");
   const showToast = useToast();
   const showConfirm = useConfirm();
 
-  // Textarea so a whole list of phrases can be pasted at once — each
-  // non-empty line becomes its own phrase, deduped against what's already
-  // there and against duplicates within the pasted batch itself.
-  function addPhrases() {
+  function addPhrase() {
     setError("");
-    const lines = newPhrase.split("\n").map((l) => l.trim()).filter(Boolean);
-    if (!lines.length) return;
-    const existingLower = new Set(outcomePhrases.map((p) => p.toLowerCase()));
-    const toAdd = [];
-    for (const line of lines) {
-      const lower = line.toLowerCase();
-      if (existingLower.has(lower)) continue;
-      existingLower.add(lower);
-      toAdd.push(line);
-    }
-    if (!toAdd.length) { setError("Those phrase(s) already exist."); return; }
-    persistOutcomePhrases([...outcomePhrases, ...toAdd]);
-    setNewPhrase("");
-    showToast(toAdd.length === 1 ? "Outcome phrase added." : `${toAdd.length} outcome phrases added.`);
+    const phraseText = text.trim().replace(/\s*\n\s*/g, " ");
+    if (!phraseText) { setError("Enter the full phrase text."); return; }
+    const phraseName = (name.trim() || (phraseText.length > 40 ? `${phraseText.slice(0, 40)}…` : phraseText));
+    if (outcomePhrases.some((p) => p.name.toLowerCase() === phraseName.toLowerCase())) { setError("A phrase with that name already exists."); return; }
+    persistOutcomePhrases([...outcomePhrases, { id: makePhraseId(), name: phraseName, text: phraseText }]);
+    setName(""); setText("");
+    showToast("Standard phrase added.");
   }
 
-  function removePhrase(text) {
-    showConfirm(`Remove this outcome phrase?\n\n"${text}"`, () => {
-      persistOutcomePhrases(outcomePhrases.filter((p) => p !== text));
-      showToast("Outcome phrase removed.");
+  function removePhrase(p) {
+    showConfirm(`Remove this standard phrase?\n\n"${p.name}"`, () => {
+      persistOutcomePhrases(outcomePhrases.filter((x) => x.id !== p.id));
+      showToast("Standard phrase removed.");
     });
+  }
+
+  function startEdit(p) {
+    setEditingId(p.id);
+    setEditName(p.name);
+    setEditText(p.text);
+  }
+
+  function saveEdit() {
+    const newName = editName.trim();
+    const newText = editText.trim().replace(/\s*\n\s*/g, " ");
+    if (!newName || !newText) return;
+    persistOutcomePhrases(outcomePhrases.map((p) => (p.id === editingId ? { ...p, name: newName, text: newText } : p)));
+    setEditingId(null);
+    showToast("Standard phrase updated.");
   }
 
   return (
     <div style={{ marginBottom: 30 }}>
       <SectionTitle icon={CheckCircle2} title="Standard Phrases" />
       <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, maxWidth: 560 }}>
-        Patrolmen can tap one of these to fill in their outcome notes, then edit or add to it before submitting. Paste multiple phrases at once — put each one on its own line.
+        Patrolmen see the short name as a tappable chip — tapping it fills in the full phrase, which they can then edit or add to before submitting.
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12, maxWidth: 560 }}>
         {outcomePhrases.map((p) => (
-          <div key={p} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 12px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)" }}>
-            <span style={{ flex: 1, fontSize: 13 }}>{p}</span>
-            <button onClick={() => removePhrase(p)} title="Delete" style={iconBtn}><Trash2 size={13} color="var(--breach)" /></button>
+          <div key={p.id} style={{ padding: "8px 12px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)" }}>
+            {editingId === p.id ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Short name" style={{ ...selectStyle, padding: "5px 8px", fontSize: 12.5 }} autoFocus />
+                <textarea rows={2} value={editText} onChange={(e) => setEditText(e.target.value)} placeholder="Full phrase" style={{ ...selectStyle, resize: "vertical", fontSize: 12.5 }} />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={saveEdit} style={secondaryBtn}>Save</button>
+                  <button onClick={() => setEditingId(null)} style={iconBtn}><X size={13} /></button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{p.name}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 2 }}>{p.text}</div>
+                </div>
+                <button onClick={() => startEdit(p)} title="Edit" style={iconBtn}><RotateCcw size={13} /></button>
+                <button onClick={() => removePhrase(p)} title="Delete" style={iconBtn}><Trash2 size={13} color="var(--breach)" /></button>
+              </div>
+            )}
           </div>
         ))}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 560 }}>
-        <textarea rows={3} value={newPhrase} onChange={(e) => setNewPhrase(e.target.value)} placeholder="e.g. Alarm reset, premises secure on departure.&#10;One phrase per line — paste a whole list at once if you like." style={{ ...selectStyle, resize: "vertical" }} />
-        <button onClick={addPhrases} style={{ ...secondaryBtn, alignSelf: "flex-start" }}>Add phrase(s)</button>
+        <Field label="Short name (shown to patrolmen as the tappable chip)">
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Alarm reset" style={selectStyle} />
+        </Field>
+        <Field label="Full phrase (inserted into the outcome field)">
+          <textarea rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Alarm reset, premises secure on departure." style={{ ...selectStyle, resize: "vertical" }} />
+        </Field>
+        <button onClick={addPhrase} style={{ ...secondaryBtn, alignSelf: "flex-start" }}>Add phrase</button>
       </div>
       {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 8 }}>{error}</div>}
     </div>
