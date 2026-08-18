@@ -2513,6 +2513,7 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
           { id: "accounts", label: "Manage logins", icon: Users },
           { id: "sites", label: "Sites & runs", icon: MapPin },
           { id: "roster", label: "Roster", icon: CalendarDays },
+          { id: "phrases", label: "Standard Phrases", icon: FileText },
           { id: "logs", label: "Logs & analysis", icon: BarChart3 },
         ].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", marginBottom: 4, borderRadius: 7, border: "none", cursor: "pointer", textAlign: "left", fontSize: 12.5, fontWeight: 600, background: tab === t.id ? "var(--accent-dim)" : "transparent", color: tab === t.id ? "var(--accent)" : "var(--text-dim)" }}>
@@ -2521,7 +2522,8 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
         ))}
       </div>
       <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
-        {tab === "accounts" && <AccountsManager accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} />}
+        {tab === "accounts" && <AccountsManager accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />}
+        {tab === "phrases" && <OutcomePhrasesEditor outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} />}
         {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
         {tab === "logs" && <Logs jobs={jobs} now={now} role="manager" companyName={companyName} />}
@@ -2668,14 +2670,25 @@ function OutcomePhrasesEditor({ outcomePhrases, persistOutcomePhrases }) {
   const showToast = useToast();
   const showConfirm = useConfirm();
 
-  function addPhrase() {
+  // Textarea so a whole list of phrases can be pasted at once — each
+  // non-empty line becomes its own phrase, deduped against what's already
+  // there and against duplicates within the pasted batch itself.
+  function addPhrases() {
     setError("");
-    const text = newPhrase.trim();
-    if (!text) return;
-    if (outcomePhrases.some((p) => p.toLowerCase() === text.toLowerCase())) { setError("That phrase already exists."); return; }
-    persistOutcomePhrases([...outcomePhrases, text]);
+    const lines = newPhrase.split("\n").map((l) => l.trim()).filter(Boolean);
+    if (!lines.length) return;
+    const existingLower = new Set(outcomePhrases.map((p) => p.toLowerCase()));
+    const toAdd = [];
+    for (const line of lines) {
+      const lower = line.toLowerCase();
+      if (existingLower.has(lower)) continue;
+      existingLower.add(lower);
+      toAdd.push(line);
+    }
+    if (!toAdd.length) { setError("Those phrase(s) already exist."); return; }
+    persistOutcomePhrases([...outcomePhrases, ...toAdd]);
     setNewPhrase("");
-    showToast("Outcome phrase added.");
+    showToast(toAdd.length === 1 ? "Outcome phrase added." : `${toAdd.length} outcome phrases added.`);
   }
 
   function removePhrase(text) {
@@ -2687,21 +2700,21 @@ function OutcomePhrasesEditor({ outcomePhrases, persistOutcomePhrases }) {
 
   return (
     <div style={{ marginBottom: 30 }}>
-      <SectionTitle icon={CheckCircle2} title="Outcome quick-phrases" />
+      <SectionTitle icon={CheckCircle2} title="Standard Phrases" />
       <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, maxWidth: 560 }}>
-        Patrolmen can tap one of these to fill in their outcome notes, then edit or add to it before submitting.
+        Patrolmen can tap one of these to fill in their outcome notes, then edit or add to it before submitting. Paste multiple phrases at once — put each one on its own line.
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12, maxWidth: 560 }}>
         {outcomePhrases.map((p) => (
-          <div key={p} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)" }}>
+          <div key={p} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 12px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)" }}>
             <span style={{ flex: 1, fontSize: 13 }}>{p}</span>
             <button onClick={() => removePhrase(p)} title="Delete" style={iconBtn}><Trash2 size={13} color="var(--breach)" /></button>
           </div>
         ))}
       </div>
-      <div style={{ display: "flex", gap: 8, maxWidth: 560 }}>
-        <input value={newPhrase} onChange={(e) => setNewPhrase(e.target.value)} placeholder="e.g. Alarm reset, premises secure on departure." style={selectStyle} onKeyDown={(e) => e.key === "Enter" && addPhrase()} />
-        <button onClick={addPhrase} style={secondaryBtn}>Add phrase</button>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 560 }}>
+        <textarea rows={3} value={newPhrase} onChange={(e) => setNewPhrase(e.target.value)} placeholder="e.g. Alarm reset, premises secure on departure.&#10;One phrase per line — paste a whole list at once if you like." style={{ ...selectStyle, resize: "vertical" }} />
+        <button onClick={addPhrases} style={{ ...secondaryBtn, alignSelf: "flex-start" }}>Add phrase(s)</button>
       </div>
       {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 8 }}>{error}</div>}
     </div>
@@ -2774,7 +2787,7 @@ function LogoUploader({ logoUrl, persistLogo, companyName, persistCompanyName })
   );
 }
 
-function AccountsManager({ accounts, setAccounts, zones, session, logoUrl, persistLogo, companyName, persistCompanyName, outcomePhrases, persistOutcomePhrases }) {
+function AccountsManager({ accounts, setAccounts, zones, session, logoUrl, persistLogo, companyName, persistCompanyName }) {
   const [role, setRole] = useState("patrolman");
   const [loginName, setLoginName] = useState("");
   const [password, setPassword] = useState("");
@@ -2821,8 +2834,6 @@ function AccountsManager({ accounts, setAccounts, zones, session, logoUrl, persi
   return (
     <div>
       <LogoUploader logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />
-
-      <OutcomePhrasesEditor outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} />
 
       <SectionTitle icon={UserPlus} title="Create a login" />
       <div style={{ maxWidth: 560, marginBottom: 30 }}>
