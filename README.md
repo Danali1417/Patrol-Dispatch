@@ -199,6 +199,24 @@ all on iOS. Android works from a normal browser tab, no install step
 needed, though "Add to Home Screen" still gives a nicer full-screen
 experience.
 
+## 7. Location names on photos, onsite/offsite, and the activity log
+
+No setup needed — these work out of the box.
+
+- **Attendance photos** are watermarked with a resolved street address
+  (not just raw GPS coordinates) using OpenStreetMap's free Nominatim
+  reverse-geocoding service via `api/reverse-geocode.js`. If the lookup
+  fails or times out (e.g. no signal), it falls back to plain
+  coordinates so photo capture never gets blocked.
+- **Onsite / offsite locations** are captured the moment a patrolman
+  marks onsite or submits an outcome, shown in Control Room as a
+  clickable Google Maps pin with the resolved address, and included on
+  the attendance PDF.
+- **Activity log**: every Control Room action on a job — dispatch,
+  reassign, cancel, delay reason, edited/saved results, marked
+  reviewed, client email sent — is timestamped with who did it, visible
+  via "Show activity log" on the job detail screen.
+
 ## Updating it later
 
 Whenever you want to change something, edit the files in this project and
