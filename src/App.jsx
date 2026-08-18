@@ -80,6 +80,19 @@ function logEntry(session, action, detail = "") {
   return { ts: new Date().toISOString(), actorLoginName: session.loginName, actorName: session.displayName, action, detail };
 }
 
+// <input type="datetime-local"> takes/returns a naive "local time" string
+// with no timezone info — these convert to/from the ISO strings jobs
+// store, using the browser's own local timezone both ways.
+function toLocalInputValue(iso) {
+  if (!iso) return "";
+  return `${isoDateOnly(iso)}T${isoTimeOnly(iso)}`;
+}
+function fromLocalInputValue(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 function jobTiming(job, now) {
   const dispatched = new Date(job.dispatchTime);
   const slaMin = slaWindowMinutes(dispatched);
@@ -1346,9 +1359,15 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   const [showCancelForm, setShowCancelForm] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [onsiteEdit, setOnsiteEdit] = useState(toLocalInputValue(job.onsiteTime));
+  const [offsiteEdit, setOffsiteEdit] = useState(toLocalInputValue(job.offsiteTime));
   const showToast = useToast();
 
   useEffect(() => setNotes(job.reviewNotes || job.outcomeNotes), [job.id]);
+  useEffect(() => {
+    setOnsiteEdit(toLocalInputValue(job.onsiteTime));
+    setOffsiteEdit(toLocalInputValue(job.offsiteTime));
+  }, [job.id, job.onsiteTime, job.offsiteTime]);
 
   async function downloadPdf() {
     setPdfBusy(true);
@@ -1372,6 +1391,19 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   // persisted update rather than a separate round trip.
   function logAction(action, detail, patch = {}) {
     update({ ...patch, activityLog: [...(job.activityLog || []), logEntry(session, action, detail)] });
+  }
+
+  const onsiteChanged = toLocalInputValue(job.onsiteTime) !== onsiteEdit;
+  const offsiteChanged = toLocalInputValue(job.offsiteTime) !== offsiteEdit;
+
+  function saveTimes() {
+    const newOnsite = fromLocalInputValue(onsiteEdit);
+    const newOffsite = fromLocalInputValue(offsiteEdit);
+    const changes = [];
+    if (onsiteChanged) changes.push(`Onsite ${fmtDateTime(job.onsiteTime)} → ${fmtDateTime(newOnsite)}`);
+    if (offsiteChanged) changes.push(`Offsite ${fmtDateTime(job.offsiteTime)} → ${fmtDateTime(newOffsite)}`);
+    if (!changes.length) return;
+    logAction("Onsite/offsite time corrected", changes.join(" · "), { onsiteTime: newOnsite, offsiteTime: newOffsite });
   }
 
   function reassign(loginName) {
@@ -1517,8 +1549,21 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       {job.status !== "dispatched" && job.status !== "cancelled" && (
         <div style={{ marginTop: 18 }}>
           <SectionTitle icon={CheckCircle2} title="Outcome" small />
-          <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 6 }}>
-            Onsite {fmtDateTime(job.onsiteTime)} · Offsite {fmtDateTime(job.offsiteTime)} · response time {jobTiming(job, now).elapsed}m (SLA {jobTiming(job, now).slaMin}m)
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 6 }}>
+            <div>
+              <div style={{ fontSize: 10.5, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>Onsite</div>
+              <input type="datetime-local" value={onsiteEdit} onChange={(e) => setOnsiteEdit(e.target.value)} style={{ ...selectStyle, width: "auto", padding: "5px 8px", fontSize: 12 }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 10.5, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>Offsite</div>
+              <input type="datetime-local" value={offsiteEdit} onChange={(e) => setOffsiteEdit(e.target.value)} style={{ ...selectStyle, width: "auto", padding: "5px 8px", fontSize: 12 }} />
+            </div>
+            {(onsiteChanged || offsiteChanged) && (
+              <button onClick={saveTimes} style={{ ...primaryBtn, padding: "6px 12px", fontSize: 12 }}><CheckCircle2 size={13} /> Save times</button>
+            )}
+            <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+              response time {jobTiming(job, now).elapsed}m (SLA {jobTiming(job, now).slaMin}m)
+            </div>
           </div>
           <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 10 }}>
             Docket No: <b style={{ color: "var(--text)" }}>{job.docketNo || "—"}</b>
