@@ -105,3 +105,21 @@ export async function notifyJobDispatch({ jobId, loginName, role, title, body })
     return { ok: false, sent: 0, total: 0, error: e.message || String(e) };
   }
 }
+
+// Notifies the patrolman a job is being taken away from them (reassigned
+// to someone else) — same best-effort/never-throw contract as
+// notifyJobDispatch.
+export async function notifyStandDown({ jobId, loginName, patrolmanName, reassignedToName }) {
+  try {
+    const res = await apiFetch("/api/notify-standdown", {
+      method: "POST",
+      body: JSON.stringify({ jobId, loginName, patrolmanName, reassignedToName }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, sent: 0, total: 0, error: data.error || `Failed (${res.status})` };
+    return { ok: true, sent: data.sent ?? 0, total: data.total ?? 0 };
+  } catch (e) {
+    console.error("notifyStandDown failed:", e);
+    return { ok: false, sent: 0, total: 0, error: e.message || String(e) };
+  }
+}

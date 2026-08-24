@@ -199,6 +199,15 @@ all on iOS. Android works from a normal browser tab, no install step
 needed, though "Add to Home Screen" still gives a nicer full-screen
 experience.
 
+**Mid-job reassignment:** if Control Room changes the attending
+patrolman on a job that's already dispatched, the *previous* patrolman
+gets their own push (with its own Acknowledge button) telling them the
+job's been given to someone else — and an in-app "reassignment notice"
+banner as a fallback if they don't have push turned on. Either way,
+their acknowledgement is timestamped and shown to Control Room on the
+job, and recorded in the job's activity log alongside the reassignment
+itself. Uses the same VAPID config above — nothing extra to set up.
+
 ## 7. Location names on photos, onsite/offsite, and the activity log
 
 No setup needed — these work out of the box.

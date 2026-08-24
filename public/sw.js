@@ -20,19 +20,20 @@ self.addEventListener("push", (event) => {
     tag: data.jobId ? `job-${data.jobId}` : undefined,
     renotify: !!data.jobId,
     requireInteraction: true,
-    data: { jobId: data.jobId, ackToken: data.ackToken, url: data.url || "/" },
+    data: { jobId: data.jobId, ackToken: data.ackToken, kind: data.kind, url: data.url || "/" },
     actions: data.jobId && data.ackToken ? [{ action: "acknowledge", title: "✅ Acknowledge" }] : [],
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });
 
 self.addEventListener("notificationclick", (event) => {
-  const { jobId, ackToken, url } = event.notification.data || {};
+  const { jobId, ackToken, kind, url } = event.notification.data || {};
   event.notification.close();
 
   if (event.action === "acknowledge" && jobId && ackToken) {
+    const endpoint = kind === "standdown" ? "/api/quick-standdown-ack" : "/api/quick-ack";
     event.waitUntil(
-      fetch(`/api/quick-ack?jobId=${encodeURIComponent(jobId)}&token=${encodeURIComponent(ackToken)}`, {
+      fetch(`${endpoint}?jobId=${encodeURIComponent(jobId)}&token=${encodeURIComponent(ackToken)}`, {
         method: "POST",
       }).catch(() => {})
     );
