@@ -226,6 +226,30 @@ No setup needed — these work out of the box.
   reviewed, client email sent — is timestamped with who did it, visible
   via "Show activity log" on the job detail screen.
 
+## 8. Live Location for Control Room (optional, no setup needed)
+
+Control Room has a "Live Location" tab showing every patrolman who's on
+today's roster on a live map (free OpenStreetMap tiles via
+[Leaflet](https://leafletjs.com/), no API key), with a name label and an
+online/offline status list alongside it — so Control Room can see who's
+actually signed in and judge who's closest to a given site.
+
+How it works, and what is and isn't kept:
+- A patrolman's browser only reports their position while they're
+  **signed in and rostered for that day** — not outside their shift, and
+  never for managers/operators.
+- Each report **overwrites** the same record; there's no location
+  history, just "where they are right now."
+- The record is deleted the moment they sign out, and Control Room's
+  view treats anyone who hasn't reported in the last 3 minutes as
+  offline (covers a closed tab/app without a proper sign-out) — so a
+  patrolman never lingers on the map after their shift ends.
+- The current position does pass through the same database as the rest
+  of the app's live data (there's no way to relay a live position
+  between two browsers without a server in between) — but nothing about
+  it is ever logged or archived; it's overwritten and deleted, not
+  accumulated.
+
 ## Updating it later
 
 Whenever you want to change something, edit the files in this project and

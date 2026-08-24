@@ -41,3 +41,17 @@ export async function kvSet(key, value) {
     body: JSON.stringify([{ key, value, updated_at: new Date().toISOString() }]),
   });
 }
+
+// Bulk-reads every row whose key starts with `prefix`, each with its own
+// updated_at — used for live patrolman locations, where every patrolman
+// upserts their own key (ops:liveloc:<loginName>) so concurrent writes
+// from different patrolmen never race each other the way a single
+// shared JSON blob would.
+export async function kvGetPrefix(prefix) {
+  const res = await sbFetch(`kv_store?key=like.${encodeURIComponent(prefix)}*&select=key,value,updated_at`);
+  return res.json();
+}
+
+export async function kvDelete(key) {
+  await sbFetch(`kv_store?key=eq.${encodeURIComponent(key)}`, { method: "DELETE" });
+}
