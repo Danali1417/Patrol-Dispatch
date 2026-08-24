@@ -27,6 +27,31 @@ export async function reverseGeocode(lat, lon, timeoutMs = 5000) {
   }
 }
 
+// Forward geocoding: turns a street address into {lat, lon} — used to
+// place a site pin on the Live Location map. Best-effort like the
+// reverse direction — resolves null on failure so a bad/unmatchable
+// address just means no pin, not a broken map.
+export async function forwardGeocode(address, timeoutMs = 6000) {
+  if (!address || !address.trim()) return null;
+  const token = getToken();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`/api/reverse-geocode?address=${encodeURIComponent(address)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: controller.signal,
+    });
+    if (res.status === 401) { reportUnauthorized(); return null; }
+    if (!res.ok) return null;
+    const data = await res.json();
+    return typeof data.lat === "number" && typeof data.lon === "number" ? { lat: data.lat, lon: data.lon } : null;
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Fetches a small static map image (data URL) with a pin at {lat, lon},
 // for embedding in the attendance PDF. Best-effort — resolves null on
 // any failure/timeout so a slow/unreachable map service never blocks a

@@ -250,6 +250,12 @@ How it works, and what is and isn't kept:
   it is ever logged or archived; it's overwritten and deleted, not
   accumulated.
 
+The map also drops a red pin for every site currently out on a job, so
+Control Room can judge at a glance who's nearest to respond. A site's
+coordinates are geocoded from its address the first time it's needed
+(same free OpenStreetMap lookup used elsewhere) and cached on the site
+record so it's never looked up twice.
+
 ## Updating it later
 
 Whenever you want to change something, edit the files in this project and
