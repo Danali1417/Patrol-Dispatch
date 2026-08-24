@@ -1090,7 +1090,7 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
         {tab === "live" && (
           <Suspense fallback={<div style={{ padding: 20, color: "var(--text-dim)", fontSize: 13 }}>Loading map…</div>}>
-            <LiveLocationMap roster={roster} accounts={accounts} />
+            <LiveLocationMap roster={roster} accounts={accounts} jobs={jobs} sites={sites} persistSites={persistSites} />
           </Suspense>
         )}
         {tab === "logs" && <Logs jobs={jobs} now={now} role="operator" />}
