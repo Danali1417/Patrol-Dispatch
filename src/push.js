@@ -111,9 +111,9 @@ export async function notifyJobDispatch({ jobId, loginName, role, title, body })
 // notifyJobDispatch.
 export async function notifyStandDown({ jobId, loginName, patrolmanName, reassignedToName }) {
   try {
-    const res = await apiFetch("/api/notify-standdown", {
+    const res = await apiFetch("/api/notify-job", {
       method: "POST",
-      body: JSON.stringify({ jobId, loginName, patrolmanName, reassignedToName }),
+      body: JSON.stringify({ mode: "standdown", jobId, loginName, patrolmanName, reassignedToName }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return { ok: false, sent: 0, total: 0, error: data.error || `Failed (${res.status})` };
