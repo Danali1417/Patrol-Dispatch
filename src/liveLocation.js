@@ -36,8 +36,11 @@ export async function stopSharingLiveLocation(loginName) {
   } catch (e) { /* best-effort — will just go stale and drop off the map on its own */ }
 }
 
-// Returns [{ loginName, lat, lon, ts, updatedAt }], silently dropping any
-// row that fails to parse.
+// Returns [{ loginName, lat, lon, ts, stationarySince, updatedAt }],
+// silently dropping any row that fails to parse. stationarySince (set
+// server-side) is when they last arrived at their current spot — used
+// to badge anyone stationary 30+ min on the map, mirroring the push
+// alert Control Room gets for the same threshold.
 export async function fetchLiveLocations() {
   const res = await apiFetch(`/api/kv?prefix=${encodeURIComponent(LIVELOC_PREFIX)}`);
   if (!res.ok) return [];
@@ -46,7 +49,7 @@ export async function fetchLiveLocations() {
     .map((e) => {
       try {
         const v = JSON.parse(e.value);
-        return { loginName: e.loginName, lat: v.lat, lon: v.lon, ts: v.ts, updatedAt: e.updatedAt };
+        return { loginName: e.loginName, lat: v.lat, lon: v.lon, ts: v.ts, stationarySince: v.stationarySince ?? null, updatedAt: e.updatedAt };
       } catch (err) {
         return null;
       }
