@@ -1514,14 +1514,14 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
 
   function update(patch) {
     const updated = jobs.map((j) => (j.id === job.id ? { ...j, ...patch } : j));
-    persist(updated);
+    return persist(updated);
   }
 
   // Merges a new entry into the job's activity log alongside whatever
   // else the patch is changing, so every operator action lands in one
   // persisted update rather than a separate round trip.
   function logAction(action, detail, patch = {}) {
-    update({ ...patch, activityLog: [...(job.activityLog || []), logEntry(session, action, detail)] });
+    return update({ ...patch, activityLog: [...(job.activityLog || []), logEntry(session, action, detail)] });
   }
 
   const onsiteChanged = toLocalInputValue(job.onsiteTime) !== onsiteEdit;
@@ -1537,43 +1537,47 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
     logAction("Onsite/offsite time corrected", changes.join(" · "), { onsiteTime: newOnsite, offsiteTime: newOffsite });
   }
 
-  function reassign(loginName) {
+  // Sequenced deliberately, each one awaited before the next starts.
+  // notifyJobDispatch and notifyStandDown both do a server-side
+  // read-modify-write on the same ops:jobs blob (to stamp an ackToken /
+  // standDowns entry) — firing them concurrently with the reassignment
+  // persist let a stale read from one silently overwrite the others'
+  // change, sometimes reverting the reassignment entirely.
+  async function reassign(loginName) {
     const p = patrolmen.find((a) => a.loginName === loginName);
     if (!p || p.loginName === job.assigneeId) return;
     const previousLoginName = job.assigneeId;
     const previousName = job.assigneeName;
     const todaysEntry = roster.find((r) => r.date === todayISO() && r.patrolmanLoginName === loginName);
-    logAction(
+    await logAction(
       "Reassigned",
       previousName ? `From ${previousName} to ${p.displayName}` : `To ${p.displayName}`,
       { assigneeId: p.loginName, assigneeName: p.displayName, run: (todaysEntry ? todaysEntry.run : p.run) || job.run }
     );
-    notifyJobDispatch({
+    const dispatchResult = await notifyJobDispatch({
       jobId: job.id,
       loginName: p.loginName,
       role: "patrolman",
       title: `Job reassigned to you — ${job.jobNumber}`,
       body: `${job.siteName} — tap Acknowledge to confirm receipt.`,
-    }).then((result) => {
-      if (result.total === 0) {
-        showToast("Reassigned, but that patrolman hasn't turned on job alerts.", "error");
-      } else if (result.sent === 0) {
-        showToast("Reassigned, but the push alert failed to deliver.", "error");
-      }
     });
+    if (dispatchResult.total === 0) {
+      showToast("Reassigned, but that patrolman hasn't turned on job alerts.", "error");
+    } else if (dispatchResult.sent === 0) {
+      showToast("Reassigned, but the push alert failed to deliver.", "error");
+    }
     if (previousLoginName) {
-      notifyStandDown({
+      const standDownResult = await notifyStandDown({
         jobId: job.id,
         loginName: previousLoginName,
         patrolmanName: previousName,
         reassignedToName: p.displayName,
-      }).then((result) => {
-        if (result.total === 0) {
-          showToast(`${previousName} wasn't notified — they haven't turned on job alerts.`, "error");
-        } else if (result.sent === 0) {
-          showToast(`${previousName} wasn't notified — the push alert failed to deliver.`, "error");
-        }
       });
+      if (standDownResult.total === 0) {
+        showToast(`${previousName} wasn't notified — they haven't turned on job alerts.`, "error");
+      } else if (standDownResult.sent === 0) {
+        showToast(`${previousName} wasn't notified — the push alert failed to deliver.`, "error");
+      }
     }
   }
 
