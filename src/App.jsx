@@ -17,7 +17,7 @@ import {
   resetPassword as apiResetPassword, changeOwnPassword as apiChangeOwnPassword,
   deleteAccount as apiDeleteAccount, bulkUpdateAccounts as apiBulkUpdateAccounts,
 } from "./accountsApi.js";
-import { getPushStatus, enableJobAlerts, notifyJobDispatch } from "./push.js";
+import { getPushStatus, enableJobAlerts, notifyJobDispatch, notifyStandDown } from "./push.js";
 import { reverseGeocode, fetchStaticMap } from "./geocode.js";
 
 /* ---------------------------------------------------------------
@@ -1322,6 +1322,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       offsiteLocation: null,
       offsiteLocationName: null,
       activityLog: [logEntry(session, "Dispatched", `Assigned to ${assignee.displayName}`)],
+      standDowns: [],
     };
     await persist([...jobs, job]);
     notifyJobDispatch({
@@ -1538,9 +1539,15 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
 
   function reassign(loginName) {
     const p = patrolmen.find((a) => a.loginName === loginName);
-    if (!p) return;
+    if (!p || p.loginName === job.assigneeId) return;
+    const previousLoginName = job.assigneeId;
+    const previousName = job.assigneeName;
     const todaysEntry = roster.find((r) => r.date === todayISO() && r.patrolmanLoginName === loginName);
-    logAction("Reassigned", `To ${p.displayName}`, { assigneeId: p.loginName, assigneeName: p.displayName, run: (todaysEntry ? todaysEntry.run : p.run) || job.run });
+    logAction(
+      "Reassigned",
+      previousName ? `From ${previousName} to ${p.displayName}` : `To ${p.displayName}`,
+      { assigneeId: p.loginName, assigneeName: p.displayName, run: (todaysEntry ? todaysEntry.run : p.run) || job.run }
+    );
     notifyJobDispatch({
       jobId: job.id,
       loginName: p.loginName,
@@ -1554,6 +1561,20 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
         showToast("Reassigned, but the push alert failed to deliver.", "error");
       }
     });
+    if (previousLoginName) {
+      notifyStandDown({
+        jobId: job.id,
+        loginName: previousLoginName,
+        patrolmanName: previousName,
+        reassignedToName: p.displayName,
+      }).then((result) => {
+        if (result.total === 0) {
+          showToast(`${previousName} wasn't notified — they haven't turned on job alerts.`, "error");
+        } else if (result.sent === 0) {
+          showToast(`${previousName} wasn't notified — the push alert failed to deliver.`, "error");
+        }
+      });
+    }
   }
 
   function confirmCancel() {
@@ -1619,6 +1640,20 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
           </button>
         )}
       </div>
+
+      {job.standDowns?.length > 0 && (
+        <div style={{ marginTop: 8, fontSize: 12 }}>
+          {job.standDowns[job.standDowns.length - 1].acknowledgedAt ? (
+            <span style={{ color: "var(--ok)", display: "flex", alignItems: "center", gap: 6 }}>
+              <CheckCircle2 size={13} /> {job.standDowns[job.standDowns.length - 1].patrolmanName} acknowledged the reassignment at {fmtTime(job.standDowns[job.standDowns.length - 1].acknowledgedAt)}
+            </span>
+          ) : (
+            <span style={{ color: "var(--warn)", display: "flex", alignItems: "center", gap: 6 }}>
+              <Bell size={13} /> Waiting on {job.standDowns[job.standDowns.length - 1].patrolmanName} to acknowledge being taken off this job
+            </span>
+          )}
+        </div>
+      )}
 
       {showCancelForm && (
         <div style={{ marginTop: 12, padding: 14, borderRadius: 8, border: "1px solid var(--breach)", background: "#FEF2F2" }}>
@@ -2357,6 +2392,44 @@ function JobAlertsBanner() {
   );
 }
 
+function StandDownNotices({ jobs, session, persist }) {
+  const pending = [];
+  jobs.forEach((job) => {
+    (job.standDowns || []).forEach((sd) => {
+      if (sd.patrolmanLoginName === session.loginName && !sd.acknowledgedAt) pending.push({ job, sd });
+    });
+  });
+  if (!pending.length) return null;
+
+  function acknowledge(job, sd) {
+    const logEntry = {
+      ts: new Date().toISOString(),
+      actorLoginName: session.loginName,
+      actorName: session.displayName,
+      action: "Stand-down acknowledged",
+      detail: `Confirmed job given to ${sd.reassignedTo}`,
+    };
+    const updatedJobs = jobs.map((j) => (j.id === job.id
+      ? { ...j, standDowns: j.standDowns.map((x) => (x.id === sd.id ? { ...x, acknowledgedAt: new Date().toISOString() } : x)), activityLog: [...(j.activityLog || []), logEntry] }
+      : j));
+    persist(updatedJobs);
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+      {pending.map(({ job, sd }) => (
+        <div key={sd.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: "#FFFBEB", border: "1px solid var(--warn)55", flexWrap: "wrap" }}>
+          <Bell size={15} color="var(--warn)" style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 200, fontSize: 12.5 }}>
+            <b>{job.jobNumber} — {job.siteName}</b> has been given to {sd.reassignedTo}.
+          </div>
+          <button onClick={() => acknowledge(job, sd)} style={primaryBtn}><CheckCircle2 size={14} /> Acknowledge</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PatrolmanView({ session, roster, jobs, persist, outcomePhrases, now }) {
   const [selectedId, setSelectedId] = useState(null);
   const mine = jobs.filter((j) => j.assigneeId === session.id).sort((a, b) => new Date(b.dispatchTime) - new Date(a.dispatchTime));
@@ -2369,6 +2442,7 @@ function PatrolmanView({ session, roster, jobs, persist, outcomePhrases, now }) 
 
   return (
     <div style={{ padding: 20 }}>
+      <StandDownNotices jobs={jobs} session={session} persist={persist} />
       <JobAlertsBanner />
       <SectionTitle icon={ShieldAlert} title={`My jobs — ${todaysRun}`} />
       {mine.length === 0 ? (
