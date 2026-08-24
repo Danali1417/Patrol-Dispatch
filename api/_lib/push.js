@@ -77,3 +77,41 @@ export async function sendPushToPatrolman(loginName, role, payload) {
   }
   return { sent, total: list.length };
 }
+
+// Broadcasts to every subscribed device across every login of a given
+// role — used for alerts (e.g. "patrolman stationary 30+ min") aimed at
+// whoever's on duty in Control Room, rather than one specific login.
+export async function sendPushToRole(role, payload) {
+  configureWebPush();
+  const subs = await loadSubs();
+  const prefix = `${role}:`;
+  let sent = 0;
+  let total = 0;
+  let changed = false;
+
+  await Promise.all(
+    Object.keys(subs).filter((k) => k.startsWith(prefix)).map(async (key) => {
+      const list = subs[key] || [];
+      total += list.length;
+      const survivors = [];
+      await Promise.all(
+        list.map(async (sub) => {
+          try {
+            await webpush.sendNotification(sub, JSON.stringify(payload), { urgency: "high", TTL: 3600 });
+            sent++;
+            survivors.push(sub);
+          } catch (err) {
+            if (err.statusCode !== 404 && err.statusCode !== 410) survivors.push(sub);
+          }
+        })
+      );
+      if (survivors.length !== list.length) {
+        subs[key] = survivors;
+        changed = true;
+      }
+    })
+  );
+
+  if (changed) await saveSubs(subs);
+  return { sent, total };
+}

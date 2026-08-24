@@ -16,6 +16,7 @@
 
 import { getSession, requireRole, requireSession } from "./_lib/auth.js";
 import { kvGet, kvSet, kvGetPrefix, kvDelete } from "./_lib/supabase.js";
+import { sendPushToRole } from "./_lib/push.js";
 
 const PUBLIC_READ_KEYS = new Set(["ops:logo", "ops:companyName"]);
 const MANAGER_ONLY_WRITE_KEYS = new Set(["ops:logo", "ops:companyName", "ops:outcomePhrases"]);
@@ -23,6 +24,67 @@ const OPERATOR_UP_WRITE_KEYS = new Set(["ops:sites", "ops:zones", "ops:roster"])
 const KNOWN_KEYS = new Set(["ops:jobs", "ops:sites", "ops:zones", "ops:roster", "ops:logo", "ops:companyName", "ops:outcomePhrases"]);
 
 const LIVELOC_PREFIX = "ops:liveloc:";
+const STATIONARY_RADIUS_M = 50; // GPS jitter tolerance — "hasn't left this spot"
+const STATIONARY_ALERT_MS = 30 * 60 * 1000;
+
+function haversineMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// Tracks how long a patrolman has stayed within STATIONARY_RADIUS_M of an
+// anchor point, carried forward on the same live-location record (still
+// just current state, never a growing history) — resets the anchor the
+// moment they move away from it. Pushes Control Room once when the 30-min
+// mark is first crossed, then again every 30 min while still stationary.
+async function applyStationaryTracking(key, incoming) {
+  let prev = null;
+  try {
+    const prevRaw = await kvGet(key);
+    prev = prevRaw ? JSON.parse(prevRaw) : null;
+  } catch (e) { /* treat as no prior state */ }
+
+  let stationaryLat = incoming.lat;
+  let stationaryLon = incoming.lon;
+  let stationarySince = incoming.ts;
+  let lastAlertedAt = null;
+
+  if (prev && typeof prev.stationaryLat === "number") {
+    const dist = haversineMeters(prev.stationaryLat, prev.stationaryLon, incoming.lat, incoming.lon);
+    if (dist <= STATIONARY_RADIUS_M) {
+      stationaryLat = prev.stationaryLat;
+      stationaryLon = prev.stationaryLon;
+      stationarySince = prev.stationarySince;
+      lastAlertedAt = prev.lastAlertedAt || null;
+    }
+  }
+
+  const stationaryMs = incoming.ts - stationarySince;
+  let shouldAlert = false;
+  if (stationaryMs >= STATIONARY_ALERT_MS && (!lastAlertedAt || incoming.ts - lastAlertedAt >= STATIONARY_ALERT_MS)) {
+    shouldAlert = true;
+    lastAlertedAt = incoming.ts;
+  }
+
+  const enriched = { lat: incoming.lat, lon: incoming.lon, ts: incoming.ts, stationaryLat, stationaryLon, stationarySince, lastAlertedAt };
+  await kvSet(key, JSON.stringify(enriched));
+
+  if (shouldAlert) {
+    const patrolmanLoginName = key.slice(LIVELOC_PREFIX.length);
+    const minutes = Math.round(stationaryMs / 60000);
+    sendPushToRole("operator", {
+      title: "Patrolman stationary",
+      body: `${patrolmanLoginName} hasn't moved in about ${minutes} min.`,
+      url: "/",
+    }).catch(() => { /* best-effort — in-app map badge covers this too */ });
+  }
+
+  return enriched;
+}
 
 export default async function handler(req, res) {
   // Control Room / Manager bulk-reading every patrolman's live location.
@@ -53,6 +115,12 @@ export default async function handler(req, res) {
       if (req.method === "POST") {
         const { value } = req.body || {};
         if (value === undefined) return res.status(400).json({ error: "value is required" });
+        let incoming;
+        try { incoming = JSON.parse(value); } catch (e) { incoming = null; }
+        if (incoming && typeof incoming.lat === "number" && typeof incoming.lon === "number" && typeof incoming.ts === "number") {
+          const enriched = await applyStationaryTracking(key, incoming);
+          return res.status(200).json({ key, value: JSON.stringify(enriched) });
+        }
         await kvSet(key, value);
         return res.status(200).json({ key, value });
       }

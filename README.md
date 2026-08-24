@@ -256,6 +256,21 @@ coordinates are geocoded from its address the first time it's needed
 (same free OpenStreetMap lookup used elsewhere) and cached on the site
 record so it's never looked up twice.
 
+**Stationary alerts.** If a patrolman stays within about 50 metres of
+the same spot for 30 minutes or more (a welfare-check nudge, not a
+punctuality check — 50m absorbs normal GPS drift so someone genuinely
+standing still doesn't get flagged for wandering a few metres), their
+marker turns red on the map, their sidebar entry shows "⚠️ Stationary
+N min", and Control Room gets a push notification — repeated every 30
+minutes for as long as they remain in the same spot. It clears itself
+the moment they move on. Push notifications are opt-in per device (a
+"Turn on stationary alerts" banner at the top of the Live Location tab,
+same mechanism as the job-dispatch alerts in section 6) but the red
+marker and sidebar badge work for everyone viewing the map regardless.
+Like the rest of Live Location, nothing here is stored as history —
+it's just the current position plus "since when," overwritten in
+place.
+
 ## Updating it later
 
 Whenever you want to change something, edit the files in this project and

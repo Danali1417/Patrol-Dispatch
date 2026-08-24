@@ -9,6 +9,7 @@ function todayISO() {
 }
 
 const STALE_MS = 3 * 60 * 1000; // no update in 3 min — treat as no longer sharing
+const STATIONARY_ALERT_MS = 30 * 60 * 1000; // matches api/kv.js — badge as soon as Control Room would've been pushed
 const POLL_MS = 15 * 1000;
 const AUSTRALIA_CENTER = [-25.2744, 133.7751];
 
@@ -19,10 +20,12 @@ function timeAgo(ts) {
   return `${mins} min ago`;
 }
 
-function markerIcon(L, initials) {
+function markerIcon(L, initials, stationary) {
+  const bg = stationary ? "#DC2626" : "#F5A623";
+  const fg = stationary ? "#fff" : "#1a1a1a";
   return L.divIcon({
     className: "",
-    html: `<div style="width:32px;height:32px;border-radius:50%;background:#F5A623;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;font:700 11px sans-serif;color:#1a1a1a;">${initials}</div>`,
+    html: `<div style="width:32px;height:32px;border-radius:50%;background:${bg};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;font:700 11px sans-serif;color:${fg};">${initials}</div>`,
     iconSize: [32, 32],
     iconAnchor: [16, 16],
   });
@@ -149,12 +152,17 @@ export default function LiveLocationMap({ roster, accounts, jobs, sites, persist
       fresh.forEach((loc) => {
         const p = patrolmen.find((a) => a.loginName === loc.loginName);
         const name = p?.displayName || loc.loginName;
+        const stationary = typeof loc.stationarySince === "number" && Date.now() - loc.stationarySince >= STATIONARY_ALERT_MS;
+        const tooltipText = stationary ? `⚠️ ${name} — stationary ${Math.floor((Date.now() - loc.stationarySince) / 60000)} min` : name;
         if (markersRef.current[loc.loginName]) {
-          markersRef.current[loc.loginName].setLatLng([loc.lat, loc.lon]);
+          markersRef.current[loc.loginName]
+            .setLatLng([loc.lat, loc.lon])
+            .setIcon(markerIcon(L, initialsOf(name), stationary))
+            .setTooltipContent(tooltipText);
         } else {
-          markersRef.current[loc.loginName] = L.marker([loc.lat, loc.lon], { icon: markerIcon(L, initialsOf(name)) })
+          markersRef.current[loc.loginName] = L.marker([loc.lat, loc.lon], { icon: markerIcon(L, initialsOf(name), stationary) })
             .addTo(map)
-            .bindTooltip(name, { permanent: true, direction: "top", offset: [0, -14], className: "" });
+            .bindTooltip(tooltipText, { permanent: true, direction: "top", offset: [0, -14], className: "" });
         }
       });
 
@@ -207,12 +215,17 @@ export default function LiveLocationMap({ roster, accounts, jobs, sites, persist
           {rosteredToday.map((p) => {
             const online = onlineLogins.has(p.loginName);
             const loc = fresh.find((l) => l.loginName === p.loginName);
+            const stationary = online && typeof loc.stationarySince === "number" && Date.now() - loc.stationarySince >= STATIONARY_ALERT_MS;
             return (
-              <div key={p.loginName} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)" }}>
-                <div style={{ width: 8, height: 8, borderRadius: "50%", background: online ? "var(--ok)" : "var(--border)", flexShrink: 0 }} />
+              <div key={p.loginName} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 7, background: "var(--panel)", border: `1px solid ${stationary ? "var(--breach)" : "var(--border)"}` }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: stationary ? "var(--breach)" : online ? "var(--ok)" : "var(--border)", flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 600 }}>{p.displayName}</div>
-                  <div style={{ fontSize: 10.5, color: "var(--text-dim)" }}>{online ? `Online · ${timeAgo(loc.ts)}` : "Not signed on"}</div>
+                  <div style={{ fontSize: 10.5, color: stationary ? "var(--breach)" : "var(--text-dim)" }}>
+                    {stationary
+                      ? `⚠️ Stationary ${Math.floor((Date.now() - loc.stationarySince) / 60000)} min`
+                      : online ? `Online · ${timeAgo(loc.ts)}` : "Not signed on"}
+                  </div>
                 </div>
               </div>
             );

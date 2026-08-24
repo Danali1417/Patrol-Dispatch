@@ -1089,9 +1089,17 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
         {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} roster={roster} session={session} persist={persist} onCreated={(id) => { setTab("board"); setSelectedId(id); }} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
         {tab === "live" && (
-          <Suspense fallback={<div style={{ padding: 20, color: "var(--text-dim)", fontSize: 13 }}>Loading map…</div>}>
-            <LiveLocationMap roster={roster} accounts={accounts} jobs={jobs} sites={sites} persistSites={persistSites} />
-          </Suspense>
+          <div>
+            <JobAlertsBanner
+              title="Get notified if a patrolman stays in one spot for 30+ minutes"
+              subtitle="A welfare check nudge — works even with this tab in the background."
+              buttonLabel="Turn on stationary alerts"
+              toastText="Stationary alerts turned on for this device."
+            />
+            <Suspense fallback={<div style={{ padding: 20, color: "var(--text-dim)", fontSize: 13 }}>Loading map…</div>}>
+              <LiveLocationMap roster={roster} accounts={accounts} jobs={jobs} sites={sites} persistSites={persistSites} />
+            </Suspense>
+          </div>
         )}
         {tab === "logs" && <Logs jobs={jobs} now={now} role="operator" />}
       </div>
@@ -2393,7 +2401,12 @@ function Stat({ label, value, accent }) {
    PATROLMAN VIEW
 ---------------------------------------------------------------- */
 
-function JobAlertsBanner() {
+function JobAlertsBanner({
+  title = "Get notified the moment a job is dispatched to you",
+  subtitle = "Even with your phone locked — tap Acknowledge right from the notification.",
+  buttonLabel = "Turn on job alerts",
+  toastText = "Job alerts turned on for this phone.",
+}) {
   const [status, setStatus] = useState({ supported: true, permission: "default", subscribed: false });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -2407,9 +2420,9 @@ function JobAlertsBanner() {
     try {
       await enableJobAlerts();
       setStatus(await getPushStatus());
-      showToast("Job alerts turned on for this phone.");
+      showToast(toastText);
     } catch (e) {
-      setError(e.message || "Couldn't turn on job alerts.");
+      setError(e.message || "Couldn't turn on alerts.");
     }
     setBusy(false);
   }
@@ -2420,17 +2433,17 @@ function JobAlertsBanner() {
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: "var(--panel)", border: "1px solid var(--border)", marginBottom: 16, flexWrap: "wrap" }}>
       <Bell size={15} color="var(--accent)" style={{ flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 200 }}>
-        <div style={{ fontSize: 12.5, fontWeight: 600 }}>Get notified the moment a job is dispatched to you</div>
+        <div style={{ fontSize: 12.5, fontWeight: 600 }}>{title}</div>
         <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
           {status.permission === "denied"
             ? "Notifications are blocked for this site — enable them in your phone/browser settings, then reload this page."
-            : "Even with your phone locked — tap Acknowledge right from the notification."}
+            : subtitle}
         </div>
         {error && <div style={{ fontSize: 11, color: "var(--breach)", marginTop: 4 }}>{error}</div>}
       </div>
       {status.permission !== "denied" && (
         <button onClick={enable} disabled={busy} style={{ ...primaryBtn, flexShrink: 0, opacity: busy ? 0.6 : 1 }}>
-          {busy ? "Turning on…" : "Turn on job alerts"}
+          {busy ? "Turning on…" : buttonLabel}
         </button>
       )}
     </div>
