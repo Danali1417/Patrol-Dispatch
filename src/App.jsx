@@ -20,6 +20,7 @@ import {
 import { getPushStatus, enableJobAlerts, notifyJobDispatch, notifyStandDown } from "./push.js";
 import { reverseGeocode, fetchStaticMap } from "./geocode.js";
 import { reportLiveLocation, stopSharingLiveLocation } from "./liveLocation.js";
+import { fetchJobPhotos, persistJobPhotos, deleteJobPhotos } from "./jobPhotos.js";
 
 const LiveLocationMap = lazy(() => import("./LiveLocationMap.jsx"));
 
@@ -492,7 +493,12 @@ export default function SentrylinePrototype() {
   const persistJobs = useCallback(async (updated) => {
     setJobs(updated);
     prevJobsRef.current = updated;
-    try { await window.storage.set(JOBS_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
+    // Photos never belong in this blob — every signed-in device polls it
+    // every 4 seconds, and photos are stored separately (jobPhotos.js) for
+    // exactly that reason. Stripped here too as a backstop in case a future
+    // call site ever passes one through by accident.
+    const slim = updated.map(({ photos, ...rest }) => rest);
+    try { await window.storage.set(JOBS_KEY, JSON.stringify(slim), true); } catch (e) { console.error(e); }
   }, []);
 
   const persistZones = useCallback(async (updated) => {
@@ -1541,6 +1547,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   const [pdfBusy, setPdfBusy] = useState(false);
   const [onsiteEdit, setOnsiteEdit] = useState(toLocalInputValue(job.onsiteTime));
   const [offsiteEdit, setOffsiteEdit] = useState(toLocalInputValue(job.offsiteTime));
+  const [photos, setPhotos] = useState([]);
   const showToast = useToast();
 
   useEffect(() => setNotes(job.reviewNotes || job.outcomeNotes), [job.id]);
@@ -1549,10 +1556,18 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
     setOffsiteEdit(toLocalInputValue(job.offsiteTime));
   }, [job.id, job.onsiteTime, job.offsiteTime]);
 
+  // Fetched on demand, not part of the polled `jobs` prop — see jobPhotos.js.
+  useEffect(() => {
+    setPhotos([]);
+    if (job.photoCount > 0) fetchJobPhotos(job.id).then(setPhotos);
+  }, [job.id, job.photoCount]);
+
+  const jobWithPhotos = { ...job, photos };
+
   async function downloadPdf() {
     setPdfBusy(true);
     try {
-      await downloadJobAttendancePdf(job, companyName, now);
+      await downloadJobAttendancePdf(jobWithPhotos, companyName, now);
     } catch (e) {
       showToast("Couldn't generate the PDF — try again.", "error");
     }
@@ -1801,9 +1816,9 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
             Docket No: <b style={{ color: "var(--text)" }}>{job.docketNo || "—"}</b>
           </div>
           <textarea rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} style={{ ...selectStyle, resize: "vertical" }} />
-          {job.photos?.length > 0 && (
+          {photos.length > 0 && (
             <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
-              {job.photos.map((p, i) => (
+              {photos.map((p, i) => (
                 <div key={i} style={{ width: 100 }}>
                   <img src={p.dataUrl} alt="attendance evidence" style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }} />
                   <div style={{ fontSize: 9.5, color: "var(--text-dim)", marginTop: 3, lineHeight: 1.3 }}>
@@ -1840,7 +1855,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
 
       {showEmail && (
         <EmailModal
-          job={{ ...job, reviewNotes: notes }}
+          job={{ ...jobWithPhotos, reviewNotes: notes }}
           companyName={companyName}
           onClose={() => setShowEmail(false)}
           onSent={({ clientEmail, emailSentByApp }) => {
@@ -2523,7 +2538,7 @@ function PatrolmanView({ session, roster, jobs, persist, outcomePhrases, now }) 
 function JobDetailPatrolman({ job, jobs, persist, outcomePhrases, now, onBack }) {
   const [outcome, setOutcome] = useState(job.outcomeNotes || "");
   const [docketNo, setDocketNo] = useState(job.docketNo || "");
-  const [photos, setPhotos] = useState(job.photos || []);
+  const [photos, setPhotos] = useState([]);
   const [busy, setBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const fileRef = useRef(null);
@@ -2531,6 +2546,12 @@ function JobDetailPatrolman({ job, jobs, persist, outcomePhrases, now, onBack })
   const isCancelled = job.status === "cancelled";
   const submitted = job.status !== "dispatched" && !isCancelled;
   const isOnsite = !!job.onsiteTime;
+
+  // Already-submitted jobs have their photos in their own key, not on
+  // `job` — see jobPhotos.js. A job still being worked has none to fetch yet.
+  useEffect(() => {
+    if (job.photoCount > 0) fetchJobPhotos(job.id).then(setPhotos);
+  }, [job.id, job.photoCount]);
 
   // Quick-phrases just fill in a starting point — always appended (not
   // replacing anything already typed) so the field stays fully editable.
@@ -2577,12 +2598,17 @@ function JobDetailPatrolman({ job, jobs, persist, outcomePhrases, now, onBack })
     setActionBusy(true);
     const location = await getCurrentLocation();
     const locationName = location ? await reverseGeocode(location.lat, location.lon) : null;
+    // Photos are saved to their own key first (see jobPhotos.js) — the job
+    // record itself only carries the count, so the board's poll never has
+    // to move photo bytes. Sequenced so a job is never marked submitted
+    // with a photoCount pointing at photos that failed to save.
+    if (photos.length > 0) await persistJobPhotos(job.id, photos);
     const updated = jobs.map((j) => (j.id === job.id ? {
       ...j,
       status: "submitted",
       outcomeNotes: outcome.trim(),
       docketNo: docketNo.trim(),
-      photos,
+      photoCount: photos.length,
       offsiteTime: new Date().toISOString(),
       offsiteLocation: location ? { lat: location.lat, lon: location.lon } : null,
       offsiteLocationName: locationName,
@@ -2729,6 +2755,7 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
     showConfirm(
       `Delete all ${jobs.length} job${jobs.length === 1 ? "" : "s"}? This clears the dispatch board and job history for every login — Control Room and patrolmen start from scratch. This can't be undone.`,
       async () => {
+        await Promise.all(jobs.map((j) => deleteJobPhotos(j.id)));
         await persistJobs([]);
         showToast("All jobs cleared — starting fresh.");
       }
