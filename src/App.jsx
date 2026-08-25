@@ -1144,7 +1144,8 @@ const BOARD_STATUS_OPTIONS = [
 // Room widen the view (or search for anything by number/site/date).
 function Board({ jobs, now, onSelect, lockedStatus }) {
   const [search, setSearch] = useState("");
-  const [dateFilter, setDateFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [timeFrom, setTimeFrom] = useState("");
   const [timeTo, setTimeTo] = useState("");
   const [statusFilter, setStatusFilter] = useState(lockedStatus || "active");
@@ -1158,10 +1159,14 @@ function Board({ jobs, now, onSelect, lockedStatus }) {
   const groupKeys = new Set(groups.map((g) => g.key));
 
   const q = search.trim().toLowerCase();
-  const hasFilter = q || dateFilter || timeFrom || timeTo || (!lockedStatus && statusFilter !== "active");
+  const hasFilter = q || dateFrom || dateTo || timeFrom || timeTo || (!lockedStatus && statusFilter !== "active");
   const filtered = jobs.filter((j) => {
     if (q && !j.jobNumber.toLowerCase().includes(q) && !j.siteName.toLowerCase().includes(q)) return false;
-    if (dateFilter && isoDateOnly(j.dispatchTime) !== dateFilter) return false;
+    if (dateFrom || dateTo) {
+      const d = isoDateOnly(j.dispatchTime);
+      if (dateFrom && d < dateFrom) return false;
+      if (dateTo && d > dateTo) return false;
+    }
     if (timeFrom || timeTo) {
       const t = isoTimeOnly(j.dispatchTime);
       if (timeFrom && t < timeFrom) return false;
@@ -1185,7 +1190,7 @@ function Board({ jobs, now, onSelect, lockedStatus }) {
   }, [q]);
 
   function clearFilters() {
-    setSearch(""); setDateFilter(""); setTimeFrom(""); setTimeTo("");
+    setSearch(""); setDateFrom(""); setDateTo(""); setTimeFrom(""); setTimeTo("");
     if (!lockedStatus) setStatusFilter("active");
   }
 
@@ -1204,8 +1209,11 @@ function Board({ jobs, now, onSelect, lockedStatus }) {
             </select>
           </Field>
         )}
-        <Field label="Date" style={{ marginBottom: 0 }}>
-          <input type="date" value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
+        <Field label="Date from" style={{ marginBottom: 0 }}>
+          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
+        </Field>
+        <Field label="Date to" style={{ marginBottom: 0 }}>
+          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
         </Field>
         <Field label="From time" style={{ marginBottom: 0 }}>
           <input type="time" value={timeFrom} onChange={(e) => setTimeFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
