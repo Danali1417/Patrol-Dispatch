@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useContext, createContext, Suspense, lazy } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback, useContext, createContext, Suspense, lazy } from "react";
 import {
   Bell, Camera, CheckCircle2, AlertTriangle, Clock, LogOut, Mail,
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
@@ -21,6 +21,7 @@ import { getPushStatus, enableJobAlerts, notifyJobDispatch, notifyStandDown } fr
 import { reverseGeocode, fetchStaticMap } from "./geocode.js";
 import { reportLiveLocation, stopSharingLiveLocation } from "./liveLocation.js";
 import { fetchJobPhotos, persistJobPhotos, deleteJobPhotos } from "./jobPhotos.js";
+import { fetchArchivedJobs, deleteArchivedJob } from "./jobArchive.js";
 
 const LiveLocationMap = lazy(() => import("./LiveLocationMap.jsx"));
 
@@ -2167,7 +2168,15 @@ function Logs({ jobs, now, role, companyName }) {
   const [subTab, setSubTab] = useState("overview");
   const showReports = role === "manager";
 
-  if (!showReports) return <LogsOverview jobs={jobs} now={now} />;
+  // Jobs closed/cancelled 48h+ ago live off the live board (see
+  // jobArchive.js) so the board's own poll stays small — Logs & analysis
+  // is where full history still shows up, fetched once here rather than
+  // ever being part of that poll.
+  const [archived, setArchived] = useState([]);
+  useEffect(() => { fetchArchivedJobs().then(setArchived); }, []);
+  const allJobs = useMemo(() => [...jobs, ...archived], [jobs, archived]);
+
+  if (!showReports) return <LogsOverview jobs={allJobs} now={now} />;
 
   return (
     <div>
@@ -2188,8 +2197,8 @@ function Logs({ jobs, now, role, companyName }) {
           </button>
         ))}
       </div>
-      {subTab === "overview" && <LogsOverview jobs={jobs} now={now} />}
-      {subTab === "reports" && <Reports jobs={jobs} companyName={companyName} />}
+      {subTab === "overview" && <LogsOverview jobs={allJobs} now={now} />}
+      {subTab === "reports" && <Reports jobs={allJobs} companyName={companyName} />}
     </div>
   );
 }
@@ -2751,11 +2760,15 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
   const showToast = useToast();
   const isDan = session.loginName.trim().toLowerCase() === "dan";
 
-  function handleResetJobs() {
+  async function handleResetJobs() {
+    const archived = await fetchArchivedJobs();
+    const total = jobs.length + archived.length;
     showConfirm(
-      `Delete all ${jobs.length} job${jobs.length === 1 ? "" : "s"}? This clears the dispatch board and job history for every login — Control Room and patrolmen start from scratch. This can't be undone.`,
+      `Delete all ${total} job${total === 1 ? "" : "s"} (including ${archived.length} archived)? This clears the dispatch board and job history for every login — Control Room and patrolmen start from scratch. This can't be undone.`,
       async () => {
-        await Promise.all(jobs.map((j) => deleteJobPhotos(j.id)));
+        const allIds = [...jobs, ...archived].map((j) => j.id);
+        await Promise.all(allIds.map((id) => deleteJobPhotos(id)));
+        await Promise.all(archived.map((j) => deleteArchivedJob(j.id)));
         await persistJobs([]);
         showToast("All jobs cleared — starting fresh.");
       }

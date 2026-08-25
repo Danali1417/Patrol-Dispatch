@@ -99,11 +99,20 @@ https://your-app.vercel.app/api/migrate-passwords?secret=YOUR_MIGRATE_SECRET
 It's safe to run more than once — it only hashes accounts that still have
 a plain-text password and leaves already-hashed ones untouched.
 
-## 4. Daily email report (optional)
+## 4. Daily email report (optional) — and the job board's daily cleanup
 
 Every morning, a scheduled job can email a Brief and Detailed report PDF
 (covering the previous 06:00–06:00 shift day) to whoever you choose,
 sent from a Gmail account.
+
+This same daily job also does something unrelated to email: it sweeps
+jobs closed 48+ hours ago off the live board (see section 9). That
+sweep runs every time this endpoint fires, whether or not you set up
+email at all — but it still needs `CRON_SECRET` below configured, since
+that's what lets Vercel's daily trigger call this endpoint in the first
+place. **If you skip this section entirely, set `CRON_SECRET` anyway**
+so the board keeps itself tidy — the email variables (`GMAIL_USER`
+etc.) can stay unset.
 
 1. In the Gmail account you want to send from: turn on **2-Step
    Verification**, then create an **App Password** at
@@ -289,13 +298,34 @@ small photo count. Jobs saved before this change are migrated
 automatically and transparently the first time the board is loaded
 after deploying it — nothing to run by hand.
 
-This keeps the board's poll small indefinitely for the volume of jobs
-a deployment like this runs day to day. If you're ever running an
-extremely high volume for years without ever using "Reset test data"
-(section on the Manager's Reset button) to start a fresh season, the
-board's own metadata (statuses, activity logs, notes — everything
-except photos) would eventually be worth archiving too, but that's a
-much slower-growing number than photos ever were.
+This keeps the board's poll small for photos specifically — see
+section 10 for how the job records themselves are kept small too.
+
+## 10. Old jobs are archived off the board automatically
+
+Even without photos, a job's own record (site details, description,
+activity log, results) adds up — at even moderate daily volume, the
+board's poll would eventually risk that same 4.5MB platform ceiling
+from section 9, just on a slower timescale (months, not days).
+
+The same daily job described in section 4 sweeps jobs that have been
+**closed out (emailed) or cancelled for 48+ hours** off the live board
+and into their own archived record — plenty of buffer for Control Room
+to amend a result or re-send a client email before it moves. This
+means:
+- The **"Closed jobs"** and **"Cancelled jobs"** tabs only show what's
+  still on the live board — recent history, not everything ever. Jobs
+  still being worked (dispatched, submitted, reviewed) are never
+  archived regardless of age.
+- **Logs & analysis** is unaffected — it pulls the archive back in
+  automatically alongside the live board, so date-range reports, CSVs,
+  and the shift-log overview still cover full history either way.
+- The Manager's **"Reset test data"** button clears archived jobs too,
+  not just what's currently on the board.
+
+This needs `CRON_SECRET` configured (section 4) — without it, Vercel's
+daily trigger can't reach the endpoint that runs the sweep, and the
+board will grow unchecked. The email report itself is still optional.
 
 ## Updating it later
 
