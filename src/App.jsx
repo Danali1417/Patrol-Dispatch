@@ -620,7 +620,7 @@ export default function SentrylinePrototype() {
           {!accountsLoaded || !sitesLoaded ? (
             <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
           ) : session.role === "manager" ? (
-            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} now={now} />
+            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
           ) : session.role === "operator" ? (
             <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} />
           ) : (
@@ -2719,11 +2719,25 @@ function DetailRow({ icon: Icon, label, value }) {
    MANAGER VIEW — create & manage logins
 ---------------------------------------------------------------- */
 
-function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, logoUrl, persistLogo, companyName, persistCompanyName, jobs, now }) {
+function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
   const [tab, setTab] = useState("accounts");
+  const showConfirm = useConfirm();
+  const showToast = useToast();
+  const isDan = session.loginName.trim().toLowerCase() === "dan";
+
+  function handleResetJobs() {
+    showConfirm(
+      `Delete all ${jobs.length} job${jobs.length === 1 ? "" : "s"}? This clears the dispatch board and job history for every login — Control Room and patrolmen start from scratch. This can't be undone.`,
+      async () => {
+        await persistJobs([]);
+        showToast("All jobs cleared — starting fresh.");
+      }
+    );
+  }
+
   return (
     <div style={{ display: "flex", minHeight: 560 }}>
-      <div style={{ width: 168, borderRight: "1px solid var(--border)", background: "var(--panel)", padding: "16px 10px" }}>
+      <div style={{ width: 168, borderRight: "1px solid var(--border)", background: "var(--panel)", padding: "16px 10px", display: "flex", flexDirection: "column" }}>
         {[
           { id: "accounts", label: "Manage logins", icon: Users },
           { id: "sites", label: "Sites & runs", icon: MapPin },
@@ -2735,6 +2749,11 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
             <t.icon size={15} /> {t.label}
           </button>
         ))}
+        {isDan && (
+          <button onClick={handleResetJobs} title="Delete every job so the app starts fresh — visible only to this login" style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", marginTop: "auto", borderRadius: 7, border: "1px solid var(--breach)", cursor: "pointer", textAlign: "left", fontSize: 12.5, fontWeight: 600, background: "transparent", color: "var(--breach)" }}>
+            <Trash2 size={15} /> Reset test data
+          </button>
+        )}
       </div>
       <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
         {tab === "accounts" && <AccountsManager accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />}
