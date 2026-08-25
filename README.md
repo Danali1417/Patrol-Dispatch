@@ -8,7 +8,14 @@ pages (Supabase, GitHub, Vercel).
 
 ## 1. Set up the database (Supabase)
 
-You've likely already done this — skip to step 2 if so.
+You've likely already done this — skip to step 2 if so. If your table
+already exists but predates the `search` column above, run this once
+instead (safe, additive, doesn't touch any existing data):
+
+```sql
+alter table kv_store add column if not exists search jsonb;
+create index if not exists kv_store_search_idx on kv_store using gin (search);
+```
 
 1. At [supabase.com](https://supabase.com), create a new project (any name,
    region closest to your team, e.g. `Asia-Pacific (Southeast)`).
@@ -18,11 +25,21 @@ You've likely already done this — skip to step 2 if so.
    create table if not exists kv_store (
      key text primary key,
      value text not null,
+     search jsonb,
      updated_at timestamptz default now()
    );
 
+   create index if not exists kv_store_search_idx on kv_store using gin (search);
+
    alter table kv_store enable row level security;
    ```
+
+   `search` holds a small, indexed snapshot of a few fields (job number,
+   site name, date) for archived jobs only — everything else in this
+   table leaves it empty. It's what lets Control Room find and open an
+   old job by number, and lets Reports pull in a chosen date range,
+   without ever having to fetch the entire job archive at once (see
+   section 11).
 
    Row-level security is turned on with **no policies at all** — deliberately.
    The app never talks to Supabase from the browser; every request goes
@@ -321,15 +338,35 @@ means:
   on any board still finds an archived job and opens it, photos
   included — shown read-only with an "Archived" label, since edits
   there have nowhere live to save back to.
-- **Logs & analysis** is unaffected — it pulls the archive back in
-  automatically alongside the live board, so date-range reports, CSVs,
-  and the shift-log overview still cover full history either way.
 - The Manager's **"Reset test data"** button clears archived jobs too,
   not just what's currently on the board.
 
 This needs `CRON_SECRET` configured (section 4) — without it, Vercel's
 daily trigger can't reach the endpoint that runs the sweep, and the
 board will grow unchecked. The email report itself is still optional.
+
+## 11. How archived jobs are searched and reported on
+
+**Logs & analysis** covers the live board plus the **last 30 days** of
+archived history automatically — that's a fixed, small window, not
+"everything ever," and the page says so.
+
+**Reports** covers just the live board until you set a "Date from" —
+once you do, it pulls in matching archived jobs for that range too (to
+today, or to a "Date to" you also set). No date filter at all means no
+archive lookup, by design.
+
+**Board's search box** reaches into the whole archive regardless of
+age — that one's a real, indexed lookup by job number or site name
+(via the `search` column from section 1), not a date-bounded window,
+so it always finds a specific old job however far back it is.
+
+None of these ever ask the database for "the whole archive" in one go
+— every one of them is scoped, by date range or by search term, no
+matter how many years of jobs pile up. That's the difference between
+this and the original problem in section 9/10: it's not just that
+old jobs move out of the way, it's that nothing ever has to read all
+of them back at once again either.
 
 ## Updating it later
 

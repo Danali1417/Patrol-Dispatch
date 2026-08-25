@@ -40,9 +40,3 @@ export async function persistJobPhotos(jobId, photos) {
     body: JSON.stringify({ key: `${JOB_PHOTOS_PREFIX}${jobId}`, value: JSON.stringify(photos) }),
   });
 }
-
-export async function deleteJobPhotos(jobId) {
-  try {
-    await apiFetch(`/api/kv?key=${encodeURIComponent(`${JOB_PHOTOS_PREFIX}${jobId}`)}`, { method: "DELETE" });
-  } catch (e) { /* best-effort — an orphaned key just sits unused, nothing reads it once the job is gone */ }
-}

@@ -15,7 +15,7 @@
 // Manager can bulk-read all of them via ?prefix=ops:liveloc:.
 
 import { getSession, requireRole, requireSession } from "./_lib/auth.js";
-import { kvGet, kvSet, kvGetPrefix, kvDelete } from "./_lib/supabase.js";
+import { kvGet, kvSet, kvGetPrefix, kvQueryPrefix, kvDelete, kvDeletePrefix } from "./_lib/supabase.js";
 import { sendPushToRole } from "./_lib/push.js";
 import { JOB_ARCHIVE_PREFIX } from "./_lib/jobArchive.js";
 
@@ -133,40 +133,50 @@ export default async function handler(req, res) {
     }
   }
 
-  // Control Room / Manager bulk-reading everything the daily archive
-  // sweep (api/_lib/jobArchive.js) has moved off the live board — used to
-  // fold older jobs back into Logs & analysis without keeping them in the
-  // 4-second board poll.
-  if (req.method === "GET" && req.query?.prefix === JOB_ARCHIVE_PREFIX) {
+  // Control Room / Manager searching or date-scoping what the daily
+  // archive sweep (api/_lib/jobArchive.js) has moved off the live board.
+  // Always filtered server-side (by term and/or date range) via the
+  // `search` jsonb column, capped, never "give me the whole archive" —
+  // that's what made ops:jobs itself grow unbounded before it was split
+  // out, and this is the same fix applied one layer over.
+  if (req.method === "GET" && req.query?.archiveQuery === "1") {
     const session = requireRole(req, res, ["manager", "operator"]);
     if (!session) return;
+    const { term, from, to } = req.query;
     try {
-      const rows = await kvGetPrefix(JOB_ARCHIVE_PREFIX);
+      const rows = await kvQueryPrefix(JOB_ARCHIVE_PREFIX, {
+        term: term || undefined,
+        searchFields: ["jobNumber", "siteName"],
+        dateField: "dispatchDate",
+        dateFrom: from || undefined,
+        dateTo: to || undefined,
+      });
       return res.status(200).json({ entries: rows.map((r) => ({ value: r.value, updatedAt: r.updated_at })) });
     } catch (err) {
-      console.error("kv GET (jobarchive prefix) failed:", err);
+      console.error("kv GET (jobarchive query) failed:", err);
+      return res.status(500).json({ error: String(err?.message || err) });
+    }
+  }
+
+  // Manager-only: "Reset test data" wiping the whole archive / all photo
+  // records in one statement each, rather than ever having to enumerate
+  // every row first — a plain DELETE-by-prefix stays cheap and safe
+  // regardless of how large either has grown.
+  if (req.method === "DELETE" && (req.query?.resetArchive === "1" || req.query?.resetPhotos === "1")) {
+    const session = requireRole(req, res, ["manager"]);
+    if (!session) return;
+    try {
+      if (req.query.resetArchive === "1") await kvDeletePrefix(JOB_ARCHIVE_PREFIX);
+      if (req.query.resetPhotos === "1") await kvDeletePrefix(JOB_PHOTOS_PREFIX);
+      return res.status(200).json({ ok: true });
+    } catch (err) {
+      console.error("kv reset (bulk delete) failed:", err);
       return res.status(500).json({ error: String(err?.message || err) });
     }
   }
 
   // GET and DELETE pass the key as a query param; POST passes it in the body.
   const key = req.query?.key || req.body?.key;
-
-  // A single archived job — only DELETE is used (by "Reset test data"
-  // clearing out what it swept up); nothing currently needs to read one
-  // back individually since Logs & analysis always pulls the whole set.
-  if (typeof key === "string" && key.startsWith(JOB_ARCHIVE_PREFIX)) {
-    const session = requireRole(req, res, ["manager", "operator"]);
-    if (!session) return;
-    if (req.method !== "DELETE") return res.status(405).json({ error: "Method not allowed" });
-    try {
-      await kvDelete(key);
-      return res.status(200).json({ ok: true });
-    } catch (err) {
-      console.error("kv jobarchive delete failed:", err);
-      return res.status(500).json({ error: String(err?.message || err) });
-    }
-  }
 
   // Per-job attendance photos — same read/write trust as ops:jobs itself
   // (any signed-in role), just split into its own key per job so a photo
