@@ -271,6 +271,32 @@ Like the rest of Live Location, nothing here is stored as history —
 it's just the current position plus "since when," overwritten in
 place.
 
+## 9. Attendance photos are stored apart from the job board
+
+Every signed-in device (Control Room, each patrolman) polls the job
+board every 4 seconds so everyone sees new dispatches and status
+changes immediately. Attendance photos used to be embedded right in
+each job's record, which meant that poll was re-downloading every
+photo of every job, on every device, all day — expensive on mobile
+data and battery, and it meant the whole board risked hitting a
+platform size limit (Vercel caps a single request/response at 4.5MB)
+once enough jobs with photos had piled up.
+
+Photos now live in their own record per job, fetched only when that
+job's own detail view, PDF, or client email actually needs them — never
+as part of the board poll. A job's record on the board just carries a
+small photo count. Jobs saved before this change are migrated
+automatically and transparently the first time the board is loaded
+after deploying it — nothing to run by hand.
+
+This keeps the board's poll small indefinitely for the volume of jobs
+a deployment like this runs day to day. If you're ever running an
+extremely high volume for years without ever using "Reset test data"
+(section on the Manager's Reset button) to start a fresh season, the
+board's own metadata (statuses, activity logs, notes — everything
+except photos) would eventually be worth archiving too, but that's a
+much slower-growing number than photos ever were.
+
 ## Updating it later
 
 Whenever you want to change something, edit the files in this project and

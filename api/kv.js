@@ -27,6 +27,36 @@ const LIVELOC_PREFIX = "ops:liveloc:";
 const STATIONARY_RADIUS_M = 50; // GPS jitter tolerance — "hasn't left this spot"
 const STATIONARY_ALERT_MS = 30 * 60 * 1000;
 
+const JOBS_KEY = "ops:jobs";
+const JOB_PHOTOS_PREFIX = "ops:jobphotos:";
+
+// Attendance photos live in their own per-job key instead of embedded in
+// the job record, so the board's every-4-second poll (every signed-in
+// device, all day) never has to move photo bytes — only the small job
+// fields it actually needs to render the list. Older jobs saved before
+// this split still have photos embedded; migrateEmbeddedPhotos() moves
+// them out the first time ops:jobs is read after deploy and is a no-op
+// on every read after that (nothing left to migrate).
+async function migrateEmbeddedPhotos(rawJobsJson) {
+  let jobs;
+  try { jobs = JSON.parse(rawJobsJson); } catch (e) { return rawJobsJson; }
+  if (!Array.isArray(jobs)) return rawJobsJson;
+  const withPhotos = jobs.filter((j) => Array.isArray(j.photos) && j.photos.length > 0);
+  if (withPhotos.length === 0) return rawJobsJson;
+
+  for (const j of withPhotos) {
+    await kvSet(`${JOB_PHOTOS_PREFIX}${j.id}`, JSON.stringify(j.photos));
+  }
+  const slimmed = jobs.map((j) => {
+    if (!Array.isArray(j.photos) || j.photos.length === 0) return j;
+    const { photos, ...rest } = j;
+    return { ...rest, photoCount: photos.length };
+  });
+  const slimmedJson = JSON.stringify(slimmed);
+  await kvSet(JOBS_KEY, slimmedJson);
+  return slimmedJson;
+}
+
 function haversineMeters(lat1, lon1, lat2, lon2) {
   const R = 6371000;
   const toRad = (d) => (d * Math.PI) / 180;
@@ -105,6 +135,34 @@ export default async function handler(req, res) {
   // GET and DELETE pass the key as a query param; POST passes it in the body.
   const key = req.query?.key || req.body?.key;
 
+  // Per-job attendance photos — same read/write trust as ops:jobs itself
+  // (any signed-in role), just split into its own key per job so a photo
+  // upload never touches the board's polled blob.
+  if (typeof key === "string" && key.startsWith(JOB_PHOTOS_PREFIX)) {
+    const session = requireRole(req, res, ["manager", "operator", "patrolman"]);
+    if (!session) return;
+    try {
+      if (req.method === "GET") {
+        const value = await kvGet(key);
+        return res.status(200).json({ key, value: value === null ? "[]" : value });
+      }
+      if (req.method === "POST") {
+        const { value } = req.body || {};
+        if (value === undefined) return res.status(400).json({ error: "value is required" });
+        await kvSet(key, value);
+        return res.status(200).json({ key, value });
+      }
+      if (req.method === "DELETE") {
+        await kvDelete(key);
+        return res.status(200).json({ ok: true });
+      }
+      return res.status(405).json({ error: "Method not allowed" });
+    } catch (err) {
+      console.error("kv jobphotos failed:", err);
+      return res.status(500).json({ error: String(err?.message || err) });
+    }
+  }
+
   if (typeof key === "string" && key.startsWith(LIVELOC_PREFIX)) {
     const session = requireSession(req, res);
     if (!session) return;
@@ -144,8 +202,9 @@ export default async function handler(req, res) {
       return res.status(401).json({ error: "Unauthorized — please sign in again." });
     }
     try {
-      const value = await kvGet(key);
+      let value = await kvGet(key);
       if (value === null) return res.status(404).json({ error: "not found" });
+      if (key === JOBS_KEY) value = await migrateEmbeddedPhotos(value);
       return res.status(200).json({ key, value });
     } catch (err) {
       console.error("kv GET failed:", err);
