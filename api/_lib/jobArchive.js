@@ -11,10 +11,22 @@
 // job edits; once a day is plenty for a size problem that grows over
 // weeks, not minutes.
 
-import { kvGet, kvSet } from "./supabase.js";
+import { kvGet, kvSet, kvSetSearchable, kvGetPrefixMissingSearch } from "./supabase.js";
 
 const JOBS_KEY = "ops:jobs";
 export const JOB_ARCHIVE_PREFIX = "ops:jobarchive:";
+
+// {jobNumber, siteName, dispatchDate} — small enough to index, and
+// everything Board's archive search / Logs & analysis' date range
+// actually filter by. dispatchDate is a plain YYYY-MM-DD (UTC) slice,
+// not timezone-aware — precise enough for "which week/month" filtering.
+function searchFieldsFor(job) {
+  return {
+    jobNumber: job.jobNumber || "",
+    siteName: job.siteName || "",
+    dispatchDate: (job.dispatchTime || "").slice(0, 10),
+  };
+}
 
 // Closed jobs stay on the live board for 2 days after they finish — long
 // enough for Control Room to amend a result or re-send a client email —
@@ -46,11 +58,33 @@ export async function archiveOldJobs(now = new Date()) {
       remaining.push(j);
     }
   }
-  if (toArchive.length === 0) return { archived: 0, remaining: jobs.length };
-
-  for (const j of toArchive) {
-    await kvSet(`${JOB_ARCHIVE_PREFIX}${j.id}`, JSON.stringify(j));
+  if (toArchive.length > 0) {
+    for (const j of toArchive) {
+      await kvSetSearchable(`${JOB_ARCHIVE_PREFIX}${j.id}`, JSON.stringify(j), searchFieldsFor(j));
+    }
+    await kvSet(JOBS_KEY, JSON.stringify(remaining));
   }
-  await kvSet(JOBS_KEY, JSON.stringify(remaining));
-  return { archived: toArchive.length, remaining: remaining.length };
+
+  const backfilled = await backfillSearchFields();
+
+  return { archived: toArchive.length, remaining: remaining.length, backfilled };
+}
+
+// One-time catch-up for jobs archived before the `search` column existed
+// (see README) — always queries only rows still missing it (capped),
+// never the whole archive, so this stays cheap both before the backfill
+// finishes and forever after (query returns nothing once none are left).
+async function backfillSearchFields() {
+  let rows;
+  try {
+    rows = await kvGetPrefixMissingSearch(JOB_ARCHIVE_PREFIX);
+  } catch (e) {
+    return 0;
+  }
+  for (const r of rows) {
+    let job;
+    try { job = JSON.parse(r.value); } catch (e) { continue; }
+    await kvSetSearchable(r.key, r.value, searchFieldsFor(job));
+  }
+  return rows.length;
 }

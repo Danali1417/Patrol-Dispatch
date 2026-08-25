@@ -1,12 +1,12 @@
 // Jobs closed out (emailed) or cancelled for 48+ hours are swept off the
 // live board and into their own key (ops:jobarchive:<id>) by a daily cron
 // — see api/_lib/jobArchive.js. The board's 4-second poll never has to
-// carry that history; Logs & analysis pulls it back in on demand instead,
-// via fetchArchivedJobs() below.
+// carry that history. Always fetched by search term and/or date range
+// (filtered server-side via api/kv.js's archiveQuery mode) — never "give
+// me everything," which is exactly the pattern that made ops:jobs itself
+// grow unbounded before photos and old jobs were split out of it.
 
 import { getToken, reportUnauthorized } from "./auth.js";
-
-const JOB_ARCHIVE_PREFIX = "ops:jobarchive:";
 
 async function apiFetch(path, opts = {}) {
   const token = getToken();
@@ -21,9 +21,10 @@ async function apiFetch(path, opts = {}) {
   return res;
 }
 
-export async function fetchArchivedJobs() {
+async function queryArchive(params) {
   try {
-    const res = await apiFetch(`/api/kv?prefix=${encodeURIComponent(JOB_ARCHIVE_PREFIX)}`);
+    const qs = new URLSearchParams({ archiveQuery: "1", ...params }).toString();
+    const res = await apiFetch(`/api/kv?${qs}`);
     if (!res.ok) return [];
     const data = await res.json().catch(() => ({}));
     return (data.entries || [])
@@ -34,8 +35,27 @@ export async function fetchArchivedJobs() {
   }
 }
 
-export async function deleteArchivedJob(jobId) {
+// Board's "search by job number or site" reaching into the archive.
+export async function searchArchivedJobs(term) {
+  if (!term || !term.trim()) return [];
+  return queryArchive({ term: term.trim() });
+}
+
+// Reports / Logs & analysis pulling in archived jobs for a chosen (or
+// default) date range, in addition to whatever's still on the live board.
+export async function fetchArchivedJobsInRange(fromDateISO, toDateISO) {
+  const params = {};
+  if (fromDateISO) params.from = fromDateISO;
+  if (toDateISO) params.to = toDateISO;
+  return queryArchive(params);
+}
+
+// "Reset test data" wiping the archive (and, separately, all job photo
+// records) in one statement each — see api/kv.js. No enumeration step,
+// so this stays safe no matter how large either has grown.
+export async function resetArchiveAndPhotos() {
   try {
-    await apiFetch(`/api/kv?key=${encodeURIComponent(`${JOB_ARCHIVE_PREFIX}${jobId}`)}`, { method: "DELETE" });
-  } catch (e) { /* best-effort — Reset test data is the only caller, and it's already best-effort throughout */ }
+    await apiFetch("/api/kv?resetArchive=1", { method: "DELETE" });
+    await apiFetch("/api/kv?resetPhotos=1", { method: "DELETE" });
+  } catch (e) { /* best-effort — Reset test data already confirms the outcome via a toast */ }
 }

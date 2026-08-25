@@ -20,8 +20,8 @@ import {
 import { getPushStatus, enableJobAlerts, notifyJobDispatch, notifyStandDown } from "./push.js";
 import { reverseGeocode, fetchStaticMap } from "./geocode.js";
 import { reportLiveLocation, stopSharingLiveLocation } from "./liveLocation.js";
-import { fetchJobPhotos, persistJobPhotos, deleteJobPhotos } from "./jobPhotos.js";
-import { fetchArchivedJobs, deleteArchivedJob } from "./jobArchive.js";
+import { fetchJobPhotos, persistJobPhotos } from "./jobPhotos.js";
+import { searchArchivedJobs, fetchArchivedJobsInRange, resetArchiveAndPhotos } from "./jobArchive.js";
 
 const LiveLocationMap = lazy(() => import("./LiveLocationMap.jsx"));
 
@@ -1065,12 +1065,16 @@ function JobProgressBar({ job, compact }) {
 function OperatorView({ session, jobs, accounts, sites, persistSites, zones, roster, persistRoster, persist, now, companyName }) {
   const [tab, setTab] = useState("board");
   const [selectedId, setSelectedId] = useState(null);
-  // Jobs closed/cancelled 48h+ ago live off the board (see jobArchive.js)
-  // — fetched once here so Board's search can still find one by number
-  // and JobDetailOperator can still open it (read-only) with its photos.
-  const [archivedJobs, setArchivedJobs] = useState([]);
-  useEffect(() => { fetchArchivedJobs().then(setArchivedJobs); }, []);
-  const selected = jobs.find((j) => j.id === selectedId) || archivedJobs.find((j) => j.id === selectedId);
+  // Jobs closed/cancelled 48h+ ago live off the board (see jobArchive.js).
+  // Board fetches archived matches itself as the user searches (never all
+  // of them at once — see jobArchive.js) and hands the full object back
+  // here alongside its id, since it won't be in `jobs` for the lookup below.
+  const [selectedArchivedJob, setSelectedArchivedJob] = useState(null);
+  const selected = jobs.find((j) => j.id === selectedId) || (selectedArchivedJob?.id === selectedId ? selectedArchivedJob : null);
+  function selectJob(id, archivedJob) {
+    setSelectedId(id);
+    setSelectedArchivedJob(archivedJob || null);
+  }
   const patrolmen = accounts.filter((a) => a.role === "patrolman");
 
   return (
@@ -1085,20 +1089,20 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
           { id: "live", label: "Live Location", icon: MapPin },
           { id: "logs", label: "Logs & analysis", icon: BarChart3 },
         ].map((t) => (
-          <button key={t.id} onClick={() => { setTab(t.id); setSelectedId(null); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", marginBottom: 4, borderRadius: 7, border: "none", cursor: "pointer", textAlign: "left", fontSize: 12.5, fontWeight: 600, background: tab === t.id ? "var(--accent-dim)" : "transparent", color: tab === t.id ? "var(--accent)" : "var(--text-dim)" }}>
+          <button key={t.id} onClick={() => { setTab(t.id); selectJob(null); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", marginBottom: 4, borderRadius: 7, border: "none", cursor: "pointer", textAlign: "left", fontSize: 12.5, fontWeight: 600, background: tab === t.id ? "var(--accent-dim)" : "transparent", color: tab === t.id ? "var(--accent)" : "var(--text-dim)" }}>
             <t.icon size={15} /> {t.label}
           </button>
         ))}
       </div>
 
       <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
-        {tab === "board" && !selected && <Board jobs={jobs} archivedJobs={archivedJobs} now={now} onSelect={setSelectedId} />}
-        {tab === "cancelled" && !selected && <Board jobs={jobs} archivedJobs={archivedJobs} now={now} onSelect={setSelectedId} lockedStatus="cancelled" />}
-        {tab === "closed" && !selected && <Board jobs={jobs} archivedJobs={archivedJobs} now={now} onSelect={setSelectedId} lockedStatus="emailed" />}
+        {tab === "board" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} />}
+        {tab === "cancelled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="cancelled" />}
+        {tab === "closed" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="emailed" />}
         {(tab === "board" || tab === "cancelled" || tab === "closed") && selected && (
-          <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} roster={roster} persist={persist} now={now} session={session} companyName={companyName} onBack={() => setSelectedId(null)} />
+          <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} roster={roster} persist={persist} now={now} session={session} companyName={companyName} onBack={() => selectJob(null)} />
         )}
-        {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} roster={roster} session={session} persist={persist} onCreated={(id) => { setTab("board"); setSelectedId(id); }} />}
+        {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} roster={roster} session={session} persist={persist} onCreated={(id) => { setTab("board"); selectJob(id); }} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
         {tab === "live" && (
           <div>
@@ -1138,12 +1142,13 @@ const BOARD_STATUS_OPTIONS = [
 // dedicated "Cancelled jobs" / "Closed jobs" tabs. Left unset on the main
 // Dispatch board, which defaults to active jobs only and lets Control
 // Room widen the view (or search for anything by number/site/date).
-function Board({ jobs, archivedJobs = [], now, onSelect, lockedStatus }) {
+function Board({ jobs, now, onSelect, lockedStatus }) {
   const [search, setSearch] = useState("");
   const [dateFilter, setDateFilter] = useState("");
   const [timeFrom, setTimeFrom] = useState("");
   const [timeTo, setTimeTo] = useState("");
   const [statusFilter, setStatusFilter] = useState(lockedStatus || "active");
+  const [archiveMatches, setArchiveMatches] = useState([]);
 
   const groups = statusFilter === "all"
     ? BOARD_GROUPS
@@ -1167,10 +1172,17 @@ function Board({ jobs, archivedJobs = [], now, onSelect, lockedStatus }) {
   const visible = filtered.filter((j) => groupKeys.has(j.status));
 
   // A typed search also reaches jobs the daily archive sweep has already
-  // moved off this board (closed/cancelled 48h+ ago) — shown separately
-  // below, read-only, so "search for an old job" still works after it
-  // ages off the live groups above.
-  const archiveMatches = q ? archivedJobs.filter((j) => j.jobNumber.toLowerCase().includes(q) || j.siteName.toLowerCase().includes(q)) : [];
+  // moved off this board (closed/cancelled 48h+ ago) — queried server-side
+  // (see jobArchive.js) so this stays fast and bounded no matter how much
+  // history has piled up; debounced so it doesn't fire on every keystroke.
+  useEffect(() => {
+    if (!q) { setArchiveMatches([]); return; }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      searchArchivedJobs(q).then((results) => { if (!cancelled) setArchiveMatches(results); });
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [q]);
 
   function clearFilters() {
     setSearch(""); setDateFilter(""); setTimeFrom(""); setTimeTo("");
@@ -1236,7 +1248,7 @@ function Board({ jobs, archivedJobs = [], now, onSelect, lockedStatus }) {
             Archived — closed 48h+ ago ({archiveMatches.length})
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, opacity: 0.75 }}>
-            {archiveMatches.sort((a, b) => new Date(b.dispatchTime) - new Date(a.dispatchTime)).map((j) => <JobCard key={j.id} job={j} now={now} onClick={() => onSelect(j.id)} />)}
+            {archiveMatches.sort((a, b) => new Date(b.dispatchTime) - new Date(a.dispatchTime)).map((j) => <JobCard key={j.id} job={j} now={now} onClick={() => onSelect(j.id, j)} />)}
           </div>
         </div>
       )}
@@ -2218,15 +2230,11 @@ function Logs({ jobs, now, role, companyName }) {
   const [subTab, setSubTab] = useState("overview");
   const showReports = role === "manager";
 
-  // Jobs closed/cancelled 48h+ ago live off the live board (see
-  // jobArchive.js) so the board's own poll stays small — Logs & analysis
-  // is where full history still shows up, fetched once here rather than
-  // ever being part of that poll.
-  const [archived, setArchived] = useState([]);
-  useEffect(() => { fetchArchivedJobs().then(setArchived); }, []);
-  const allJobs = useMemo(() => [...jobs, ...archived], [jobs, archived]);
-
-  if (!showReports) return <LogsOverview jobs={allJobs} now={now} />;
+  // LogsOverview and Reports each pull in their own slice of the archive
+  // below (a fixed recent window, and whatever date range is picked,
+  // respectively) rather than one shared "fetch everything" here — see
+  // jobArchive.js for why that's no longer how archived jobs are read.
+  if (!showReports) return <LogsOverview jobs={jobs} now={now} />;
 
   return (
     <div>
@@ -2247,20 +2255,33 @@ function Logs({ jobs, now, role, companyName }) {
           </button>
         ))}
       </div>
-      {subTab === "overview" && <LogsOverview jobs={allJobs} now={now} />}
-      {subTab === "reports" && <Reports jobs={allJobs} companyName={companyName} />}
+      {subTab === "overview" && <LogsOverview jobs={jobs} now={now} />}
+      {subTab === "reports" && <Reports jobs={jobs} companyName={companyName} />}
     </div>
   );
 }
 
+const LOGS_OVERVIEW_WINDOW_DAYS = 30;
+
 function LogsOverview({ jobs, now }) {
-  const attended = jobs.filter((j) => j.onsiteTime);
+  // Fixed recent window from the archive, merged with whatever's still on
+  // the live board — an unbounded "since forever" fetch is exactly what
+  // made ops:jobs (and then the archive itself) risk Vercel's response
+  // size cap; see jobArchive.js.
+  const [archived, setArchived] = useState([]);
+  useEffect(() => {
+    const to = new Date(now).toISOString().slice(0, 10);
+    const from = new Date(now - LOGS_OVERVIEW_WINDOW_DAYS * 24 * 3600000).toISOString().slice(0, 10);
+    fetchArchivedJobsInRange(from, to).then(setArchived);
+  }, [now]);
+  const jobsInWindow = useMemo(() => [...jobs, ...archived], [jobs, archived]);
+  const attended = jobsInWindow.filter((j) => j.onsiteTime);
   const avgResp = attended.length ? Math.round(attended.reduce((s, j) => s + jobTiming(j, now).elapsed, 0) / attended.length) : 0;
-  const cancelled = jobs.filter((j) => j.status === "cancelled");
-  const breaches = jobs.filter((j) => j.status !== "cancelled" && (j.onsiteTime ? jobTiming(j, now).elapsed > jobTiming(j, now).slaMin : jobTiming(j, now).level === "breach")).length;
+  const cancelled = jobsInWindow.filter((j) => j.status === "cancelled");
+  const breaches = jobsInWindow.filter((j) => j.status !== "cancelled" && (j.onsiteTime ? jobTiming(j, now).elapsed > jobTiming(j, now).slaMin : jobTiming(j, now).level === "breach")).length;
 
   const byCompany = {};
-  jobs.forEach((j) => {
+  jobsInWindow.forEach((j) => {
     byCompany[j.monitoringCo] = byCompany[j.monitoringCo] || { count: 0, respSum: 0, respN: 0, cancelled: 0 };
     byCompany[j.monitoringCo].count++;
     if (j.status === "cancelled") byCompany[j.monitoringCo].cancelled++;
@@ -2270,8 +2291,11 @@ function LogsOverview({ jobs, now }) {
   return (
     <div>
       <SectionTitle icon={BarChart3} title="Shift log & analysis" />
+      <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 14 }}>
+        Covers the live board plus the last {LOGS_OVERVIEW_WINDOW_DAYS} days of closed-out history — see Reports for any other date range.
+      </div>
       <div style={{ display: "flex", gap: 12, marginBottom: 22, flexWrap: "wrap" }}>
-        <Stat label="Jobs dispatched" value={jobs.length} />
+        <Stat label="Jobs dispatched" value={jobsInWindow.length} />
         <Stat label="Attended" value={attended.length} />
         <Stat label="Avg. response time" value={`${avgResp}m`} />
         <Stat label="SLA breaches" value={breaches} accent={breaches > 0 ? "var(--breach)" : "var(--ok)"} />
@@ -2315,9 +2339,21 @@ function Reports({ jobs, companyName }) {
   const [timeFrom, setTimeFrom] = useState("");
   const [timeTo, setTimeTo] = useState("");
   const [busy, setBusy] = useState(false);
+  const [archived, setArchived] = useState([]);
   const showToast = useToast();
 
-  const filtered = jobs
+  // Only reaches into the archive once a "from" date bounds it below —
+  // otherwise this would be the same unbounded "everything ever" fetch
+  // that made ops:jobs (and then the archive itself) risk Vercel's
+  // response size cap; see jobArchive.js. With no filter at all, a
+  // report covers just what's still on the live board.
+  useEffect(() => {
+    if (!dateFrom) { setArchived([]); return; }
+    fetchArchivedJobsInRange(dateFrom, dateTo || todayISO()).then(setArchived);
+  }, [dateFrom, dateTo]);
+  const allJobs = useMemo(() => [...jobs, ...archived], [jobs, archived]);
+
+  const filtered = allJobs
     .filter((j) => {
       const d = isoDateOnly(j.dispatchTime);
       if (dateFrom && d < dateFrom) return false;
@@ -2419,6 +2455,12 @@ function Reports({ jobs, companyName }) {
           <Download size={14} /> {busy ? "Generating…" : "Download PDF"}
         </button>
       </div>
+
+      {!dateFrom && (
+        <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: -10, marginBottom: 18 }}>
+          Showing only what's still on the live board. Set a "Date from" to also pull in matching closed-out history from the archive.
+        </div>
+      )}
 
       {summary.length > 0 && (
         <div style={{ marginBottom: 20 }}>
@@ -2810,15 +2852,14 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
   const showToast = useToast();
   const isDan = session.loginName.trim().toLowerCase() === "dan";
 
-  async function handleResetJobs() {
-    const archived = await fetchArchivedJobs();
-    const total = jobs.length + archived.length;
+  function handleResetJobs() {
     showConfirm(
-      `Delete all ${total} job${total === 1 ? "" : "s"} (including ${archived.length} archived)? This clears the dispatch board and job history for every login — Control Room and patrolmen start from scratch. This can't be undone.`,
+      `Delete all ${jobs.length} job${jobs.length === 1 ? "" : "s"} on the live board, plus the entire closed-job archive and every attendance photo? This clears job history for every login — Control Room and patrolmen start from scratch. This can't be undone.`,
       async () => {
-        const allIds = [...jobs, ...archived].map((j) => j.id);
-        await Promise.all(allIds.map((id) => deleteJobPhotos(id)));
-        await Promise.all(archived.map((j) => deleteArchivedJob(j.id)));
+        // Bulk delete-by-prefix on the server — no enumeration needed
+        // first, so this stays safe regardless of how large the archive
+        // has grown (see jobArchive.js / resetArchiveAndPhotos).
+        await resetArchiveAndPhotos();
         await persistJobs([]);
         showToast("All jobs cleared — starting fresh.");
       }
