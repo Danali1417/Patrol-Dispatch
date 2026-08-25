@@ -313,10 +313,14 @@ The same daily job described in section 4 sweeps jobs that have been
 and into their own archived record — plenty of buffer for Control Room
 to amend a result or re-send a client email before it moves. This
 means:
-- The **"Closed jobs"** and **"Cancelled jobs"** tabs only show what's
+- The **"Closed jobs"** and **"Cancelled jobs"** tabs only *list* what's
   still on the live board — recent history, not everything ever. Jobs
   still being worked (dispatched, submitted, reviewed) are never
   archived regardless of age.
+- Nothing is actually lost, though: **searching by job number or site**
+  on any board still finds an archived job and opens it, photos
+  included — shown read-only with an "Archived" label, since edits
+  there have nowhere live to save back to.
 - **Logs & analysis** is unaffected — it pulls the archive back in
   automatically alongside the live board, so date-range reports, CSVs,
   and the shift-log overview still cover full history either way.
