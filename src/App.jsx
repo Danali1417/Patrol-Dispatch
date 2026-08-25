@@ -4,7 +4,7 @@ import {
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
   ShieldAlert, ArrowLeft, Building2, Settings, Lock, Eye, EyeOff,
   Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone, CalendarDays, Ban,
-  FileText, Download
+  FileText, Download, Archive
 } from "lucide-react";
 import {
   STATUS_META, fmtTime, fmtDateTime, isoDateOnly, isoTimeOnly,
@@ -1065,7 +1065,12 @@ function JobProgressBar({ job, compact }) {
 function OperatorView({ session, jobs, accounts, sites, persistSites, zones, roster, persistRoster, persist, now, companyName }) {
   const [tab, setTab] = useState("board");
   const [selectedId, setSelectedId] = useState(null);
-  const selected = jobs.find((j) => j.id === selectedId);
+  // Jobs closed/cancelled 48h+ ago live off the board (see jobArchive.js)
+  // — fetched once here so Board's search can still find one by number
+  // and JobDetailOperator can still open it (read-only) with its photos.
+  const [archivedJobs, setArchivedJobs] = useState([]);
+  useEffect(() => { fetchArchivedJobs().then(setArchivedJobs); }, []);
+  const selected = jobs.find((j) => j.id === selectedId) || archivedJobs.find((j) => j.id === selectedId);
   const patrolmen = accounts.filter((a) => a.role === "patrolman");
 
   return (
@@ -1087,9 +1092,9 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
       </div>
 
       <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
-        {tab === "board" && !selected && <Board jobs={jobs} now={now} onSelect={setSelectedId} />}
-        {tab === "cancelled" && !selected && <Board jobs={jobs} now={now} onSelect={setSelectedId} lockedStatus="cancelled" />}
-        {tab === "closed" && !selected && <Board jobs={jobs} now={now} onSelect={setSelectedId} lockedStatus="emailed" />}
+        {tab === "board" && !selected && <Board jobs={jobs} archivedJobs={archivedJobs} now={now} onSelect={setSelectedId} />}
+        {tab === "cancelled" && !selected && <Board jobs={jobs} archivedJobs={archivedJobs} now={now} onSelect={setSelectedId} lockedStatus="cancelled" />}
+        {tab === "closed" && !selected && <Board jobs={jobs} archivedJobs={archivedJobs} now={now} onSelect={setSelectedId} lockedStatus="emailed" />}
         {(tab === "board" || tab === "cancelled" || tab === "closed") && selected && (
           <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} roster={roster} persist={persist} now={now} session={session} companyName={companyName} onBack={() => setSelectedId(null)} />
         )}
@@ -1133,14 +1138,12 @@ const BOARD_STATUS_OPTIONS = [
 // dedicated "Cancelled jobs" / "Closed jobs" tabs. Left unset on the main
 // Dispatch board, which defaults to active jobs only and lets Control
 // Room widen the view (or search for anything by number/site/date).
-function Board({ jobs, now, onSelect, lockedStatus }) {
+function Board({ jobs, archivedJobs = [], now, onSelect, lockedStatus }) {
   const [search, setSearch] = useState("");
   const [dateFilter, setDateFilter] = useState("");
   const [timeFrom, setTimeFrom] = useState("");
   const [timeTo, setTimeTo] = useState("");
   const [statusFilter, setStatusFilter] = useState(lockedStatus || "active");
-
-  if (jobs.length === 0) return <Empty text="No jobs dispatched yet. Use “New job” to send the first alarm response." />;
 
   const groups = statusFilter === "all"
     ? BOARD_GROUPS
@@ -1163,10 +1166,18 @@ function Board({ jobs, now, onSelect, lockedStatus }) {
   });
   const visible = filtered.filter((j) => groupKeys.has(j.status));
 
+  // A typed search also reaches jobs the daily archive sweep has already
+  // moved off this board (closed/cancelled 48h+ ago) — shown separately
+  // below, read-only, so "search for an old job" still works after it
+  // ages off the live groups above.
+  const archiveMatches = q ? archivedJobs.filter((j) => j.jobNumber.toLowerCase().includes(q) || j.siteName.toLowerCase().includes(q)) : [];
+
   function clearFilters() {
     setSearch(""); setDateFilter(""); setTimeFrom(""); setTimeTo("");
     if (!lockedStatus) setStatusFilter("active");
   }
+
+  if (jobs.length === 0 && !q) return <Empty text="No jobs dispatched yet. Use “New job” to send the first alarm response." />;
 
   return (
     <div>
@@ -1193,7 +1204,7 @@ function Board({ jobs, now, onSelect, lockedStatus }) {
         {hasFilter && <button onClick={clearFilters} style={{ ...secondaryBtn, marginBottom: 0 }}><X size={13} /> Clear filters</button>}
       </div>
 
-      {visible.length === 0 && (
+      {visible.length === 0 && archiveMatches.length === 0 && (
         <Empty text={
           hasFilter ? "No jobs match these filters."
           : lockedStatus ? "Nothing here yet."
@@ -1217,6 +1228,18 @@ function Board({ jobs, now, onSelect, lockedStatus }) {
           </div>
         );
       })}
+
+      {archiveMatches.length > 0 && (
+        <div style={{ marginBottom: 22 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text-dim)", marginBottom: 8 }}>
+            <Archive size={13} />
+            Archived — closed 48h+ ago ({archiveMatches.length})
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, opacity: 0.75 }}>
+            {archiveMatches.sort((a, b) => new Date(b.dispatchTime) - new Date(a.dispatchTime)).map((j) => <JobCard key={j.id} job={j} now={now} onClick={() => onSelect(j.id)} />)}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1658,6 +1681,11 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   }
 
   const isHandling = job.handlingLoginName === session.loginName;
+  // Not in the live `jobs` array means the daily archive sweep already
+  // moved it off the board (see jobArchive.js) — still viewable with its
+  // photos, but every mutation here writes back to `ops:jobs`, which no
+  // longer has a matching entry, so edits would silently go nowhere.
+  const isArchived = !jobs.some((j) => j.id === job.id);
 
   return (
     <div style={{ maxWidth: 640 }}>
@@ -1669,6 +1697,12 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       </div>
       <JobHeader job={job} />
 
+      {isArchived && (
+        <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel-alt)", fontSize: 12, color: "var(--text-dim)", display: "flex", alignItems: "center", gap: 7 }}>
+          <Archive size={13} /> Archived — closed 48h+ ago and off the live board. View only; details and photos are still here, but changes on this screen won't be saved.
+        </div>
+      )}
+
       <div style={{ marginTop: 16, overflowX: "auto", paddingBottom: 4 }}>
         <JobProgressBar job={job} />
       </div>
@@ -1678,7 +1712,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
           <span>Dispatched by <b style={{ color: "var(--text)" }}>{job.dispatchedByName}</b></span>
           <span>·</span>
           <span>Handling: <b style={{ color: isHandling ? "var(--ok)" : "var(--text)" }}>{job.handlingName}</b>{isHandling ? " (you)" : ""}</span>
-          {!isHandling && (
+          {!isHandling && !isArchived && (
             <button onClick={takeJob} style={{ ...secondaryBtn, padding: "4px 10px", fontSize: 11.5 }}>Take this job</button>
           )}
         </div>
@@ -1700,10 +1734,14 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
 
       <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <span style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.4 }}>Attending patrolman</span>
-        <select value={job.assigneeId} onChange={(e) => reassign(e.target.value)} style={{ ...selectStyle, width: "auto", padding: "6px 10px", fontSize: 12.5 }}>
-          {patrolmen.map((p) => <option key={p.loginName} value={p.loginName}>{p.displayName} · {p.loginName}</option>)}
-        </select>
-        {job.status === "dispatched" && (
+        {isArchived ? (
+          <span style={{ fontSize: 12.5 }}>{job.assigneeName}</span>
+        ) : (
+          <select value={job.assigneeId} onChange={(e) => reassign(e.target.value)} style={{ ...selectStyle, width: "auto", padding: "6px 10px", fontSize: 12.5 }}>
+            {patrolmen.map((p) => <option key={p.loginName} value={p.loginName}>{p.displayName} · {p.loginName}</option>)}
+          </select>
+        )}
+        {job.status === "dispatched" && !isArchived && (
           <button onClick={() => setShowCancelForm((v) => !v)} style={{ ...iconBtn, width: "auto", padding: "6px 10px", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--breach)", marginLeft: "auto" }}>
             <Ban size={13} /> Cancel job
           </button>
@@ -1798,16 +1836,24 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
         <div style={{ marginTop: 18 }}>
           <SectionTitle icon={CheckCircle2} title="Outcome" small />
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 6 }}>
-            <div>
-              <div style={{ fontSize: 10.5, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>Onsite</div>
-              <input type="datetime-local" value={onsiteEdit} onChange={(e) => setOnsiteEdit(e.target.value)} style={{ ...selectStyle, width: "auto", padding: "5px 8px", fontSize: 12 }} />
-            </div>
-            <div>
-              <div style={{ fontSize: 10.5, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>Offsite</div>
-              <input type="datetime-local" value={offsiteEdit} onChange={(e) => setOffsiteEdit(e.target.value)} style={{ ...selectStyle, width: "auto", padding: "5px 8px", fontSize: 12 }} />
-            </div>
-            {(onsiteChanged || offsiteChanged) && (
-              <button onClick={saveTimes} style={{ ...primaryBtn, padding: "6px 12px", fontSize: 12 }}><CheckCircle2 size={13} /> Save times</button>
+            {isArchived ? (
+              <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+                Onsite {fmtDateTime(job.onsiteTime)} · Offsite {fmtDateTime(job.offsiteTime)}
+              </div>
+            ) : (
+              <>
+                <div>
+                  <div style={{ fontSize: 10.5, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>Onsite</div>
+                  <input type="datetime-local" value={onsiteEdit} onChange={(e) => setOnsiteEdit(e.target.value)} style={{ ...selectStyle, width: "auto", padding: "5px 8px", fontSize: 12 }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 10.5, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>Offsite</div>
+                  <input type="datetime-local" value={offsiteEdit} onChange={(e) => setOffsiteEdit(e.target.value)} style={{ ...selectStyle, width: "auto", padding: "5px 8px", fontSize: 12 }} />
+                </div>
+                {(onsiteChanged || offsiteChanged) && (
+                  <button onClick={saveTimes} style={{ ...primaryBtn, padding: "6px 12px", fontSize: 12 }}><CheckCircle2 size={13} /> Save times</button>
+                )}
+              </>
             )}
             <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
               response time {jobTiming(job, now).elapsed}m (SLA {jobTiming(job, now).slaMin}m)
@@ -1816,7 +1862,11 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
           <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 10 }}>
             Docket No: <b style={{ color: "var(--text)" }}>{job.docketNo || "—"}</b>
           </div>
-          <textarea rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} style={{ ...selectStyle, resize: "vertical" }} />
+          {isArchived ? (
+            <div style={{ ...selectStyle, minHeight: 84, whiteSpace: "pre-wrap", color: "var(--text)" }}>{notes || "—"}</div>
+          ) : (
+            <textarea rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} style={{ ...selectStyle, resize: "vertical" }} />
+          )}
           {photos.length > 0 && (
             <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
               {photos.map((p, i) => (
@@ -1838,11 +1888,11 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
             </div>
           )}
           <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-            {notes !== (job.reviewNotes || job.outcomeNotes) && (
+            {!isArchived && notes !== (job.reviewNotes || job.outcomeNotes) && (
               <button onClick={() => logAction("Results updated", notes.trim(), { reviewNotes: notes })} style={primaryBtn}><CheckCircle2 size={14} /> Save changes</button>
             )}
-            {job.status === "submitted" && <button onClick={() => logAction("Marked reviewed", "", { status: "reviewed", reviewNotes: notes })} style={secondaryBtn}><CheckCircle2 size={14} /> Mark reviewed</button>}
-            {(job.status === "reviewed" || job.status === "submitted") && <button onClick={() => { logAction("Prepared client email", "", { reviewNotes: notes }); setShowEmail(true); }} style={primaryBtn}><Mail size={14} /> Prepare client email</button>}
+            {!isArchived && job.status === "submitted" && <button onClick={() => logAction("Marked reviewed", "", { status: "reviewed", reviewNotes: notes })} style={secondaryBtn}><CheckCircle2 size={14} /> Mark reviewed</button>}
+            {!isArchived && (job.status === "reviewed" || job.status === "submitted") && <button onClick={() => { logAction("Prepared client email", "", { reviewNotes: notes }); setShowEmail(true); }} style={primaryBtn}><Mail size={14} /> Prepare client email</button>}
             {job.status === "emailed" && (
               <span style={{ color: "var(--ok)", fontSize: 12.5, display: "flex", alignItems: "center", gap: 6 }}>
                 <CheckCircle2 size={14} /> {job.emailSentByApp ? `Emailed to client ${fmtDateTime(job.emailedAt)}` : `Marked sent ${fmtDateTime(job.emailedAt)}`}
