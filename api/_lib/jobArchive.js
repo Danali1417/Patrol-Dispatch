@@ -34,7 +34,12 @@ export async function archiveOldJobs(now = new Date()) {
   const toArchive = [];
   const remaining = [];
   for (const j of jobs) {
-    const terminalAt = j.status === "emailed" ? j.emailedAt : j.status === "cancelled" ? j.cancelledAt : null;
+    const isTerminal = j.status === "emailed" || j.status === "cancelled";
+    // Jobs closed by an older version of the app may be missing their own
+    // emailedAt/cancelledAt — falling back to dispatchTime (always set)
+    // means a genuinely old, genuinely terminal job still gets swept up
+    // instead of sitting on the live board forever for lack of one field.
+    const terminalAt = isTerminal ? (j.status === "emailed" ? j.emailedAt : j.cancelledAt) || j.dispatchTime : null;
     if (terminalAt && nowMs - new Date(terminalAt).getTime() >= ARCHIVE_AFTER_MS) {
       toArchive.push(j);
     } else {
