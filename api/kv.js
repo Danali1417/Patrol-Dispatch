@@ -17,6 +17,7 @@
 import { getSession, requireRole, requireSession } from "./_lib/auth.js";
 import { kvGet, kvSet, kvGetPrefix, kvDelete } from "./_lib/supabase.js";
 import { sendPushToRole } from "./_lib/push.js";
+import { JOB_ARCHIVE_PREFIX } from "./_lib/jobArchive.js";
 
 const PUBLIC_READ_KEYS = new Set(["ops:logo", "ops:companyName"]);
 const MANAGER_ONLY_WRITE_KEYS = new Set(["ops:logo", "ops:companyName", "ops:outcomePhrases"]);
@@ -132,8 +133,40 @@ export default async function handler(req, res) {
     }
   }
 
+  // Control Room / Manager bulk-reading everything the daily archive
+  // sweep (api/_lib/jobArchive.js) has moved off the live board — used to
+  // fold older jobs back into Logs & analysis without keeping them in the
+  // 4-second board poll.
+  if (req.method === "GET" && req.query?.prefix === JOB_ARCHIVE_PREFIX) {
+    const session = requireRole(req, res, ["manager", "operator"]);
+    if (!session) return;
+    try {
+      const rows = await kvGetPrefix(JOB_ARCHIVE_PREFIX);
+      return res.status(200).json({ entries: rows.map((r) => ({ value: r.value, updatedAt: r.updated_at })) });
+    } catch (err) {
+      console.error("kv GET (jobarchive prefix) failed:", err);
+      return res.status(500).json({ error: String(err?.message || err) });
+    }
+  }
+
   // GET and DELETE pass the key as a query param; POST passes it in the body.
   const key = req.query?.key || req.body?.key;
+
+  // A single archived job — only DELETE is used (by "Reset test data"
+  // clearing out what it swept up); nothing currently needs to read one
+  // back individually since Logs & analysis always pulls the whole set.
+  if (typeof key === "string" && key.startsWith(JOB_ARCHIVE_PREFIX)) {
+    const session = requireRole(req, res, ["manager", "operator"]);
+    if (!session) return;
+    if (req.method !== "DELETE") return res.status(405).json({ error: "Method not allowed" });
+    try {
+      await kvDelete(key);
+      return res.status(200).json({ ok: true });
+    } catch (err) {
+      console.error("kv jobarchive delete failed:", err);
+      return res.status(500).json({ error: String(err?.message || err) });
+    }
+  }
 
   // Per-job attendance photos — same read/write trust as ops:jobs itself
   // (any signed-in role), just split into its own key per job so a photo
