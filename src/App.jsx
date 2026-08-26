@@ -586,7 +586,10 @@ export default function SentrylinePrototype() {
         setJobs(fresh);
         prevJobsRef.current = fresh;
       } catch (e) { /* ignore poll errors */ }
-    }, 4000);
+      // Every signed-in device polls this on its own timer, all day — this
+      // interval is the single biggest driver of Supabase egress usage, so
+      // it's kept as long as dispatch/cancel/SLA-breach alerts can tolerate.
+    }, 8000);
     return () => clearInterval(t);
   }, [session]);
 
