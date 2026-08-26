@@ -300,8 +300,8 @@ place.
 ## 9. Attendance photos are stored apart from the job board
 
 Every signed-in device (Control Room, each patrolman) polls the job
-board every 4 seconds so everyone sees new dispatches and status
-changes immediately. Attendance photos used to be embedded right in
+board every 8 seconds so everyone sees new dispatches and status
+changes promptly. Attendance photos used to be embedded right in
 each job's record, which meant that poll was re-downloading every
 photo of every job, on every device, all day — expensive on mobile
 data and battery, and it meant the whole board risked hitting a
