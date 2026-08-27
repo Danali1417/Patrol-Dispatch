@@ -5,6 +5,11 @@
 // saving transition; the tolerance check below accepts that and skips
 // itself if invoked well outside the target window for any other reason.
 //
+// vercel.json also raises this function's maxDuration to 60s (Hobby's
+// ceiling) — archiveOldJobs() below can send one photo-backup email per
+// job it archives, one at a time, and the platform default (10s) could
+// get cut off mid-run on a day with an unusually large backlog.
+//
 // Required env vars (set in Vercel → Project Settings → Environment Variables):
 //   GMAIL_USER            the Gmail address to send from
 //   GMAIL_APP_PASSWORD    the 16-character App Password for that account
