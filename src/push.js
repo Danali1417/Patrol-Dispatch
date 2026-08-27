@@ -80,8 +80,17 @@ export async function disableJobAlerts() {
     if (!registration) return;
     const subscription = await registration.pushManager.getSubscription();
     if (!subscription) return;
-    await apiFetch("/api/push-subscribe", {
+    // A plain fetch, not apiFetch — this also runs from the forced-logout
+    // handler itself (session already gone by then), and apiFetch's 401
+    // handling calls back into that same handler, which calls this again,
+    // recursing for as long as the DELETE keeps failing. A stale/missing
+    // token here just means the server-side record was likely already
+    // cleaned up another way (e.g. claimActiveSession on a new login) —
+    // this call unsubscribing the browser's own copy is what matters.
+    const token = getToken();
+    await fetch("/api/push-subscribe", {
       method: "DELETE",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({ endpoint: subscription.endpoint }),
     }).catch(() => {});
     await subscription.unsubscribe();

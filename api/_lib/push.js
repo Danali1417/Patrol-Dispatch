@@ -45,6 +45,19 @@ export async function removeSubscription(loginName, role, endpoint) {
   await saveSubs(subs);
 }
 
+// Wipes every device subscribed for this login — called the moment a new
+// login is claimed (see claimActiveSession in auth.js), so a phone or
+// computer left signed in elsewhere stops receiving job alerts for this
+// account as soon as someone signs in anywhere else, even if that other
+// device's page is closed and never gets to unsubscribe itself.
+export async function clearSubscriptions(loginName, role) {
+  const subs = await loadSubs();
+  const key = `${role}:${loginName}`;
+  if (!(key in subs)) return;
+  delete subs[key];
+  await saveSubs(subs);
+}
+
 // Sends payload to every device subscribed for this login, pruning any
 // the push service reports as gone (410/404 — uninstalled or expired).
 export async function sendPushToPatrolman(loginName, role, payload) {
