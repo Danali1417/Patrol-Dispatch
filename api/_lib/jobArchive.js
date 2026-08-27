@@ -1,20 +1,30 @@
 // Moves long-closed jobs out of the board's polled ops:jobs blob and into
 // their own per-job key (ops:jobarchive:<id>) — same idea as jobphotos.js,
 // applied to the job record itself instead of just its photos. Every
-// signed-in device polls ops:jobs every 4 seconds, so keeping months of
-// closed-out history in there forever both wastes that poll and risks
-// ops:jobs eventually hitting Vercel's 4.5MB request/response cap.
+// signed-in device polls ops:jobs, so keeping months of closed-out history
+// in there forever both wastes that poll and risks ops:jobs eventually
+// hitting Vercel's 4.5MB request/response cap.
+//
+// Also the point where attendance photos actually stop costing anything:
+// photos are by far the largest thing this app stores, so right before a
+// job is archived, its photos are emailed as a backup attachment (see
+// backupAndDeletePhotos below) and then deleted from Supabase — the
+// archived job keeps its text (result, activity log) forever, but the
+// photo bytes don't pile up past the 48-hour window they're useful for
+// in-app.
 //
 // Run once daily from api/daily-report.js (the only existing cron on this
 // project's Hobby plan) rather than on every read — a full sweep+rewrite
-// on every 4-second poll would be wasteful and racy against concurrent
-// job edits; once a day is plenty for a size problem that grows over
-// weeks, not minutes.
+// on every poll would be wasteful and racy against concurrent job edits;
+// once a day is plenty for a size problem that grows over weeks, not
+// minutes.
 
-import { kvGet, kvSet, kvSetSearchable, kvGetPrefixMissingSearch } from "./supabase.js";
+import nodemailer from "nodemailer";
+import { kvGet, kvSet, kvSetSearchable, kvGetPrefixMissingSearch, kvDelete } from "./supabase.js";
 
 const JOBS_KEY = "ops:jobs";
 export const JOB_ARCHIVE_PREFIX = "ops:jobarchive:";
+export const JOB_PHOTOS_PREFIX = "ops:jobphotos:";
 
 // {jobNumber, siteName, dispatchDate} — small enough to index, and
 // everything Board's archive search / Logs & analysis' date range
@@ -35,7 +45,73 @@ function searchFieldsFor(job) {
 // back in for anything older, so nothing is actually lost.
 const ARCHIVE_AFTER_MS = 48 * 60 * 60 * 1000;
 
-export async function archiveOldJobs(now = new Date()) {
+function defaultTransporter() {
+  return nodemailer.createTransport({
+    service: "gmail",
+    auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
+  });
+}
+
+function photoAttachmentsFor(job, photos) {
+  return photos
+    .map((p, i) => {
+      const match = /^data:([^;]+);base64,(.*)$/.exec(p.dataUrl || "");
+      if (!match) return null;
+      const [, contentType, content] = match;
+      const ext = contentType.split("/")[1] || "jpg";
+      return { filename: `${job.jobNumber || job.id}-photo-${i + 1}.${ext}`, content, encoding: "base64", contentType };
+    })
+    .filter(Boolean);
+}
+
+// Emails a job's attendance photos to the company's own backup inbox and
+// deletes them from Supabase — called once per job right before it's
+// archived. Left in place (and simply retried on the next day's cron) if
+// sending fails or isn't configured, so a bad send or a missing env var
+// never loses the only copy of a photo.
+async function backupAndDeletePhotos(job, { transporter } = {}) {
+  const photosKey = `${JOB_PHOTOS_PREFIX}${job.id}`;
+  const raw = await kvGet(photosKey);
+  if (!raw) return "none";
+
+  let photos;
+  try { photos = JSON.parse(raw); } catch (e) { return "none"; }
+  if (!Array.isArray(photos) || photos.length === 0) {
+    await kvDelete(photosKey);
+    return "none";
+  }
+
+  const to = process.env.PHOTO_BACKUP_EMAIL || process.env.REPORT_RECIPIENTS;
+  if (!to || !process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) return "not-configured";
+
+  const attachments = photoAttachmentsFor(job, photos);
+  if (!attachments.length) {
+    await kvDelete(photosKey);
+    return "none";
+  }
+
+  const subject = `Attendance photo backup — ${job.jobNumber || job.id}${job.siteName ? ` — ${job.siteName}` : ""}`;
+  const text = [
+    `Job ${job.jobNumber || job.id} — ${job.siteName || "—"}`,
+    `Status: ${job.status === "cancelled" ? "Cancelled" : "Closed"}`,
+    `Patrolman: ${job.assigneeName || "—"}`,
+    `Outcome: ${job.reviewNotes || job.cancelReason || "—"}`,
+    ``,
+    `${attachments.length} attendance photo${attachments.length !== 1 ? "s" : ""} attached — this is the only copy kept once this job is archived.`,
+  ].join("\n");
+
+  try {
+    const send = transporter || defaultTransporter();
+    await send.sendMail({ from: process.env.GMAIL_USER, to, subject, text, attachments });
+  } catch (err) {
+    console.error(`photo backup email failed for job ${job.id}:`, err);
+    return "failed";
+  }
+  await kvDelete(photosKey);
+  return "sent";
+}
+
+export async function archiveOldJobs(now = new Date(), { transporter } = {}) {
   const raw = await kvGet(JOBS_KEY);
   if (!raw) return { archived: 0, remaining: 0 };
   let jobs;
@@ -58,8 +134,12 @@ export async function archiveOldJobs(now = new Date()) {
       remaining.push(j);
     }
   }
+
+  const photoBackupCounts = { sent: 0, none: 0, failed: 0, "not-configured": 0 };
   if (toArchive.length > 0) {
     for (const j of toArchive) {
+      const outcome = await backupAndDeletePhotos(j, { transporter });
+      photoBackupCounts[outcome] = (photoBackupCounts[outcome] || 0) + 1;
       await kvSetSearchable(`${JOB_ARCHIVE_PREFIX}${j.id}`, JSON.stringify(j), searchFieldsFor(j));
     }
     await kvSet(JOBS_KEY, JSON.stringify(remaining));
@@ -67,7 +147,7 @@ export async function archiveOldJobs(now = new Date()) {
 
   const backfilled = await backfillSearchFields();
 
-  return { archived: toArchive.length, remaining: remaining.length, backfilled };
+  return { archived: toArchive.length, remaining: remaining.length, backfilled, photoBackupCounts };
 }
 
 // One-time catch-up for jobs archived before the `search` column existed

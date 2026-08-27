@@ -18,6 +18,11 @@
 //   REPORT_SEND_HOUR              local hour (0-23) to send at, default 7
 //   REPORT_SEND_TOLERANCE_MINUTES how far from that hour a single daily
 //                                 cron fire is still accepted, default 90
+//   PHOTO_BACKUP_EMAIL            where archived jobs' attendance photos
+//                                 get emailed before being deleted from
+//                                 Supabase (see jobArchive.js / README
+//                                 section 12) — defaults to
+//                                 REPORT_RECIPIENTS if unset
 
 import nodemailer from "nodemailer";
 import { getZonedNow } from "./_lib/time.js";

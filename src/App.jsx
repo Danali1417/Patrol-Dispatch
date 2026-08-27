@@ -1605,6 +1605,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   const [onsiteEdit, setOnsiteEdit] = useState(toLocalInputValue(job.onsiteTime));
   const [offsiteEdit, setOffsiteEdit] = useState(toLocalInputValue(job.offsiteTime));
   const [photos, setPhotos] = useState([]);
+  const [photosLoaded, setPhotosLoaded] = useState(false);
   const showToast = useToast();
 
   useEffect(() => setNotes(job.reviewNotes || job.outcomeNotes), [job.id]);
@@ -1616,7 +1617,12 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   // Fetched on demand, not part of the polled `jobs` prop — see jobPhotos.js.
   useEffect(() => {
     setPhotos([]);
-    if (job.photoCount > 0) fetchJobPhotos(job.id).then(setPhotos);
+    setPhotosLoaded(false);
+    if (job.photoCount > 0) {
+      fetchJobPhotos(job.id).then((p) => { setPhotos(p); setPhotosLoaded(true); });
+    } else {
+      setPhotosLoaded(true);
+    }
   }, [job.id, job.photoCount]);
 
   const jobWithPhotos = { ...job, photos };
@@ -1899,6 +1905,12 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
             <div style={{ ...selectStyle, minHeight: 84, whiteSpace: "pre-wrap", color: "var(--text)" }}>{notes || "—"}</div>
           ) : (
             <textarea rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} style={{ ...selectStyle, resize: "vertical" }} />
+          )}
+          {isArchived && photosLoaded && photos.length === 0 && job.photoCount > 0 && (
+            <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 8 }}>
+              <Camera size={12} style={{ verticalAlign: -1, marginRight: 4 }} />
+              {job.photoCount} attendance photo{job.photoCount !== 1 ? "s" : ""} — emailed as a backup and removed once this job was archived.
+            </div>
           )}
           {photos.length > 0 && (
             <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
