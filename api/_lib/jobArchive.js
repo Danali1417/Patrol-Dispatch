@@ -81,7 +81,7 @@ async function backupAndDeletePhotos(job, { transporter } = {}) {
     return "none";
   }
 
-  const to = process.env.PHOTO_BACKUP_EMAIL || process.env.REPORT_RECIPIENTS;
+  const to = process.env.REPORT_RECIPIENTS;
   if (!to || !process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) return "not-configured";
 
   const attachments = photoAttachmentsFor(job, photos);

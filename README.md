@@ -380,10 +380,9 @@ So right before a job is archived (the same 48-hours-after-closed-or-
 cancelled sweep from section 10), if it has attendance photos, this
 app:
 
-1. Emails them as attachments to `PHOTO_BACKUP_EMAIL` (or, if that's
-   not set, whatever `REPORT_RECIPIENTS` is already configured to —
-   see section 4), along with the job's result and outcome notes as
-   the email body.
+1. Emails them as attachments to the same `REPORT_RECIPIENTS` the
+   daily report already goes to (section 4) — one email per job,
+   along with its result and outcome notes as the message body.
 2. Deletes them from Supabase.
 
 The archived job record itself is untouched — its text, result, and
