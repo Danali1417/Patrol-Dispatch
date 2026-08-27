@@ -3,6 +3,7 @@
     { "path": "/api/daily-report", "schedule": "30 20 * * *" }
   ],
   "functions": {
-    "api/daily-report.js": { "maxDuration": 60 }
+    "api/daily-report.js": { "maxDuration": 60 },
+    "api/send-client-email.js": { "maxDuration": 20 }
   }
 }

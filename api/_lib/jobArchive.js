@@ -46,9 +46,15 @@ function searchFieldsFor(job) {
 const ARCHIVE_AFTER_MS = 48 * 60 * 60 * 1000;
 
 function defaultTransporter() {
+  // Short timeouts (nodemailer defaults to up to 2 minutes) so one bad
+  // connection can't eat the whole 60s cron budget (vercel.json) and
+  // starve every other job still waiting for its own backup this run.
   return nodemailer.createTransport({
     service: "gmail",
     auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 10000,
   });
 }
 
@@ -66,7 +72,12 @@ function photoAttachmentsFor(job, photos) {
 
 // Emails a job's attendance photos to the company's own backup inbox and
 // deletes them from Supabase — called once per job right before it's
-// archived. Left in place (and simply retried on the next day's cron) if
+// archived. Most jobs never reach this still needing to send: closing or
+// cancelling a job already fires this same email immediately, client-side
+// (see sendPhotoBackupEmail in src/App.jsx), and stamps `photosBackedUpAt`
+// on success — this is just the guaranteed fallback for whatever that
+// missed (a dropped connection, a job closed via "Mark as sent/closed",
+// etc). Left in place (and simply retried on the next day's cron) if
 // sending fails or isn't configured, so a bad send or a missing env var
 // never loses the only copy of a photo.
 async function backupAndDeletePhotos(job, { transporter } = {}) {
@@ -79,6 +90,11 @@ async function backupAndDeletePhotos(job, { transporter } = {}) {
   if (!Array.isArray(photos) || photos.length === 0) {
     await kvDelete(photosKey);
     return "none";
+  }
+
+  if (job.photosBackedUpAt) {
+    await kvDelete(photosKey);
+    return "already-sent";
   }
 
   const to = process.env.REPORT_RECIPIENTS;
@@ -135,7 +151,7 @@ export async function archiveOldJobs(now = new Date(), { transporter } = {}) {
     }
   }
 
-  const photoBackupCounts = { sent: 0, none: 0, failed: 0, "not-configured": 0 };
+  const photoBackupCounts = { sent: 0, none: 0, failed: 0, "not-configured": 0, "already-sent": 0 };
   if (toArchive.length > 0) {
     for (const j of toArchive) {
       const outcome = await backupAndDeletePhotos(j, { transporter });

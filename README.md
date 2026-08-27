@@ -376,26 +376,36 @@ Photos are by far the largest thing this app stores — a job's text
 fast, and it's what actually risks the database's storage/transfer
 limits over months and years, not the text.
 
-So right before a job is archived (the same 48-hours-after-closed-or-
-cancelled sweep from section 10), if it has attendance photos, this
-app:
+So every job's attendance photos get emailed as attachments to the
+same `REPORT_RECIPIENTS` the daily report already goes to (section 4)
+— one email per job, along with its result and outcome notes as the
+message body — before being deleted from Supabase. That happens at
+one of two points:
 
-1. Emails them as attachments to the same `REPORT_RECIPIENTS` the
-   daily report already goes to (section 4) — one email per job,
-   along with its result and outcome notes as the message body.
-2. Deletes them from Supabase.
+1. **Immediately**, the moment a job is closed or cancelled (from
+   Control Room's "Send email now", "Mark as sent/closed", or
+   "Cancel job") — the common case, so the backup lands within
+   seconds rather than waiting.
+2. **As a guaranteed fallback**, right before a job is archived (the
+   same 48-hours-after-closed-or-cancelled sweep from section 10) —
+   in case the immediate send never happened or failed (a dropped
+   connection, an offline browser). A job never gets emailed twice:
+   closing/cancelling it stamps a "backed up" marker the moment the
+   immediate send succeeds, and the archive sweep skips straight to
+   deleting if it sees that marker already set.
 
-The archived job record itself is untouched — its text, result, and
-activity log stay searchable forever (section 11). Only the photo
-bytes are gone; opening an old archived job that had photos shows a
-small note that they were emailed as a backup and removed, instead of
-just silently looking like there never were any.
+The archived job record itself is untouched either way — its text,
+result, and activity log stay searchable forever (section 11). Only
+the photo bytes are gone; opening an old archived job that had photos
+shows a small note that they were emailed as a backup and removed,
+instead of just silently looking like there never were any.
 
 If sending that email fails for any reason (bad credentials, Gmail
-hiccup, `GMAIL_USER`/`GMAIL_APP_PASSWORD`/recipient not configured
-yet), the photos are simply left in place and it's retried
-automatically on the next day's cron — a failed send can never lose
-the only copy.
+hiccup, `GMAIL_USER`/`GMAIL_APP_PASSWORD`/`REPORT_RECIPIENTS` not
+configured yet), the photos are simply left in place — the archive
+sweep keeps retrying once a day for as long as it takes, and only
+ever deletes right after a send actually succeeds. A failed send can
+never lose the only copy, just delay its backup.
 
 ## Updating it later
 

@@ -1,9 +1,17 @@
-// Sends a one-off "alarm response outcome" email to a client, triggered
-// interactively from the Control Room job screen (EmailModal in
-// src/App.jsx), using the same Gmail account as the daily report.
+// Sends a one-off email using the same Gmail account as the daily report.
+// Two callers, two shapes of request:
+//   - The Control Room job screen (EmailModal in src/App.jsx) sends the
+//     client-facing "alarm response outcome" advice — `to` is whatever
+//     client address the operator entered.
+//   - Every close/cancel action also fires an internal photo backup
+//     (internalBackup: true) the moment the job closes, so REPORT_RECIPIENTS
+//     doesn't wait for the 48h archive sweep — see jobArchive.js, which
+//     skips re-sending a job whose backup already went out this way. `to`
+//     is never accepted from the client for this one; REPORT_RECIPIENTS is
+//     a server-only env var precisely so the browser never needs to know it.
 //
 // Required env vars (already set for the daily report — reused here):
-//   GMAIL_USER, GMAIL_APP_PASSWORD
+//   GMAIL_USER, GMAIL_APP_PASSWORD, REPORT_RECIPIENTS (internalBackup only)
 // Also required:
 //   VITE_APP_MAIL_SECRET   any random string. Set it once in Vercel and the
 //                          client bundle picks it up automatically (the
@@ -26,9 +34,19 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: secret ? "Unauthorized" : "VITE_APP_MAIL_SECRET is not configured on the server" });
   }
 
-  const { to, subject, text, html, attachments } = req.body || {};
-  if (!to || !/\S+@\S+\.\S+/.test(to)) {
-    return res.status(400).json({ error: "A valid recipient email is required" });
+  const { to: requestedTo, subject, text, html, attachments, internalBackup } = req.body || {};
+
+  let to;
+  if (internalBackup === true) {
+    to = process.env.REPORT_RECIPIENTS;
+    if (!to) {
+      return res.status(500).json({ error: "REPORT_RECIPIENTS is not configured" });
+    }
+  } else {
+    to = requestedTo;
+    if (!to || !/\S+@\S+\.\S+/.test(to)) {
+      return res.status(400).json({ error: "A valid recipient email is required" });
+    }
   }
   if (!subject || !text) {
     return res.status(400).json({ error: "subject and text are required" });
@@ -38,9 +56,18 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Both callers of this endpoint are awaited from an interactive UI
+    // action (sending the client email, or the photo backup fired the
+    // moment a job closes/cancels — see sendPhotoBackupEmail in
+    // src/App.jsx) — nodemailer's defaults (up to 2 minutes to even give
+    // up on a connection) would otherwise freeze that action's button for
+    // just as long during a Gmail outage. 10s bounds the worst case.
     const transporter = nodemailer.createTransport({
       service: "gmail",
       auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 10000,
     });
     const mail = { from: process.env.GMAIL_USER, to, subject, text, ...(html ? { html } : {}) };
     if (Array.isArray(attachments) && attachments.length) {
