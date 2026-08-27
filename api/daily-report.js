@@ -13,7 +13,10 @@
 // Required env vars (set in Vercel → Project Settings → Environment Variables):
 //   GMAIL_USER            the Gmail address to send from
 //   GMAIL_APP_PASSWORD    the 16-character App Password for that account
-//   REPORT_RECIPIENTS     comma-separated recipient email address(es)
+//   REPORT_RECIPIENTS     comma-separated recipient email address(es) —
+//                         also where archived jobs' attendance photos get
+//                         emailed before being deleted from Supabase
+//                         (see jobArchive.js / README section 12)
 //   CRON_SECRET           any random string — protects this endpoint from
 //                         being triggered by anyone who finds the URL.
 //                         Vercel automatically sends it as a Bearer token
@@ -23,11 +26,6 @@
 //   REPORT_SEND_HOUR              local hour (0-23) to send at, default 7
 //   REPORT_SEND_TOLERANCE_MINUTES how far from that hour a single daily
 //                                 cron fire is still accepted, default 90
-//   PHOTO_BACKUP_EMAIL            where archived jobs' attendance photos
-//                                 get emailed before being deleted from
-//                                 Supabase (see jobArchive.js / README
-//                                 section 12) — defaults to
-//                                 REPORT_RECIPIENTS if unset
 
 import nodemailer from "nodemailer";
 import { getZonedNow } from "./_lib/time.js";
