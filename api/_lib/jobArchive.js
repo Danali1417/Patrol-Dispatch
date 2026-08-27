@@ -21,6 +21,7 @@
 
 import nodemailer from "nodemailer";
 import { kvGet, kvSet, kvSetSearchable, kvGetPrefixMissingSearch, kvDelete } from "./supabase.js";
+import { fmtDateTime } from "../../src/reportUtils.js";
 
 const JOBS_KEY = "ops:jobs";
 export const JOB_ARCHIVE_PREFIX = "ops:jobarchive:";
@@ -44,6 +45,11 @@ function searchFieldsFor(job) {
 // show what's still on the live board; Logs & analysis pulls the archive
 // back in for anything older, so nothing is actually lost.
 const ARCHIVE_AFTER_MS = 48 * 60 * 60 * 1000;
+
+// Vercel's servers run in UTC — without this, the backup email's times
+// would be shifted from what Control Room actually sees in the app.
+// Same default as api/daily-report.js.
+const REPORT_TIMEZONE = process.env.REPORT_TIMEZONE || "Australia/Sydney";
 
 function defaultTransporter() {
   // Short timeouts (nodemailer defaults to up to 2 minutes) so one bad
@@ -111,6 +117,9 @@ async function backupAndDeletePhotos(job, { transporter } = {}) {
     `Job ${job.jobNumber || job.id} — ${job.siteName || "—"}`,
     `Status: ${job.status === "cancelled" ? "Cancelled" : "Closed"}`,
     `Patrolman: ${job.assigneeName || "—"}`,
+    `Dispatched: ${fmtDateTime(job.dispatchTime, REPORT_TIMEZONE)}`,
+    `Onsite: ${fmtDateTime(job.onsiteTime, REPORT_TIMEZONE)}`,
+    `Offsite: ${fmtDateTime(job.offsiteTime, REPORT_TIMEZONE)}`,
     `Outcome: ${job.reviewNotes || job.cancelReason || "—"}`,
     ``,
     `${attachments.length} attendance photo${attachments.length !== 1 ? "s" : ""} attached — this is the only copy kept once this job is archived.`,
