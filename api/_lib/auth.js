@@ -6,6 +6,7 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { kvGet, kvSet } from "./supabase.js";
+import { clearSubscriptions } from "./push.js";
 
 const SESSION_EXPIRY = process.env.SESSION_EXPIRY_HOURS ? `${process.env.SESSION_EXPIRY_HOURS}h` : "24h";
 
@@ -31,6 +32,13 @@ function activeSessionKey(role, loginName) {
 export async function claimActiveSession(account) {
   const sid = crypto.randomUUID();
   await kvSet(activeSessionKey(account.role, account.loginName), sid);
+  // Push subscriptions are device-level and outlive a session on their
+  // own — logging in here is the one moment we know for certain every
+  // previously-subscribed device for this account is no longer "the"
+  // active one, so this is where stale devices actually get cut off
+  // (see clearSubscriptions' own comment for why this matters more than
+  // relying on those devices to unsubscribe themselves on logout).
+  await clearSubscriptions(account.loginName, account.role).catch(() => {});
   return sid;
 }
 

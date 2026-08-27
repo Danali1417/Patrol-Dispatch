@@ -17,7 +17,7 @@ import {
   resetPassword as apiResetPassword, changeOwnPassword as apiChangeOwnPassword,
   deleteAccount as apiDeleteAccount, bulkUpdateAccounts as apiBulkUpdateAccounts,
 } from "./accountsApi.js";
-import { getPushStatus, enableJobAlerts, notifyJobDispatch, notifyStandDown } from "./push.js";
+import { getPushStatus, enableJobAlerts, disableJobAlerts, notifyJobDispatch, notifyStandDown } from "./push.js";
 import { reverseGeocode, fetchStaticMap } from "./geocode.js";
 import { reportLiveLocation, stopSharingLiveLocation } from "./liveLocation.js";
 import { fetchJobPhotos, persistJobPhotos } from "./jobPhotos.js";
@@ -321,6 +321,7 @@ export default function SentrylinePrototype() {
     const INACTIVITY_LIMIT_MS = 30 * 60 * 1000;
     const check = setInterval(() => {
       if (Date.now() - lastActivityRef.current >= INACTIVITY_LIMIT_MS) {
+        disableJobAlerts();
         apiLogout();
         setSession(null);
         setLogoutReason("inactivity");
@@ -364,18 +365,27 @@ export default function SentrylinePrototype() {
     // Fired before apiLogout() clears the auth token — the effect
     // cleanup above would otherwise run after the token's already gone
     // and silently fail to delete the location (it's still there as a
-    // fallback for other exits, e.g. just closing the tab).
+    // fallback for other exits, e.g. just closing the tab). Same reason
+    // disableJobAlerts() runs here too: signing out should stop job
+    // alerts landing on this device immediately, not just once someone
+    // else eventually logs in on this same account elsewhere.
     if (session?.role === "patrolman") stopSharingLiveLocation(session.loginName);
+    disableJobAlerts();
     apiLogout();
     setSession(null);
   }, [session]);
 
   // Wire up forced sign-out if any authenticated request ever comes back
   // 401 — auth.js already clears the stored token. `reason` is "superseded"
-  // when this same account has since logged in elsewhere, otherwise it's a
-  // plain expired/invalid token.
+  // when this same account has since logged in elsewhere (the server's
+  // already cleared this account's push subscriptions at that point — see
+  // claimActiveSession — so disableJobAlerts() here is just tidying up
+  // this device's own local registration), otherwise it's a plain
+  // expired/invalid token, where this is the only thing that stops this
+  // device from still getting job alerts for an account it's no longer
+  // signed into.
   useEffect(() => {
-    setOnUnauthorized((reason) => { setSession(null); setLogoutReason(reason === "superseded" ? "superseded" : "expired"); });
+    setOnUnauthorized((reason) => { disableJobAlerts(); setSession(null); setLogoutReason(reason === "superseded" ? "superseded" : "expired"); });
   }, []);
 
   // Load jobs, accounts, zones, sites, roster — all require a session now,

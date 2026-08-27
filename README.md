@@ -234,6 +234,14 @@ their acknowledgement is timestamped and shown to Control Room on the
 job, and recorded in the job's activity log alongside the reassignment
 itself. Uses the same VAPID config above — nothing extra to set up.
 
+**A device stops getting alerts as soon as it's no longer signed in** —
+either by explicitly signing out, or by someone else signing into that
+same login elsewhere (see "Security" below for the one-active-session
+rule). The moment a login is claimed on a new device, every
+previously-registered device for that account is cut off from future
+job alerts immediately, even if that old device's browser tab is
+closed and never gets a chance to unsubscribe itself.
+
 ## 7. Location names on photos, onsite/offsite, and the activity log
 
 No setup needed — these work out of the box.
