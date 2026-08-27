@@ -1602,6 +1602,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   const [showCancelForm, setShowCancelForm] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
   const [onsiteEdit, setOnsiteEdit] = useState(toLocalInputValue(job.onsiteTime));
   const [offsiteEdit, setOffsiteEdit] = useState(toLocalInputValue(job.offsiteTime));
   const [photos, setPhotos] = useState([]);
@@ -1708,8 +1709,13 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
     }
   }
 
-  function confirmCancel() {
-    logAction("Cancelled", cancelReason.trim(), { status: "cancelled", cancelReason: cancelReason.trim(), cancelledAt: new Date().toISOString() });
+  async function confirmCancel() {
+    setCancelBusy(true);
+    const patch = { status: "cancelled", cancelReason: cancelReason.trim(), cancelledAt: new Date().toISOString() };
+    const backup = await sendPhotoBackupEmail({ ...jobWithPhotos, ...patch });
+    if (backup.sent) patch.photosBackedUpAt = new Date().toISOString();
+    await logAction("Cancelled", cancelReason.trim(), patch);
+    setCancelBusy(false);
     setShowCancelForm(false);
     showToast("Job cancelled.");
   }
@@ -1808,8 +1814,10 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
           </div>
           <textarea rows={2} value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="e.g. Monitoring advised stand down — client cancelled the alarm" style={{ ...selectStyle, resize: "vertical" }} />
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-            <button onClick={confirmCancel} style={{ ...primaryBtn, background: "var(--breach)" }}><Ban size={14} /> Confirm cancel</button>
-            <button onClick={() => setShowCancelForm(false)} style={secondaryBtn}>Never mind</button>
+            <button onClick={confirmCancel} disabled={cancelBusy} style={{ ...primaryBtn, background: "var(--breach)", opacity: cancelBusy ? 0.6 : 1, cursor: cancelBusy ? "not-allowed" : "pointer" }}>
+              <Ban size={14} /> {cancelBusy ? "Cancelling…" : "Confirm cancel"}
+            </button>
+            <button onClick={() => setShowCancelForm(false)} disabled={cancelBusy} style={secondaryBtn}>Never mind</button>
           </div>
         </div>
       )}
@@ -1954,9 +1962,10 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
           job={{ ...jobWithPhotos, reviewNotes: notes }}
           companyName={companyName}
           onClose={() => setShowEmail(false)}
-          onSent={({ clientEmail, emailSentByApp }) => {
+          onSent={({ clientEmail, emailSentByApp, photosBackedUp }) => {
             logAction(emailSentByApp ? "Client email sent" : "Client email marked sent", clientEmail, {
               status: "emailed", emailedAt: new Date().toISOString(), reviewNotes: notes, clientEmail, emailSentByApp,
+              ...(photosBackedUp ? { photosBackedUpAt: new Date().toISOString() } : {}),
             });
             setShowEmail(false);
           }}
@@ -2065,6 +2074,38 @@ function photoAttachments(job) {
     const ext = contentType.split("/")[1] || "jpg";
     return { filename: `${job.jobNumber}-photo-${i + 1}.${ext}`, content, contentType };
   }).filter(Boolean);
+}
+
+// Fired the moment a job closes or cancels (confirmCancel, EmailModal's
+// sendNow, and "Mark as sent/closed") so the backup photo email goes out
+// right away instead of waiting for the 48h archive sweep. Best-effort —
+// on any failure the archive sweep still catches it later (see
+// backupAndDeletePhotos in api/_lib/jobArchive.js), so a network blip here
+// never loses a photo, just delays its backup. `to` is deliberately never
+// passed: the server fills in REPORT_RECIPIENTS itself so that address
+// never has to reach the browser.
+async function sendPhotoBackupEmail(job) {
+  const attachments = photoAttachments(job);
+  if (!attachments.length) return { sent: false };
+  const subject = `Attendance photo backup — ${job.jobNumber}${job.siteName ? ` — ${job.siteName}` : ""}`;
+  const text = [
+    `Job ${job.jobNumber} — ${job.siteName || "—"}`,
+    `Status: ${job.status === "cancelled" ? "Cancelled" : "Closed"}`,
+    `Patrolman: ${job.assigneeName || "—"}`,
+    `Outcome: ${job.reviewNotes || job.cancelReason || "—"}`,
+    ``,
+    `${attachments.length} attendance photo${attachments.length !== 1 ? "s" : ""} attached.`,
+  ].join("\n");
+  try {
+    const res = await fetch("/api/send-client-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-App-Secret": import.meta.env.VITE_APP_MAIL_SECRET || "" },
+      body: JSON.stringify({ internalBackup: true, subject, text, attachments }),
+    });
+    return { sent: res.ok };
+  } catch (e) {
+    return { sent: false };
+  }
 }
 
 function loadImageSize(dataUrl) {
@@ -2213,11 +2254,21 @@ function EmailModal({ job, companyName, onClose, onSent }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Send failed (${res.status})`);
       showToast("Email sent to client.");
-      onSent({ clientEmail: clientEmail.trim(), emailSentByApp: true });
+      const backup = await sendPhotoBackupEmail(job);
+      onSent({ clientEmail: clientEmail.trim(), emailSentByApp: true, photosBackedUp: backup.sent });
     } catch (e) {
       setError(e.message || "Couldn't send — try again, or copy the text and send it yourself.");
     }
     setBusy(false);
+  }
+
+  // The client email is skipped here, but the internal backup isn't — this
+  // is exactly the path that used to leave photos with no email at all.
+  async function markSentWithoutEmail() {
+    setBusy(true);
+    const backup = await sendPhotoBackupEmail(job);
+    setBusy(false);
+    onSent({ clientEmail: clientEmail.trim(), emailSentByApp: false, photosBackedUp: backup.sent });
   }
 
   return (
@@ -2243,7 +2294,9 @@ function EmailModal({ job, companyName, onClose, onSent }) {
         {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 8 }}>{error}</div>}
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
           <button onClick={() => navigator.clipboard?.writeText(text)} style={secondaryBtn}><Copy size={13} /> Copy</button>
-          <button onClick={() => onSent({ clientEmail: clientEmail.trim(), emailSentByApp: false })} style={secondaryBtn}><CheckCircle2 size={13} /> Mark as sent / closed</button>
+          <button onClick={markSentWithoutEmail} disabled={busy} style={{ ...secondaryBtn, opacity: busy ? 0.6 : 1, cursor: busy ? "not-allowed" : "pointer" }}>
+            <CheckCircle2 size={13} /> {busy ? "Working…" : "Mark as sent / closed"}
+          </button>
           <button
             onClick={sendNow}
             disabled={busy || !emailLooksValid}
