@@ -284,7 +284,9 @@ export default function SentrylinePrototype() {
   const [now, setNow] = useState(Date.now());
   const [banner, setBanner] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [autoLoggedOut, setAutoLoggedOut] = useState(false);
+  // null | "inactivity" | "superseded" | "expired" — why the Login screen
+  // is showing a "you were signed out" banner, if at all.
+  const [logoutReason, setLogoutReason] = useState(null);
   const [toast, setToast] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
   const prevJobsRef = useRef([]);
@@ -321,7 +323,7 @@ export default function SentrylinePrototype() {
       if (Date.now() - lastActivityRef.current >= INACTIVITY_LIMIT_MS) {
         apiLogout();
         setSession(null);
-        setAutoLoggedOut(true);
+        setLogoutReason("inactivity");
       }
     }, 30000);
 
@@ -369,9 +371,11 @@ export default function SentrylinePrototype() {
   }, [session]);
 
   // Wire up forced sign-out if any authenticated request ever comes back
-  // 401 (expired/invalid token) — auth.js already clears the stored token.
+  // 401 — auth.js already clears the stored token. `reason` is "superseded"
+  // when this same account has since logged in elsewhere, otherwise it's a
+  // plain expired/invalid token.
   useEffect(() => {
-    setOnUnauthorized(() => { setSession(null); setAutoLoggedOut(true); });
+    setOnUnauthorized((reason) => { setSession(null); setLogoutReason(reason === "superseded" ? "superseded" : "expired"); });
   }, []);
 
   // Load jobs, accounts, zones, sites, roster — all require a session now,
@@ -494,10 +498,10 @@ export default function SentrylinePrototype() {
   const persistJobs = useCallback(async (updated) => {
     setJobs(updated);
     prevJobsRef.current = updated;
-    // Photos never belong in this blob — every signed-in device polls it
-    // every 4 seconds, and photos are stored separately (jobPhotos.js) for
-    // exactly that reason. Stripped here too as a backstop in case a future
-    // call site ever passes one through by accident.
+    // Photos never belong in this blob — every signed-in device polls it,
+    // and photos are stored separately (jobPhotos.js) for exactly that
+    // reason. Stripped here too as a backstop in case a future call site
+    // ever passes one through by accident.
     const slim = updated.map(({ photos, ...rest }) => rest);
     try { await window.storage.set(JOBS_KEY, JSON.stringify(slim), true); } catch (e) { console.error(e); }
   }, []);
@@ -605,10 +609,10 @@ export default function SentrylinePrototype() {
         <ConfirmContext.Provider value={showConfirm}>
           <Shell>
             <Login
-              autoLoggedOut={autoLoggedOut}
+              logoutReason={logoutReason}
               logoUrl={logoUrl}
               companyName={companyName}
-              onLogin={(s) => { setSession(s); setAutoLoggedOut(false); }}
+              onLogin={(s) => { setSession(s); setLogoutReason(null); }}
             />
             <ToastOverlay toast={toast} />
             <ConfirmDialog confirmState={confirmState} onClose={() => setConfirmState(null)} />
@@ -759,7 +763,7 @@ function Logo({ src }) {
    LOGIN — role select, then Login Name / Password only
 ---------------------------------------------------------------- */
 
-function Login({ autoLoggedOut, logoUrl, companyName, onLogin }) {
+function Login({ logoutReason, logoUrl, companyName, onLogin }) {
   const [role, setRole] = useState(null);
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
@@ -797,9 +801,15 @@ function Login({ autoLoggedOut, logoUrl, companyName, onLogin }) {
         <div style={{ fontSize: 13, color: "var(--text-dim)", textAlign: "center", marginBottom: 32 }}>
           Choose your sign-in
         </div>
-        {autoLoggedOut && (
+        {logoutReason && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: 12, borderRadius: 7, background: "#FFFBEB", border: "1px solid var(--warn)", color: "#92400E", fontSize: 12.5, marginBottom: 20 }}>
-            <Clock size={14} /> Signed out after 30 minutes of inactivity — please sign in again.
+            {logoutReason === "superseded" ? (
+              <><ShieldAlert size={14} /> Signed out — this login was opened in another window or device.</>
+            ) : logoutReason === "inactivity" ? (
+              <><Clock size={14} /> Signed out after 30 minutes of inactivity — please sign in again.</>
+            ) : (
+              <><Clock size={14} /> Your session expired — please sign in again.</>
+            )}
           </div>
         )}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

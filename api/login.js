@@ -3,7 +3,7 @@
 // only place a password is ever checked — the client sends it once here
 // and never receives a stored password or hash back.
 
-import { verifyPassword, issueSessionToken, hashPassword } from "./_lib/auth.js";
+import { verifyPassword, issueSessionToken, hashPassword, claimActiveSession } from "./_lib/auth.js";
 import { kvGet, kvSet } from "./_lib/supabase.js";
 import { DEFAULT_ACCOUNTS } from "./_lib/defaultAccounts.js";
 
@@ -55,7 +55,10 @@ export default async function handler(req, res) {
       return res.status(403).json({ error: "This login has been deactivated. See your manager." });
     }
 
-    const token = issueSessionToken(account);
+    // Claiming a fresh session id here invalidates any token already out
+    // there for this same account — the point being one login, one window.
+    const sid = await claimActiveSession(account);
+    const token = issueSessionToken(account, sid);
     const { password: _pw, passwordHash: _hash, ...safeAccount } = account;
     return res.status(200).json({ token, account: safeAccount });
   } catch (err) {

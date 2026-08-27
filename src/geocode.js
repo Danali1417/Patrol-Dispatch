@@ -16,7 +16,7 @@ export async function reverseGeocode(lat, lon, timeoutMs = 5000) {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       signal: controller.signal,
     });
-    if (res.status === 401) { reportUnauthorized(); return null; }
+    if (res.status === 401) { const body = await res.json().catch(() => ({})); reportUnauthorized(body.reason); return null; }
     if (!res.ok) return null;
     const data = await res.json();
     return data.name || null;
@@ -41,7 +41,7 @@ export async function forwardGeocode(address, timeoutMs = 6000) {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       signal: controller.signal,
     });
-    if (res.status === 401) { reportUnauthorized(); return null; }
+    if (res.status === 401) { const body = await res.json().catch(() => ({})); reportUnauthorized(body.reason); return null; }
     if (!res.ok) return null;
     const data = await res.json();
     return typeof data.lat === "number" && typeof data.lon === "number" ? { lat: data.lat, lon: data.lon } : null;
@@ -66,7 +66,7 @@ export async function fetchStaticMap(lat, lon, timeoutMs = 8000) {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       signal: controller.signal,
     });
-    if (res.status === 401) { reportUnauthorized(); return null; }
+    if (res.status === 401) { const body = await res.json().catch(() => ({})); reportUnauthorized(body.reason); return null; }
     if (!res.ok) return null;
     const data = await res.json();
     return data.dataUrl || null;

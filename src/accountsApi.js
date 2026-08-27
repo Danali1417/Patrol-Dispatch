@@ -17,7 +17,8 @@ async function accountsFetch(opts = {}) {
     },
   });
   if (res.status === 401) {
-    reportUnauthorized();
+    const body = await res.json().catch(() => ({}));
+    reportUnauthorized(body.reason);
     throw new Error("Session expired — please sign in again.");
   }
   const data = await res.json().catch(() => ({}));

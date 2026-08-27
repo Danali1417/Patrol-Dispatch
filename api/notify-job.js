@@ -18,7 +18,7 @@ const JOBS_KEY = "ops:jobs";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
-  const session = requireRole(req, res, ["manager", "operator"]);
+  const session = await requireRole(req, res, ["manager", "operator"]);
   if (!session) return;
 
   const body = req.body || {};

@@ -14,7 +14,7 @@
 // patrolman may only read/write/delete their own key; Control Room and
 // Manager can bulk-read all of them via ?prefix=ops:liveloc:.
 
-import { getSession, requireRole, requireSession } from "./_lib/auth.js";
+import { requireRole, requireSession } from "./_lib/auth.js";
 import { kvGet, kvSet, kvGetPrefix, kvQueryPrefix, kvDelete, kvDeletePrefix } from "./_lib/supabase.js";
 import { sendPushToRole } from "./_lib/push.js";
 import { JOB_ARCHIVE_PREFIX } from "./_lib/jobArchive.js";
@@ -120,7 +120,7 @@ async function applyStationaryTracking(key, incoming) {
 export default async function handler(req, res) {
   // Control Room / Manager bulk-reading every patrolman's live location.
   if (req.method === "GET" && req.query?.prefix === LIVELOC_PREFIX) {
-    const session = requireRole(req, res, ["manager", "operator"]);
+    const session = await requireRole(req, res, ["manager", "operator"]);
     if (!session) return;
     try {
       const rows = await kvGetPrefix(LIVELOC_PREFIX);
@@ -140,7 +140,7 @@ export default async function handler(req, res) {
   // that's what made ops:jobs itself grow unbounded before it was split
   // out, and this is the same fix applied one layer over.
   if (req.method === "GET" && req.query?.archiveQuery === "1") {
-    const session = requireRole(req, res, ["manager", "operator"]);
+    const session = await requireRole(req, res, ["manager", "operator"]);
     if (!session) return;
     const { term, from, to } = req.query;
     try {
@@ -163,7 +163,7 @@ export default async function handler(req, res) {
   // every row first — a plain DELETE-by-prefix stays cheap and safe
   // regardless of how large either has grown.
   if (req.method === "DELETE" && (req.query?.resetArchive === "1" || req.query?.resetPhotos === "1")) {
-    const session = requireRole(req, res, ["manager"]);
+    const session = await requireRole(req, res, ["manager"]);
     if (!session) return;
     try {
       if (req.query.resetArchive === "1") await kvDeletePrefix(JOB_ARCHIVE_PREFIX);
@@ -182,7 +182,7 @@ export default async function handler(req, res) {
   // (any signed-in role), just split into its own key per job so a photo
   // upload never touches the board's polled blob.
   if (typeof key === "string" && key.startsWith(JOB_PHOTOS_PREFIX)) {
-    const session = requireRole(req, res, ["manager", "operator", "patrolman"]);
+    const session = await requireRole(req, res, ["manager", "operator", "patrolman"]);
     if (!session) return;
     try {
       if (req.method === "GET") {
@@ -207,7 +207,7 @@ export default async function handler(req, res) {
   }
 
   if (typeof key === "string" && key.startsWith(LIVELOC_PREFIX)) {
-    const session = requireSession(req, res);
+    const session = await requireSession(req, res);
     if (!session) return;
     if (key !== `${LIVELOC_PREFIX}${session.loginName}` || session.role !== "patrolman") {
       return res.status(403).json({ error: "You can only share your own location." });
@@ -241,8 +241,9 @@ export default async function handler(req, res) {
   }
 
   if (req.method === "GET") {
-    if (!PUBLIC_READ_KEYS.has(key) && !getSession(req)) {
-      return res.status(401).json({ error: "Unauthorized — please sign in again." });
+    if (!PUBLIC_READ_KEYS.has(key)) {
+      const session = await requireSession(req, res);
+      if (!session) return; // response already sent, with a reason
     }
     try {
       let value = await kvGet(key);
@@ -261,7 +262,7 @@ export default async function handler(req, res) {
       : OPERATOR_UP_WRITE_KEYS.has(key)
       ? ["manager", "operator"]
       : ["manager", "operator", "patrolman"];
-    const session = requireRole(req, res, roles);
+    const session = await requireRole(req, res, roles);
     if (!session) return; // response already sent
 
     const { value } = req.body || {};
