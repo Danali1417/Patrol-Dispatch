@@ -10,9 +10,12 @@ export function setOnUnauthorized(cb) {
   onUnauthorized = cb;
 }
 
-export function reportUnauthorized() {
+// `reason` is the server's classification of why the token stopped working:
+// "superseded" (this account logged in on another device/browser) vs.
+// anything else (plain expiry) — lets the sign-in screen explain which.
+export function reportUnauthorized(reason) {
   clearToken();
-  if (onUnauthorized) onUnauthorized();
+  if (onUnauthorized) onUnauthorized(reason);
 }
 
 export function getToken() {

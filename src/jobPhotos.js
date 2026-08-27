@@ -1,10 +1,10 @@
 // Attendance photos for a job, kept in their own key (ops:jobphotos:<id>)
 // instead of embedded in the job record — the board polls the whole job
-// list every 4 seconds on every signed-in device, and photos are by far
-// the biggest thing in a job, so they're fetched only when a job's own
-// detail view actually needs them (viewing it, generating its PDF,
-// emailing it), never as part of that poll. See api/kv.js for the
-// server-side migration that moves older embedded photos out on first read.
+// list on every signed-in device, and photos are by far the biggest thing
+// in a job, so they're fetched only when a job's own detail view actually
+// needs them (viewing it, generating its PDF, emailing it), never as part
+// of that poll. See api/kv.js for the server-side migration that moves
+// older embedded photos out on first read.
 
 import { getToken, reportUnauthorized } from "./auth.js";
 
@@ -17,7 +17,8 @@ async function apiFetch(path, opts = {}) {
     headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(opts.headers || {}) },
   });
   if (res.status === 401) {
-    reportUnauthorized();
+    const body = await res.json().catch(() => ({}));
+    reportUnauthorized(body.reason);
     throw new Error("Session expired — please sign in again.");
   }
   return res;

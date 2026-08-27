@@ -1,6 +1,6 @@
 // Jobs closed out (emailed) or cancelled for 48+ hours are swept off the
 // live board and into their own key (ops:jobarchive:<id>) by a daily cron
-// — see api/_lib/jobArchive.js. The board's 4-second poll never has to
+// — see api/_lib/jobArchive.js. The board's poll never has to
 // carry that history. Always fetched by search term and/or date range
 // (filtered server-side via api/kv.js's archiveQuery mode) — never "give
 // me everything," which is exactly the pattern that made ops:jobs itself
@@ -15,7 +15,8 @@ async function apiFetch(path, opts = {}) {
     headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(opts.headers || {}) },
   });
   if (res.status === 401) {
-    reportUnauthorized();
+    const body = await res.json().catch(() => ({}));
+    reportUnauthorized(body.reason);
     throw new Error("Session expired — please sign in again.");
   }
   return res;

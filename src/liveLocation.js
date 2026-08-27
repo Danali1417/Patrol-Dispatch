@@ -15,7 +15,8 @@ async function apiFetch(path, opts = {}) {
     headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(opts.headers || {}) },
   });
   if (res.status === 401) {
-    reportUnauthorized();
+    const body = await res.json().catch(() => ({}));
+    reportUnauthorized(body.reason);
     throw new Error("Session expired — please sign in again.");
   }
   return res;

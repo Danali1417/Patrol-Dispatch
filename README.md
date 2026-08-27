@@ -396,6 +396,11 @@ Sign in as Manager → change every password from there before real use.
 - Signing in issues a signed session token (kept in the browser's local
   storage) that expires after 24 hours or 30 minutes of inactivity,
   whichever comes first.
+- Only one browser/device can be signed in on a given login at a time —
+  signing in again (same login name, same role) immediately signs the
+  previous one out, with a message explaining why. This also keeps the
+  same person from accidentally leaving several tabs open all polling
+  the board at once.
 - Supabase's row-level security has no policies at all (see step 1) — the
   public "anon" key has zero access. Only the server-only service role
   key, which is never sent to the browser, can read or write data.

@@ -42,7 +42,7 @@ function pinSvg(px, py) {
 
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
-  const session = requireSession(req, res);
+  const session = await requireSession(req, res);
   if (!session) return;
 
   const lat = Number(req.query?.lat);

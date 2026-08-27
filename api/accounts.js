@@ -29,7 +29,7 @@ function findIndex(accounts, loginName, role) {
 
 export default async function handler(req, res) {
   if (req.method === "GET") {
-    const session = requireSession(req, res);
+    const session = await requireSession(req, res);
     if (!session) return;
     try {
       let accounts = await loadAccounts();
@@ -50,7 +50,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === "POST") {
-    const session = requireRole(req, res, ["manager"]);
+    const session = await requireRole(req, res, ["manager"]);
     if (!session) return;
     const { loginName, password, role, displayName, shift, run, contactNumber } = req.body || {};
     if (!loginName || !password || !role) {
@@ -86,7 +86,7 @@ export default async function handler(req, res) {
     const { action } = req.body || {};
 
     if (action === "changeOwnPassword") {
-      const session = requireSession(req, res);
+      const session = await requireSession(req, res);
       if (!session) return;
       const { currentPassword, newPassword } = req.body || {};
       if (!currentPassword || !newPassword || newPassword.length < 4) {
@@ -109,7 +109,7 @@ export default async function handler(req, res) {
     }
 
     if (action === "resetPassword") {
-      const session = requireRole(req, res, ["manager"]);
+      const session = await requireRole(req, res, ["manager"]);
       if (!session) return;
       const { loginName, role, newPassword } = req.body || {};
       if (!loginName || !role || !newPassword || newPassword.length < 4) {
@@ -133,7 +133,7 @@ export default async function handler(req, res) {
       // Bulk create/update in one read-modify-write — used by the Excel
       // roster import and by run rename/delete cascades that can touch
       // many patrolman accounts at once.
-      const session = requireRole(req, res, ["manager", "operator"]);
+      const session = await requireRole(req, res, ["manager", "operator"]);
       if (!session) return;
       const { creates = [], updates = [] } = req.body || {};
       const allowed = ["run", "contactNumber", "active", "displayName", "shift"];
@@ -168,7 +168,7 @@ export default async function handler(req, res) {
     }
 
     // Default: profile field update (run, contactNumber, active, displayName, shift)
-    const session = requireRole(req, res, ["manager"]);
+    const session = await requireRole(req, res, ["manager"]);
     if (!session) return;
     const { loginName, role, patch } = req.body || {};
     if (!loginName || !role || !patch || typeof patch !== "object") {
@@ -191,7 +191,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === "DELETE") {
-    const session = requireRole(req, res, ["manager"]);
+    const session = await requireRole(req, res, ["manager"]);
     if (!session) return;
     const { loginName, role } = req.body || {};
     if (!loginName || !role) return res.status(400).json({ error: "loginName and role are required." });
