@@ -17,7 +17,7 @@
 import { requireRole, requireSession } from "./_lib/auth.js";
 import { kvGet, kvSet, kvGetPrefix, kvQueryPrefix, kvDelete, kvDeletePrefix } from "./_lib/supabase.js";
 import { sendPushToRole } from "./_lib/push.js";
-import { JOB_ARCHIVE_PREFIX } from "./_lib/jobArchive.js";
+import { JOB_ARCHIVE_PREFIX, JOB_PHOTOS_PREFIX } from "./_lib/jobArchive.js";
 
 const PUBLIC_READ_KEYS = new Set(["ops:logo", "ops:companyName"]);
 const MANAGER_ONLY_WRITE_KEYS = new Set(["ops:logo", "ops:companyName", "ops:outcomePhrases"]);
@@ -29,7 +29,6 @@ const STATIONARY_RADIUS_M = 50; // GPS jitter tolerance — "hasn't left this sp
 const STATIONARY_ALERT_MS = 30 * 60 * 1000;
 
 const JOBS_KEY = "ops:jobs";
-const JOB_PHOTOS_PREFIX = "ops:jobphotos:";
 
 // Attendance photos live in their own per-job key instead of embedded in
 // the job record, so the board's every-4-second poll (every signed-in

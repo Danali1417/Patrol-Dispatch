@@ -334,10 +334,11 @@ means:
   still on the live board — recent history, not everything ever. Jobs
   still being worked (dispatched, submitted, reviewed) are never
   archived regardless of age.
-- Nothing is actually lost, though: **searching by job number or site**
-  on any board still finds an archived job and opens it, photos
-  included — shown read-only with an "Archived" label, since edits
-  there have nowhere live to save back to.
+- The job's own details aren't lost: **searching by job number or
+  site** on any board still finds an archived job and opens it —
+  shown read-only with an "Archived" label, since edits there have
+  nowhere live to save back to. Its attendance photos are a separate
+  story — see section 12.
 - The Manager's **"Reset test data"** button clears archived jobs too,
   not just what's currently on the board.
 
@@ -367,6 +368,35 @@ matter how many years of jobs pile up. That's the difference between
 this and the original problem in section 9/10: it's not just that
 old jobs move out of the way, it's that nothing ever has to read all
 of them back at once again either.
+
+## 12. Attendance photos are backed up by email, then deleted
+
+Photos are by far the largest thing this app stores — a job's text
+(result, activity log, times) stays tiny forever, but photos add up
+fast, and it's what actually risks the database's storage/transfer
+limits over months and years, not the text.
+
+So right before a job is archived (the same 48-hours-after-closed-or-
+cancelled sweep from section 10), if it has attendance photos, this
+app:
+
+1. Emails them as attachments to `PHOTO_BACKUP_EMAIL` (or, if that's
+   not set, whatever `REPORT_RECIPIENTS` is already configured to —
+   see section 4), along with the job's result and outcome notes as
+   the email body.
+2. Deletes them from Supabase.
+
+The archived job record itself is untouched — its text, result, and
+activity log stay searchable forever (section 11). Only the photo
+bytes are gone; opening an old archived job that had photos shows a
+small note that they were emailed as a backup and removed, instead of
+just silently looking like there never were any.
+
+If sending that email fails for any reason (bad credentials, Gmail
+hiccup, `GMAIL_USER`/`GMAIL_APP_PASSWORD`/recipient not configured
+yet), the photos are simply left in place and it's retried
+automatically on the next day's cron — a failed send can never lose
+the only copy.
 
 ## Updating it later
 
