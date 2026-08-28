@@ -1746,8 +1746,8 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
     <div style={{ maxWidth: 640 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <button onClick={onBack} style={backBtn}><ArrowLeft size={13} /> Back to board</button>
-        <button onClick={downloadPdf} disabled={pdfBusy} style={{ ...secondaryBtn, opacity: pdfBusy ? 0.6 : 1 }}>
-          <Download size={13} /> {pdfBusy ? "Generating…" : "Download attendance PDF"}
+        <button onClick={downloadPdf} disabled={pdfBusy || !photosLoaded} style={{ ...secondaryBtn, opacity: pdfBusy || !photosLoaded ? 0.6 : 1 }}>
+          <Download size={13} /> {pdfBusy ? "Generating…" : !photosLoaded ? "Loading…" : "Download attendance PDF"}
         </button>
       </div>
       <JobHeader job={job} />
