@@ -242,6 +242,12 @@ previously-registered device for that account is cut off from future
 job alerts immediately, even if that old device's browser tab is
 closed and never gets a chance to unsubscribe itself.
 
+Signing back into the **same** device doesn't require clicking "Turn
+on job alerts" again — that only re-appears for a device that's
+genuinely new to this login (or was the one cut off by someone else
+signing in elsewhere). The device you actually use every day silently
+picks its alerts back up the moment you sign back in.
+
 ## 7. Location names on photos, onsite/offsite, and the activity log
 
 No setup needed — these work out of the box.
