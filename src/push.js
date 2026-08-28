@@ -74,6 +74,42 @@ export async function enableJobAlerts() {
   }
 }
 
+// Every fresh login wipes this account's server-side subscriptions (see
+// claimActiveSession in api/_lib/auth.js) — necessary so a device left
+// signed in elsewhere actually stops getting alerts, but it means the
+// device that just logged in would otherwise need "Turn on job alerts"
+// clicked again every single time, even signing back in on the same
+// browser it always uses. Called right after every successful login: if
+// this device already has notification permission and an existing local
+// subscription (from having enabled it before), silently re-registers
+// that same subscription server-side — no permission prompt, no banner,
+// nothing for the user to notice or click. If it was never enabled on
+// this device, this is a no-op and the "Turn on job alerts" banner still
+// shows as normal.
+export async function resyncJobAlertsIfEnabled() {
+  try {
+    if (!pushSupported() || Notification.permission !== "granted") return;
+    const registration = await navigator.serviceWorker.getRegistration();
+    if (!registration) return;
+    const subscription = await registration.pushManager.getSubscription();
+    if (!subscription) return;
+    await apiFetch("/api/push-subscribe", {
+      method: "POST",
+      body: JSON.stringify({ subscription: subscription.toJSON() }),
+    });
+  } catch (e) { /* best-effort — worst case, the banner reappears and they click it again */ }
+}
+
+// Tells the server to stop sending pushes to this device — but, deliberately,
+// does NOT unsubscribe the browser's own local registration. Signing back
+// into the same account on the same device (the overwhelmingly common
+// case — SESSION_EXPIRY / the operator inactivity timeout / an ordinary
+// sign-out and back in) can then silently restore delivery via
+// resyncJobAlertsIfEnabled() below, with no permission prompt and no
+// banner, because the local subscription this device already has is
+// still sitting there ready to be re-registered. Only the server-side
+// record — the thing that actually controls who gets notified — is
+// removed here.
 export async function disableJobAlerts() {
   try {
     const registration = await navigator.serviceWorker.getRegistration();
@@ -85,15 +121,13 @@ export async function disableJobAlerts() {
     // handling calls back into that same handler, which calls this again,
     // recursing for as long as the DELETE keeps failing. A stale/missing
     // token here just means the server-side record was likely already
-    // cleaned up another way (e.g. claimActiveSession on a new login) —
-    // this call unsubscribing the browser's own copy is what matters.
+    // cleaned up another way (e.g. claimActiveSession on a new login).
     const token = getToken();
     await fetch("/api/push-subscribe", {
       method: "DELETE",
       headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: JSON.stringify({ endpoint: subscription.endpoint }),
     }).catch(() => {});
-    await subscription.unsubscribe();
   } catch (e) { /* best-effort */ }
 }
 

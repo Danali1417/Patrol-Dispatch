@@ -17,7 +17,7 @@ import {
   resetPassword as apiResetPassword, changeOwnPassword as apiChangeOwnPassword,
   deleteAccount as apiDeleteAccount, bulkUpdateAccounts as apiBulkUpdateAccounts,
 } from "./accountsApi.js";
-import { getPushStatus, enableJobAlerts, disableJobAlerts, notifyJobDispatch, notifyStandDown } from "./push.js";
+import { getPushStatus, enableJobAlerts, disableJobAlerts, resyncJobAlertsIfEnabled, notifyJobDispatch, notifyStandDown } from "./push.js";
 import { reverseGeocode, fetchStaticMap } from "./geocode.js";
 import { reportLiveLocation, stopSharingLiveLocation } from "./liveLocation.js";
 import { fetchJobPhotos, persistJobPhotos } from "./jobPhotos.js";
@@ -622,7 +622,7 @@ export default function SentrylinePrototype() {
               logoutReason={logoutReason}
               logoUrl={logoUrl}
               companyName={companyName}
-              onLogin={(s) => { setSession(s); setLogoutReason(null); }}
+              onLogin={(s) => { setSession(s); setLogoutReason(null); resyncJobAlertsIfEnabled(); }}
             />
             <ToastOverlay toast={toast} />
             <ConfirmDialog confirmState={confirmState} onClose={() => setConfirmState(null)} />
