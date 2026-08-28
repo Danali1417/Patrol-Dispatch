@@ -23,6 +23,33 @@ async function nominatimFetch(url) {
   }
 }
 
+async function geocodeOnce(address) {
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(address)}`;
+  const response = await nominatimFetch(url);
+  if (!response.ok) return null;
+  const results = await response.json();
+  const first = results[0];
+  if (!first) return null;
+  return { lat: Number(first.lat), lon: Number(first.lon) };
+}
+
+// Finds the LAST "<number> <street name> <street type>" in the string and
+// returns from there onward — e.g. "LEVEL 1 SHOP 1056 WESTPOINT S/C 17
+// PATRICK STREET BLACKTOWN NSW 2148" becomes "17 PATRICK STREET BLACKTOWN
+// NSW 2148". Last match rather than first, since a shop/suite number
+// earlier in the string ("SHOP 1056") can itself look like a street
+// number — the real street address is whichever such match sits closest
+// to the suburb/state/postcode at the end.
+const STREET_TYPES = "STREET|ST|ROAD|RD|AVENUE|AVE|DRIVE|DR|COURT|CT|PLACE|PL|LANE|LN|HIGHWAY|HWY|PARADE|PDE|CRESCENT|CRES|CLOSE|CL|WAY|BOULEVARD|BLVD|TERRACE|TCE|CIRCUIT|CCT|GROVE|GR";
+const STREET_ADDRESS_RE = new RegExp(`\\d+[A-Za-z]?\\s+[A-Za-z0-9'\\s]*?\\b(?:${STREET_TYPES})\\b`, "gi");
+
+function simplifyToStreetAddress(address) {
+  const matches = [...address.matchAll(STREET_ADDRESS_RE)];
+  if (!matches.length) return null;
+  const last = matches[matches.length - 1];
+  return address.slice(last.index).trim();
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
   const session = await requireSession(req, res);
@@ -30,13 +57,19 @@ export default async function handler(req, res) {
 
   if (typeof req.query?.address === "string" && req.query.address.trim()) {
     try {
-      const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(req.query.address.trim())}`;
-      const response = await nominatimFetch(url);
-      if (!response.ok) return res.status(200).json({ lat: null, lon: null });
-      const results = await response.json();
-      const first = results[0];
-      if (!first) return res.status(200).json({ lat: null, lon: null });
-      return res.status(200).json({ lat: Number(first.lat), lon: Number(first.lon) });
+      const raw = req.query.address.trim();
+      let coords = await geocodeOnce(raw);
+      // A unit/shop/level prefix (e.g. "LEVEL 1 SHOP 1056 WESTPOINT S/C
+      // 17 PATRICK STREET BLACKTOWN NSW 2148") routinely defeats Nominatim's
+      // free-text search — it's built for "house-number + street", not a
+      // shopping-centre descriptor glued in front of one. If the full
+      // string comes back empty, retry with just the street-number-onward
+      // portion, which is all a map pin actually needs.
+      if (!coords) {
+        const simplified = simplifyToStreetAddress(raw);
+        if (simplified && simplified !== raw) coords = await geocodeOnce(simplified);
+      }
+      return res.status(200).json(coords || { lat: null, lon: null });
     } catch (err) {
       // Best-effort — the caller just skips the pin for this address.
       return res.status(200).json({ lat: null, lon: null });
