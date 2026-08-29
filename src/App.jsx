@@ -4,7 +4,7 @@ import {
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
   ShieldAlert, ArrowLeft, Building2, Settings, Lock, Eye, EyeOff,
   Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone, CalendarDays, Ban,
-  FileText, Download, Archive, Pencil
+  FileText, Download, Archive, Pencil, MessageSquare
 } from "lucide-react";
 import {
   STATUS_META, fmtTime, fmtDateTime, isoDateOnly, isoTimeOnly,
@@ -21,6 +21,7 @@ import { getPushStatus, enableJobAlerts, disableJobAlerts, resyncJobAlertsIfEnab
 import { reverseGeocode, fetchStaticMap } from "./geocode.js";
 import { reportLiveLocation, stopSharingLiveLocation } from "./liveLocation.js";
 import { fetchJobPhotos, persistJobPhotos } from "./jobPhotos.js";
+import { fetchJobChat, sendJobChatMessage } from "./jobChat.js";
 import { searchArchivedJobs, fetchArchivedJobsInRange, resetArchiveAndPhotos } from "./jobArchive.js";
 
 const LiveLocationMap = lazy(() => import("./LiveLocationMap.jsx"));
@@ -2093,6 +2094,13 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
         </div>
       )}
 
+      <JobChatPanel
+        jobId={job.id}
+        session={session}
+        closed={isArchived || job.status === "emailed" || job.status === "cancelled"}
+        embeddedChat={isArchived ? (job.chat || []) : undefined}
+      />
+
       <ActivityLogSection log={job.activityLog} />
 
       {showEmail && (
@@ -2108,6 +2116,104 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
             setShowEmail(false);
           }}
         />
+      )}
+    </div>
+  );
+}
+
+// Per-job chat between Control Room and the assigned patrolman — see
+// jobChat.js. Polls only while this job's detail view is open (like
+// photos), never in the background across the whole board. Read-only
+// once the job is closed; an archived job's chat is already folded into
+// the job record itself (see jobArchive.js) and passed in as
+// `embeddedChat` — its live key is gone by then, so nothing to fetch or
+// poll.
+const JOB_CHAT_POLL_MS = 6000;
+
+function JobChatPanel({ jobId, session, closed, embeddedChat }) {
+  const [messages, setMessages] = useState(embeddedChat || []);
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(!!embeddedChat);
+  const showToast = useToast();
+  const bodyRef = useRef(null);
+
+  useEffect(() => {
+    if (embeddedChat) return;
+    let cancelled = false;
+    async function load() {
+      const chat = await fetchJobChat(jobId);
+      if (!cancelled) { setMessages(chat); setLoaded(true); }
+    }
+    load();
+    const interval = setInterval(load, JOB_CHAT_POLL_MS);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [jobId, embeddedChat]);
+
+  useEffect(() => {
+    if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+  }, [messages]);
+
+  async function send() {
+    const trimmed = text.trim();
+    if (!trimmed || busy) return;
+    setBusy(true);
+    try {
+      const updated = await sendJobChatMessage(jobId, trimmed);
+      setMessages(updated);
+      setText("");
+    } catch (e) {
+      showToast(e.message || "Couldn't send the message.", "error");
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div style={{ marginTop: 18, border: "1px solid var(--border)", borderRadius: 9, overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 12px", background: "var(--panel-alt)", borderBottom: "1px solid var(--border)", fontSize: 12.5, fontWeight: 700 }}>
+        <MessageSquare size={14} color="var(--accent)" /> Job Chat
+      </div>
+      <div style={{ fontSize: 10.5, color: "var(--text-dim)", padding: "8px 12px 0" }}>
+        Messages here become part of this job's permanent record.
+      </div>
+      <div ref={bodyRef} style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8, maxHeight: 280, overflowY: "auto" }}>
+        {!loaded && <div style={{ fontSize: 12, color: "var(--text-dim)" }}>Loading…</div>}
+        {loaded && messages.length === 0 && <div style={{ fontSize: 12, color: "var(--text-dim)" }}>No messages yet.</div>}
+        {messages.map((m, i) => {
+          const mine = m.fromLoginName === session.loginName;
+          return (
+            <div key={i} style={{ display: "flex", flexDirection: "column", maxWidth: "80%", alignSelf: mine ? "flex-end" : "flex-start", alignItems: mine ? "flex-end" : "flex-start" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-dim)", marginBottom: 2 }}>{mine ? "You" : m.fromName}</div>
+              <div style={{
+                padding: "7px 10px", borderRadius: 11, fontSize: 12.5, lineHeight: 1.45, color: "var(--text)",
+                background: mine ? "var(--accent-dim)" : "var(--panel-alt)",
+                ...(mine ? { borderBottomRightRadius: 3 } : { borderBottomLeftRadius: 3 }),
+              }}>
+                {m.text}
+              </div>
+              <div style={{ fontSize: 9.5, color: "var(--text-dim)", marginTop: 2 }}>{fmtDateTime(m.ts)}</div>
+            </div>
+          );
+        })}
+      </div>
+      {closed ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 12px", fontSize: 11.5, color: "var(--text-dim)", borderTop: "1px solid var(--border)", background: "var(--panel)" }}>
+          <Lock size={12} /> This job is closed — chat is read-only.
+        </div>
+      ) : (
+        <div style={{ display: "flex", gap: 8, padding: 10, borderTop: "1px solid var(--border)" }}>
+          <textarea
+            rows={1}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+            placeholder={session.role === "patrolman" ? "Message control room about this job…" : "Message the patrolman about this job…"}
+            style={{ ...selectStyle, flex: 1, resize: "none" }}
+          />
+          <button onClick={send} disabled={!text.trim() || busy} style={{ ...primaryBtn, opacity: text.trim() && !busy ? 1 : 0.5, cursor: text.trim() && !busy ? "pointer" : "not-allowed" }}>
+            <Send size={13} /> Send
+          </button>
+        </div>
       )}
     </div>
   );
@@ -3097,6 +3203,8 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
           <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>{job.outcomeNotes}</div>
         </div>
       )}
+
+      <JobChatPanel jobId={job.id} session={session} closed={job.status === "emailed" || isCancelled} />
     </div>
   );
 }
