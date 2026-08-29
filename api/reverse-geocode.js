@@ -40,8 +40,19 @@ async function geocodeOnce(address) {
 // earlier in the string ("SHOP 1056") can itself look like a street
 // number — the real street address is whichever such match sits closest
 // to the suburb/state/postcode at the end.
+//
+// The span between the number and the street type deliberately excludes
+// digits (a real street name is never "<number> <words with digits in
+// them> <type>"). Without that, a string like "UNIT 3 AND UNIT 4 11 WELD
+// ST" lets the regex latch onto the first stray digit ("3") and run
+// straight through to "ST", producing "3 AND UNIT 4 11 WELD ST" instead
+// of "11 WELD ST" — since nothing forces it to skip past the other
+// digits in between. Excluding digits from that middle span means the
+// attempt starting at "3" fails as soon as it hits "4", so the regex
+// engine moves on and only succeeds starting at the number actually
+// adjacent to the street name.
 const STREET_TYPES = "STREET|ST|ROAD|RD|AVENUE|AVE|DRIVE|DR|COURT|CT|PLACE|PL|LANE|LN|HIGHWAY|HWY|PARADE|PDE|CRESCENT|CRES|CLOSE|CL|WAY|BOULEVARD|BLVD|TERRACE|TCE|CIRCUIT|CCT|GROVE|GR";
-const STREET_ADDRESS_RE = new RegExp(`\\d+[A-Za-z]?\\s+[A-Za-z0-9'\\s]*?\\b(?:${STREET_TYPES})\\b`, "gi");
+const STREET_ADDRESS_RE = new RegExp(`\\d+[A-Za-z]?\\s+[A-Za-z'\\s]*?\\b(?:${STREET_TYPES})\\b`, "gi");
 
 function simplifyToStreetAddress(address) {
   const matches = [...address.matchAll(STREET_ADDRESS_RE)];
