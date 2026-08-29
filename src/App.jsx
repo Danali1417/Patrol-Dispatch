@@ -107,6 +107,21 @@ function mapsUrlLatLon(lat, lon) {
   return `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`;
 }
 
+// Chrome (and most other browsers) silently block a plain <a> or
+// window.open() navigation straight to a data: URL — a security measure
+// against phishing via disguised data URLs — so a normal link/click to a
+// base64 photo just does nothing. Opening a blank tab first and writing
+// the image into that document as an <img> src sidesteps the restriction
+// entirely, since it's no longer a top-level navigation to a data: URL.
+function openDataUrlImage(dataUrl) {
+  const win = window.open();
+  if (!win) return; // popup blocked — nothing more we can do
+  win.document.write(
+    `<title>Attendance photo</title><body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;min-height:100vh;"><img src="${dataUrl}" style="max-width:100%;max-height:100vh;object-fit:contain;"></body>`
+  );
+  win.document.close();
+}
+
 // Free, key-less embedded map snapshot (OpenStreetMap's own official
 // embed endpoint) showing a pin at the given point — used for the
 // onsite/offsite "map snap" in Control Room. The Google Maps link next
@@ -2070,7 +2085,13 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
             <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
               {photos.map((p, i) => (
                 <div key={i} style={{ width: 100 }}>
-                  <img src={p.dataUrl} alt="attendance evidence" style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }} />
+                  <img
+                    src={p.dataUrl}
+                    alt="attendance evidence"
+                    onClick={() => openDataUrlImage(p.dataUrl)}
+                    title="Click to open full size in a new tab"
+                    style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)", cursor: "pointer" }}
+                  />
                   <div style={{ fontSize: 9.5, color: "var(--text-dim)", marginTop: 3, lineHeight: 1.3 }}>
                     {p.ts ? fmtDateTime(p.ts) : ""}
                     {p.location && (
