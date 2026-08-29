@@ -4,7 +4,7 @@ import {
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
   ShieldAlert, ArrowLeft, Building2, Settings, Lock, Eye, EyeOff,
   Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone, CalendarDays, Ban,
-  FileText, Download, Archive
+  FileText, Download, Archive, Pencil
 } from "lucide-react";
 import {
   STATUS_META, fmtTime, fmtDateTime, isoDateOnly, isoTimeOnly,
@@ -1627,6 +1627,15 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   const [offsiteEdit, setOffsiteEdit] = useState(toLocalInputValue(job.offsiteTime));
   const [photos, setPhotos] = useState([]);
   const [photosLoaded, setPhotosLoaded] = useState(false);
+  const [showEditJob, setShowEditJob] = useState(false);
+  const [editJobNumber, setEditJobNumber] = useState(job.jobNumber || "");
+  const [editOrderNo, setEditOrderNo] = useState(job.orderNo || "");
+  const [editDocketNo, setEditDocketNo] = useState(job.docketNo || "");
+  const [editSiteName, setEditSiteName] = useState(job.siteName || "");
+  const [editAddress, setEditAddress] = useState(job.address || "");
+  const [editMonitoringCo, setEditMonitoringCo] = useState(job.monitoringCo || "");
+  const [editBureau, setEditBureau] = useState(job.bureau || "");
+  const [editDescription, setEditDescription] = useState(job.description || "");
   const showToast = useToast();
 
   useEffect(() => setNotes(job.reviewNotes || job.outcomeNotes), [job.id]);
@@ -1634,6 +1643,20 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
     setOnsiteEdit(toLocalInputValue(job.onsiteTime));
     setOffsiteEdit(toLocalInputValue(job.offsiteTime));
   }, [job.id, job.onsiteTime, job.offsiteTime]);
+  // Reset the edit form to the job's current values whenever a different
+  // job is opened, so stale edits from a previous job can't be saved onto
+  // this one.
+  useEffect(() => {
+    setShowEditJob(false);
+    setEditJobNumber(job.jobNumber || "");
+    setEditOrderNo(job.orderNo || "");
+    setEditDocketNo(job.docketNo || "");
+    setEditSiteName(job.siteName || "");
+    setEditAddress(job.address || "");
+    setEditMonitoringCo(job.monitoringCo || "");
+    setEditBureau(job.bureau || "");
+    setEditDescription(job.description || "");
+  }, [job.id]);
 
   // Fetched on demand, not part of the polled `jobs` prop — see jobPhotos.js.
   useEffect(() => {
@@ -1683,6 +1706,38 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
     if (offsiteChanged) changes.push(`Offsite ${fmtDateTime(job.offsiteTime)} → ${fmtDateTime(newOffsite)}`);
     if (!changes.length) return;
     logAction("Onsite/offsite time corrected", changes.join(" · "), { onsiteTime: newOnsite, offsiteTime: newOffsite });
+  }
+
+  const canSaveJobEdit = editJobNumber.trim() && editSiteName.trim() && editAddress.trim() && editDescription.trim();
+
+  // Every field stays editable after dispatch, including the job number —
+  // control room may need to correct any of it once more details come in.
+  // Each changed field is logged individually so the activity log stays a
+  // readable audit trail rather than one opaque "job edited" line.
+  function saveJobDetails() {
+    if (!canSaveJobEdit) return;
+    const patch = {};
+    const changes = [];
+    function diff(label, key, newVal) {
+      const oldVal = job[key] || "";
+      const cleaned = newVal.trim();
+      if (cleaned !== oldVal) {
+        changes.push(`${label} "${oldVal || "—"}" → "${cleaned || "—"}"`);
+        patch[key] = cleaned;
+      }
+    }
+    diff("Job number", "jobNumber", editJobNumber);
+    diff("Order No", "orderNo", editOrderNo);
+    diff("Docket No", "docketNo", editDocketNo);
+    diff("Site name", "siteName", editSiteName);
+    diff("Address", "address", editAddress);
+    diff("Monitoring company", "monitoringCo", editMonitoringCo);
+    diff("Bureau", "bureau", editBureau);
+    diff("Alarm / area", "description", editDescription);
+    setShowEditJob(false);
+    if (!changes.length) return;
+    logAction("Job details edited", changes.join(" · "), patch);
+    showToast("Job details updated.");
   }
 
   // Sequenced deliberately, each one awaited before the next starts.
@@ -1756,11 +1811,58 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
     <div style={{ maxWidth: 640 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <button onClick={onBack} style={backBtn}><ArrowLeft size={13} /> Back to board</button>
-        <button onClick={downloadPdf} disabled={pdfBusy || !photosLoaded} style={{ ...secondaryBtn, opacity: pdfBusy || !photosLoaded ? 0.6 : 1 }}>
-          <Download size={13} /> {pdfBusy ? "Generating…" : !photosLoaded ? "Loading…" : "Download attendance PDF"}
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {!isArchived && (
+            <button onClick={() => setShowEditJob((v) => !v)} style={secondaryBtn}>
+              <Pencil size={13} /> {showEditJob ? "Close edit" : "Edit details"}
+            </button>
+          )}
+          <button onClick={downloadPdf} disabled={pdfBusy || !photosLoaded} style={{ ...secondaryBtn, opacity: pdfBusy || !photosLoaded ? 0.6 : 1 }}>
+            <Download size={13} /> {pdfBusy ? "Generating…" : !photosLoaded ? "Loading…" : "Download attendance PDF"}
+          </button>
+        </div>
       </div>
       <JobHeader job={job} />
+
+      {showEditJob && !isArchived && (
+        <div style={{ marginTop: 14, padding: 14, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel-alt)" }}>
+          <SectionTitle icon={Pencil} title="Edit job details" small />
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 10 }}>
+            <Field label="Job number" style={{ flex: "1 1 140px" }}>
+              <input value={editJobNumber} onChange={(e) => setEditJobNumber(e.target.value)} style={selectStyle} />
+            </Field>
+            <Field label="Order No" style={{ flex: "1 1 140px" }}>
+              <input value={editOrderNo} onChange={(e) => setEditOrderNo(e.target.value)} style={selectStyle} />
+            </Field>
+            <Field label="Docket No" style={{ flex: "1 1 140px" }}>
+              <input value={editDocketNo} onChange={(e) => setEditDocketNo(e.target.value)} style={selectStyle} />
+            </Field>
+          </div>
+          <Field label="Site name">
+            <input value={editSiteName} onChange={(e) => setEditSiteName(e.target.value)} style={selectStyle} />
+          </Field>
+          <Field label="Address">
+            <input value={editAddress} onChange={(e) => setEditAddress(e.target.value)} style={selectStyle} />
+          </Field>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <Field label="Monitoring company" style={{ flex: "1 1 160px" }}>
+              <input value={editMonitoringCo} onChange={(e) => setEditMonitoringCo(e.target.value)} style={selectStyle} />
+            </Field>
+            <Field label="Bureau" style={{ flex: "1 1 160px" }}>
+              <input value={editBureau} onChange={(e) => setEditBureau(e.target.value)} style={selectStyle} />
+            </Field>
+          </div>
+          <Field label="Alarm description / area(s) in alarm">
+            <textarea rows={2} value={editDescription} onChange={(e) => setEditDescription(e.target.value.toUpperCase())} style={{ ...selectStyle, resize: "vertical", fontFamily: "var(--sans)" }} />
+          </Field>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={saveJobDetails} disabled={!canSaveJobEdit} style={{ ...primaryBtn, opacity: canSaveJobEdit ? 1 : 0.5, cursor: canSaveJobEdit ? "pointer" : "not-allowed" }}>
+              <CheckCircle2 size={14} /> Save changes
+            </button>
+            <button onClick={() => setShowEditJob(false)} style={secondaryBtn}>Cancel</button>
+          </div>
+        </div>
+      )}
 
       {isArchived && (
         <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel-alt)", fontSize: 12, color: "var(--text-dim)", display: "flex", alignItems: "center", gap: 7 }}>
