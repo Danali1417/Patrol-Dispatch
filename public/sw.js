@@ -20,8 +20,12 @@ self.addEventListener("push", (event) => {
     tag: data.jobId ? `job-${data.jobId}` : undefined,
     renotify: !!data.jobId,
     requireInteraction: true,
-    data: { jobId: data.jobId, ackToken: data.ackToken, url: data.url || "/" },
-    actions: data.jobId && data.ackToken ? [{ action: "acknowledge", title: "✅ Acknowledge" }] : [],
+    data: { jobId: data.jobId, ackToken: data.ackToken, url: data.url || "/", kind: data.kind },
+    // Only stand-down notices get the lock-screen one-tap Acknowledge
+    // action — acknowledging a new job dispatch now requires confirming
+    // an ETA first (see EtaModal in src/App.jsx), which a bare
+    // notification tap can't do.
+    actions: data.jobId && data.ackToken && data.kind === "standdown" ? [{ action: "acknowledge", title: "✅ Acknowledge" }] : [],
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });

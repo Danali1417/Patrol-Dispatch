@@ -1788,6 +1788,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
           {job.acknowledgedAt ? (
             <span style={{ color: "var(--ok)", display: "flex", alignItems: "center", gap: 6 }}>
               <CheckCircle2 size={13} /> Acknowledged by {job.assigneeName} at {fmtTime(job.acknowledgedAt)}
+              {job.eta && <> — ETA <b>{job.eta.label === "Other" ? job.eta.detail : job.eta.label}</b></>}
             </span>
           ) : (
             <span style={{ color: "var(--warn)", display: "flex", alignItems: "center", gap: 6 }}>
@@ -2172,6 +2173,7 @@ async function downloadJobAttendancePdf(job, companyName, now) {
     ["Attending patrolman", [job.assigneeName, job.run].filter(Boolean).join(" — ") || "—"],
     ["Dispatched", fmtDateTime(job.dispatchTime)],
     ["Acknowledged", job.acknowledgedAt ? fmtDateTime(job.acknowledgedAt) : "—"],
+    ["ETA given", job.eta ? (job.eta.label === "Other" ? job.eta.detail : job.eta.label) : "—"],
     ["Onsite", job.onsiteTime ? fmtDateTime(job.onsiteTime) : "—"],
     ["Onsite location", job.onsiteLocation ? (job.onsiteLocationName || formatLocation(job.onsiteLocation)) : "—"],
     ["Offsite", job.offsiteTime ? fmtDateTime(job.offsiteTime) : "—"],
@@ -2628,7 +2630,7 @@ function Stat({ label, value, accent }) {
 
 function JobAlertsBanner({
   title = "Get notified the moment a job is dispatched to you",
-  subtitle = "Even with your phone locked — tap Acknowledge right from the notification.",
+  subtitle = "Even with your phone locked — open the notification to confirm your ETA and acknowledge.",
   buttonLabel = "Turn on job alerts",
   toastText = "Job alerts turned on for this phone.",
 }) {
@@ -2721,7 +2723,7 @@ function PatrolmanView({ session, roster, jobs, persist, outcomePhrases, now }) 
   const isRosteredToday = roster?.some((r) => r.date === todayISO() && r.patrolmanLoginName === session.loginName);
 
   if (selected) {
-    return <div style={{ padding: 20, maxWidth: 520 }}><JobDetailPatrolman job={selected} jobs={jobs} persist={persist} outcomePhrases={outcomePhrases} now={now} onBack={() => setSelectedId(null)} /></div>;
+    return <div style={{ padding: 20, maxWidth: 520 }}><JobDetailPatrolman job={selected} jobs={jobs} session={session} persist={persist} outcomePhrases={outcomePhrases} now={now} onBack={() => setSelectedId(null)} /></div>;
   }
 
   return (
@@ -2745,12 +2747,89 @@ function PatrolmanView({ session, roster, jobs, persist, outcomePhrases, now }) 
   );
 }
 
-function JobDetailPatrolman({ job, jobs, persist, outcomePhrases, now, onBack }) {
+const ETA_PRESETS = ["45 minutes", "60 minutes", "75 minutes", "90 minutes", "120 minutes"];
+
+// Blocks acknowledgement until an ETA is actually chosen — onConfirm only
+// ever fires with a valid one, so callers never need to re-check.
+function EtaModal({ onConfirm, onClose }) {
+  const [choice, setChoice] = useState(null); // one of ETA_PRESETS, or "other"
+  const [otherText, setOtherText] = useState("");
+  const canConfirm = choice && (choice !== "other" || otherText.trim());
+
+  function confirm() {
+    if (!canConfirm) return;
+    onConfirm(choice === "other" ? { label: "Other", detail: otherText.trim() } : { label: choice });
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#000000aa", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
+      <div style={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10, width: 380, maxWidth: "90%", padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <SectionTitle icon={Clock} title="Confirm your ETA" small />
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer" }}><X size={16} /></button>
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 14 }}>
+          Let control room know when you expect to arrive before acknowledging this job.
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
+          {ETA_PRESETS.map((p) => (
+            <button
+              key={p}
+              onClick={() => setChoice(p)}
+              style={{
+                padding: "10px 12px", borderRadius: 7, textAlign: "left", cursor: "pointer", font: "inherit",
+                border: `1px solid ${choice === p ? "var(--accent)" : "var(--border)"}`,
+                background: choice === p ? "var(--accent-dim)" : "var(--panel-alt)",
+                color: choice === p ? "var(--accent)" : "var(--text)", fontWeight: 600, fontSize: 13,
+              }}
+            >
+              {p}
+            </button>
+          ))}
+          <button
+            onClick={() => setChoice("other")}
+            style={{
+              padding: "10px 12px", borderRadius: 7, textAlign: "left", cursor: "pointer", font: "inherit",
+              border: `1px solid ${choice === "other" ? "var(--accent)" : "var(--border)"}`,
+              background: choice === "other" ? "var(--accent-dim)" : "var(--panel-alt)",
+              color: choice === "other" ? "var(--accent)" : "var(--text)", fontWeight: 600, fontSize: 13,
+            }}
+          >
+            Other
+          </button>
+        </div>
+        {choice === "other" && (
+          <textarea
+            rows={2}
+            autoFocus
+            value={otherText}
+            onChange={(e) => setOtherText(e.target.value)}
+            placeholder="e.g. 150 minutes — stuck in traffic on the highway"
+            style={{ ...selectStyle, resize: "vertical", marginBottom: 12 }}
+          />
+        )}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={onClose} style={secondaryBtn}>Cancel</button>
+          <button
+            onClick={confirm}
+            disabled={!canConfirm}
+            style={{ ...primaryBtn, flex: 1, justifyContent: "center", opacity: canConfirm ? 1 : 0.5, cursor: canConfirm ? "pointer" : "not-allowed" }}
+          >
+            <CheckCircle2 size={14} /> Confirm & acknowledge
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, onBack }) {
   const [outcome, setOutcome] = useState(job.outcomeNotes || "");
   const [docketNo, setDocketNo] = useState(job.docketNo || "");
   const [photos, setPhotos] = useState([]);
   const [busy, setBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const [showEtaModal, setShowEtaModal] = useState(false);
   const fileRef = useRef(null);
   const showToast = useToast();
   const isCancelled = job.status === "cancelled";
@@ -2783,10 +2862,19 @@ function JobDetailPatrolman({ job, jobs, persist, outcomePhrases, now, onBack })
     e.target.value = "";
   }
 
-  async function acknowledgeJob() {
-    const updated = jobs.map((j) => (j.id === job.id ? { ...j, acknowledgedAt: new Date().toISOString() } : j));
+  // Acknowledging always requires an ETA first (see EtaModal) — this is
+  // only ever called with one already confirmed.
+  async function acknowledgeJob(eta) {
+    const etaText = eta.label === "Other" ? eta.detail : eta.label;
+    const updated = jobs.map((j) => (j.id === job.id ? {
+      ...j,
+      acknowledgedAt: new Date().toISOString(),
+      eta,
+      activityLog: [...(j.activityLog || []), logEntry(session, "Acknowledged", `ETA: ${etaText}`)],
+    } : j));
     await persist(updated);
-    showToast("Job acknowledged — control room can see you've received it.");
+    setShowEtaModal(false);
+    showToast(`Job acknowledged — ETA ${etaText} sent to control room.`);
   }
 
   async function markOnsite() {
@@ -2851,17 +2939,20 @@ function JobDetailPatrolman({ job, jobs, persist, outcomePhrases, now, onBack })
         <div style={{ marginTop: 20 }}>
           <SectionTitle icon={Bell} title="Acknowledge this job" small />
           <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 12 }}>
-            Let control room know you've received this job and are on your way.
+            Confirm your ETA to let control room know you've received this job and when you'll arrive.
           </div>
-          <button onClick={acknowledgeJob} style={{ ...primaryBtn, width: "100%", justifyContent: "center" }}>
+          <button onClick={() => setShowEtaModal(true)} style={{ ...primaryBtn, width: "100%", justifyContent: "center" }}>
             <CheckCircle2 size={14} /> Acknowledge — I've received this job
           </button>
         </div>
       )}
 
+      {showEtaModal && <EtaModal onConfirm={acknowledgeJob} onClose={() => setShowEtaModal(false)} />}
+
       {!submitted && !isOnsite && !isCancelled && job.acknowledgedAt && (
         <div style={{ fontSize: 11.5, color: "var(--ok)", marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>
           <CheckCircle2 size={13} /> Acknowledged at {fmtTime(job.acknowledgedAt)}
+          {job.eta && <> — ETA {job.eta.label === "Other" ? job.eta.detail : job.eta.label}</>}
         </div>
       )}
 
