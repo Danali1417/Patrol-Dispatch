@@ -377,15 +377,25 @@ export default function SentrylinePrototype() {
 
   // Wire up forced sign-out if any authenticated request ever comes back
   // 401 — auth.js already clears the stored token. `reason` is "superseded"
-  // when this same account has since logged in elsewhere (the server's
-  // already cleared this account's push subscriptions at that point — see
-  // claimActiveSession — so disableJobAlerts() here is just tidying up
-  // this device's own local registration), otherwise it's a plain
-  // expired/invalid token, where this is the only thing that stops this
-  // device from still getting job alerts for an account it's no longer
-  // signed into.
+  // when this same account has since logged in elsewhere — the server's
+  // already cleared this account's push subscriptions at that point (see
+  // claimActiveSession), so disableJobAlerts() here is just tidying up this
+  // device's own local registration for a device that's genuinely been
+  // replaced. A plain expired token is different: the board polls every 8s
+  // regardless of whether the session is still valid, so an ordinary
+  // 24-hour token expiry fires this constantly for a patrolman who's simply
+  // left the app open across a shift — disableJobAlerts() must NOT run for
+  // that case, or their phone silently stops getting job alerts the moment
+  // the token times out, with no indication anything's wrong, until they
+  // happen to explicitly sign back in. The still-possessed device should
+  // keep getting alerts right up until it's actually superseded or signed
+  // out on purpose.
   useEffect(() => {
-    setOnUnauthorized((reason) => { disableJobAlerts(); setSession(null); setLogoutReason(reason === "superseded" ? "superseded" : "expired"); });
+    setOnUnauthorized((reason) => {
+      if (reason === "superseded") disableJobAlerts();
+      setSession(null);
+      setLogoutReason(reason === "superseded" ? "superseded" : "expired");
+    });
   }, []);
 
   // Load jobs, accounts, zones, sites, roster — all require a session now,
