@@ -26,6 +26,7 @@ import { fmtDateTime } from "../../src/reportUtils.js";
 const JOBS_KEY = "ops:jobs";
 export const JOB_ARCHIVE_PREFIX = "ops:jobarchive:";
 export const JOB_PHOTOS_PREFIX = "ops:jobphotos:";
+export const JOB_CHAT_PREFIX = "ops:jobchat:";
 
 // {jobNumber, siteName, dispatchDate} — small enough to index, and
 // everything Board's archive search / Logs & analysis' date range
@@ -136,6 +137,25 @@ async function backupAndDeletePhotos(job, { transporter } = {}) {
   return "sent";
 }
 
+// Job chat lives in its own key while a job is live (see api/kv.js) so
+// the board's poll never carries chat text for jobs nobody has open —
+// folded directly into the archived job record here (unlike photos,
+// plain text is cheap enough to just keep forever) so it's still there
+// when someone looks this job up by number later, then the live key is
+// deleted since nothing will ever poll it again once archived.
+async function archiveChat(job) {
+  const chatKey = `${JOB_CHAT_PREFIX}${job.id}`;
+  const raw = await kvGet(chatKey);
+  if (!raw) return null;
+  await kvDelete(chatKey);
+  try {
+    const chat = JSON.parse(raw);
+    return Array.isArray(chat) && chat.length ? chat : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 export async function archiveOldJobs(now = new Date(), { transporter } = {}) {
   const raw = await kvGet(JOBS_KEY);
   if (!raw) return { archived: 0, remaining: 0 };
@@ -165,7 +185,9 @@ export async function archiveOldJobs(now = new Date(), { transporter } = {}) {
     for (const j of toArchive) {
       const outcome = await backupAndDeletePhotos(j, { transporter });
       photoBackupCounts[outcome] = (photoBackupCounts[outcome] || 0) + 1;
-      await kvSetSearchable(`${JOB_ARCHIVE_PREFIX}${j.id}`, JSON.stringify(j), searchFieldsFor(j));
+      const chat = await archiveChat(j);
+      const archivedJob = chat ? { ...j, chat } : j;
+      await kvSetSearchable(`${JOB_ARCHIVE_PREFIX}${j.id}`, JSON.stringify(archivedJob), searchFieldsFor(j));
     }
     await kvSet(JOBS_KEY, JSON.stringify(remaining));
   }

@@ -17,7 +17,7 @@
 import { requireRole, requireSession } from "./_lib/auth.js";
 import { kvGet, kvSet, kvGetPrefix, kvQueryPrefix, kvDelete, kvDeletePrefix } from "./_lib/supabase.js";
 import { sendPushToRole } from "./_lib/push.js";
-import { JOB_ARCHIVE_PREFIX, JOB_PHOTOS_PREFIX } from "./_lib/jobArchive.js";
+import { JOB_ARCHIVE_PREFIX, JOB_PHOTOS_PREFIX, JOB_CHAT_PREFIX } from "./_lib/jobArchive.js";
 
 const PUBLIC_READ_KEYS = new Set(["ops:logo", "ops:companyName"]);
 const MANAGER_ONLY_WRITE_KEYS = new Set(["ops:logo", "ops:companyName", "ops:outcomePhrases"]);
@@ -279,6 +279,50 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: "Method not allowed" });
     } catch (err) {
       console.error("kv jobphotos failed:", err);
+      return res.status(500).json({ error: String(err?.message || err) });
+    }
+  }
+
+  // Per-job chat between Control Room and the assigned patrolman — same
+  // read/write trust as ops:jobs itself, split into its own key per job
+  // for the same reason as photos above. POST only ever appends one
+  // message rather than accepting a client-computed whole array: the
+  // server stamps the author/role/timestamp from the session token
+  // (never trusting the client's own claim of who's speaking) and reads
+  // the current list immediately before appending to it, so this can't
+  // silently drop a message the way a client-side stale-snapshot
+  // overwrite could (see mergeJobsWrite's comment in this same file for
+  // the class of bug this sidesteps).
+  if (typeof key === "string" && key.startsWith(JOB_CHAT_PREFIX)) {
+    const session = await requireRole(req, res, ["manager", "operator", "patrolman"]);
+    if (!session) return;
+    try {
+      if (req.method === "GET") {
+        const value = await kvGet(key);
+        return res.status(200).json({ key, value: value === null ? "[]" : value });
+      }
+      if (req.method === "POST") {
+        const text = (req.body?.message?.text || "").trim();
+        if (!text) return res.status(400).json({ error: "Message text is required." });
+        if (text.length > 2000) return res.status(400).json({ error: "Message is too long (2000 characters max)." });
+        const raw = await kvGet(key);
+        let chat;
+        try { chat = raw ? JSON.parse(raw) : []; } catch (e) { chat = []; }
+        if (!Array.isArray(chat)) chat = [];
+        chat.push({
+          ts: new Date().toISOString(),
+          fromLoginName: session.loginName,
+          fromName: session.displayName,
+          fromRole: session.role,
+          text,
+        });
+        const value = JSON.stringify(chat);
+        await kvSet(key, value);
+        return res.status(200).json({ key, value });
+      }
+      return res.status(405).json({ error: "Method not allowed" });
+    } catch (err) {
+      console.error("kv jobchat failed:", err);
       return res.status(500).json({ error: String(err?.message || err) });
     }
   }
