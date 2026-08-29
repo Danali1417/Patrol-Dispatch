@@ -1064,9 +1064,10 @@ function jobMilestones(job) {
   const submitted = job.status !== "dispatched";
   const resultDone = job.status === "reviewed" || job.status === "emailed";
   const resultLabel = job.status === "emailed" ? "Sent" : job.status === "reviewed" ? "Closed" : "Result";
+  const etaText = job.eta ? (job.eta.label === "Other" ? job.eta.detail : job.eta.label) : null;
   return [
     { key: "dispatched", label: "Dispatched", done: true, ts: job.dispatchTime },
-    { key: "acknowledged", label: "Acknowledged", done: !!job.acknowledgedAt, ts: job.acknowledgedAt },
+    { key: "acknowledged", label: "Acknowledged", done: !!job.acknowledgedAt, ts: job.acknowledgedAt, sub: etaText ? `ETA ${etaText}` : null },
     { key: "onsite", label: "Onsite", done: !!job.onsiteTime, ts: job.onsiteTime },
     { key: "submitted", label: "Submitted", done: submitted, ts: job.offsiteTime },
     { key: "offsite", label: "Offsite", done: !!job.offsiteTime, ts: job.offsiteTime },
@@ -1087,7 +1088,7 @@ function JobProgressBar({ job, compact }) {
       {milestones.map((m, i) => (
         <React.Fragment key={m.key}>
           {i > 0 && <div style={{ width: compact ? 8 : 18, height: 2, background: m.done ? "var(--ok)" : "var(--border)", flexShrink: 0 }} />}
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }} title={`${m.label}${m.ts ? ` — ${fmtDateTime(m.ts)}` : ""}`}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flexShrink: 0 }} title={`${m.label}${m.ts ? ` — ${fmtDateTime(m.ts)}` : ""}${m.sub ? ` (${m.sub})` : ""}`}>
             <div style={{
               width: dotSize, height: dotSize, borderRadius: "50%", flexShrink: 0,
               background: m.done ? "var(--ok)" : "var(--panel)",
@@ -1097,6 +1098,7 @@ function JobProgressBar({ job, compact }) {
               {!compact && m.done && <CheckCircle2 size={13} color="#fff" />}
             </div>
             {!compact && <div style={{ fontSize: 9.5, color: m.done ? "var(--text)" : "var(--text-dim)", marginTop: 4, whiteSpace: "nowrap" }}>{m.label}</div>}
+            {!compact && m.sub && <div style={{ fontSize: 8.5, color: "var(--accent)", fontWeight: 600, whiteSpace: "nowrap" }}>{m.sub}</div>}
           </div>
         </React.Fragment>
       ))}
