@@ -2864,18 +2864,15 @@ function PatrolmanView({ session, roster, jobs, persist, outcomePhrases, now }) 
   );
 }
 
-const ETA_PRESETS = ["45 minutes", "60 minutes", "75 minutes", "90 minutes", "120 minutes"];
-
-// Blocks acknowledgement until an ETA is actually chosen — onConfirm only
-// ever fires with a valid one, so callers never need to re-check.
+// Blocks acknowledgement until an ETA is actually entered — onConfirm only
+// ever fires with a non-empty one, so callers never need to re-check.
 function EtaModal({ onConfirm, onClose }) {
-  const [choice, setChoice] = useState(null); // one of ETA_PRESETS, or "other"
-  const [otherText, setOtherText] = useState("");
-  const canConfirm = choice && (choice !== "other" || otherText.trim());
+  const [text, setText] = useState("");
+  const canConfirm = text.trim();
 
   function confirm() {
     if (!canConfirm) return;
-    onConfirm(choice === "other" ? { label: "Other", detail: otherText.trim() } : { label: choice });
+    onConfirm({ label: text.trim() });
   }
 
   return (
@@ -2886,45 +2883,16 @@ function EtaModal({ onConfirm, onClose }) {
           <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer" }}><X size={16} /></button>
         </div>
         <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 14 }}>
-          Let control room know when you expect to arrive before acknowledging this job.
+          Let control room know your ETA and a brief reason before acknowledging this job.
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 12 }}>
-          {ETA_PRESETS.map((p) => (
-            <button
-              key={p}
-              onClick={() => setChoice(p)}
-              style={{
-                padding: "10px 12px", borderRadius: 7, textAlign: "left", cursor: "pointer", font: "inherit",
-                border: `1px solid ${choice === p ? "var(--accent)" : "var(--border)"}`,
-                background: choice === p ? "var(--accent-dim)" : "var(--panel-alt)",
-                color: choice === p ? "var(--accent)" : "var(--text)", fontWeight: 600, fontSize: 13,
-              }}
-            >
-              {p}
-            </button>
-          ))}
-          <button
-            onClick={() => setChoice("other")}
-            style={{
-              padding: "10px 12px", borderRadius: 7, textAlign: "left", cursor: "pointer", font: "inherit",
-              border: `1px solid ${choice === "other" ? "var(--accent)" : "var(--border)"}`,
-              background: choice === "other" ? "var(--accent-dim)" : "var(--panel-alt)",
-              color: choice === "other" ? "var(--accent)" : "var(--text)", fontWeight: 600, fontSize: 13,
-            }}
-          >
-            Other
-          </button>
-        </div>
-        {choice === "other" && (
-          <textarea
-            rows={2}
-            autoFocus
-            value={otherText}
-            onChange={(e) => setOtherText(e.target.value)}
-            placeholder="e.g. 150 minutes — stuck in traffic on the highway"
-            style={{ ...selectStyle, resize: "vertical", marginBottom: 12 }}
-          />
-        )}
+        <textarea
+          rows={3}
+          autoFocus
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="e.g. 60 minutes — heavy traffic on the highway"
+          style={{ ...selectStyle, resize: "vertical", marginBottom: 12 }}
+        />
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={onClose} style={secondaryBtn}>Cancel</button>
           <button
