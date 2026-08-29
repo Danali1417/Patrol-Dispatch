@@ -16,7 +16,7 @@
 
 import { requireRole, requireSession } from "./_lib/auth.js";
 import { kvGet, kvSet, kvGetPrefix, kvQueryPrefix, kvDelete, kvDeletePrefix } from "./_lib/supabase.js";
-import { sendPushToRole } from "./_lib/push.js";
+import { sendPushToRole, sendPushToPatrolman } from "./_lib/push.js";
 import { JOB_ARCHIVE_PREFIX, JOB_PHOTOS_PREFIX, JOB_CHAT_PREFIX } from "./_lib/jobArchive.js";
 
 const PUBLIC_READ_KEYS = new Set(["ops:logo", "ops:companyName"]);
@@ -194,6 +194,33 @@ async function applyStationaryTracking(key, incoming) {
   return enriched;
 }
 
+// Looks up which job this message belongs to (for its jobNumber and who's
+// assigned) and pushes a notification to whoever's on the other side of
+// the conversation — the assigned patrolman if Control Room/a manager
+// sent it, or every on-duty operator if the patrolman sent it (there's no
+// single "control room" login to target, unlike a specific patrolman).
+async function notifyChatMessage(jobId, session, text) {
+  const jobsRaw = await kvGet(JOBS_KEY);
+  const jobs = jobsRaw ? JSON.parse(jobsRaw) : [];
+  const job = jobs.find((j) => j.id === jobId);
+  if (!job) return;
+
+  const preview = text.length > 120 ? `${text.slice(0, 117)}…` : text;
+  const payload = {
+    title: `New message — ${job.jobNumber}`,
+    body: `${session.displayName}: ${preview}`,
+    jobId,
+    url: "/",
+    kind: "chat",
+  };
+
+  if (session.role === "patrolman") {
+    await sendPushToRole("operator", payload);
+  } else if (job.assigneeId) {
+    await sendPushToPatrolman(job.assigneeId, "patrolman", payload);
+  }
+}
+
 export default async function handler(req, res) {
   // Control Room / Manager bulk-reading every patrolman's live location.
   if (req.method === "GET" && req.query?.prefix === LIVELOC_PREFIX) {
@@ -318,6 +345,12 @@ export default async function handler(req, res) {
         });
         const value = JSON.stringify(chat);
         await kvSet(key, value);
+        // Best-effort — a patrolman with the app in the background, or an
+        // operator not currently on this job, would otherwise have no
+        // idea a message is waiting until they happen to open it. Never
+        // awaited: a slow or failing push must not delay or fail the
+        // chat send itself.
+        notifyChatMessage(key.slice(JOB_CHAT_PREFIX.length), session, text).catch(() => {});
         return res.status(200).json({ key, value });
       }
       return res.status(405).json({ error: "Method not allowed" });
