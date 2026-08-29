@@ -61,6 +61,41 @@ function simplifyToStreetAddress(address) {
   return address.slice(last.index).trim();
 }
 
+// Same match as simplifyToStreetAddress, but just the "<number> <street>
+// <type>" span itself (e.g. "135 BONDS RD"), without whatever suburb/
+// state/postcode text follows it.
+function extractStreetOnly(address) {
+  const matches = [...address.matchAll(STREET_ADDRESS_RE)];
+  if (!matches.length) return null;
+  const last = matches[matches.length - 1];
+  return last[0].trim();
+}
+
+// Australian postcodes are the last token in a standard address line.
+const AU_POSTCODE_RE = /\b(\d{4})\s*$/;
+function extractPostcode(address) {
+  const m = AU_POSTCODE_RE.exec(address.trim());
+  return m ? m[1] : null;
+}
+
+// Last resort when the street number/name is clean but the free-text
+// query still fails — usually because whatever's between the street and
+// the postcode isn't a locality Nominatim recognises (a shopping centre
+// name, an informal "North <suburb>" that isn't the gazetted name, etc).
+// Structured search lets the postcode do the disambiguating instead of
+// that text, since it's passed as its own field rather than folded into
+// one free-text string the suburb name could derail.
+async function geocodeStructured(street, postcode) {
+  if (!street || !postcode) return null;
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&street=${encodeURIComponent(street)}&postalcode=${encodeURIComponent(postcode)}&country=Australia`;
+  const response = await nominatimFetch(url);
+  if (!response.ok) return null;
+  const results = await response.json();
+  const first = results[0];
+  if (!first) return null;
+  return { lat: Number(first.lat), lon: Number(first.lon) };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
   const session = await requireSession(req, res);
@@ -79,6 +114,9 @@ export default async function handler(req, res) {
       if (!coords) {
         const simplified = simplifyToStreetAddress(raw);
         if (simplified && simplified !== raw) coords = await geocodeOnce(simplified);
+      }
+      if (!coords) {
+        coords = await geocodeStructured(extractStreetOnly(raw), extractPostcode(raw));
       }
       return res.status(200).json(coords || { lat: null, lon: null });
     } catch (err) {
