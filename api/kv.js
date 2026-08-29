@@ -30,6 +30,42 @@ const STATIONARY_ALERT_MS = 30 * 60 * 1000;
 
 const JOBS_KEY = "ops:jobs";
 
+// Every write to ops:jobs is computed client-side from whatever that
+// device last polled (up to 8s stale) and sent as a full replacement
+// array — a plain overwrite here would let two concurrent writes (two
+// operators, or the same operator in two tabs) race: whichever's stale
+// snapshot omitted the other's very recent change wins and silently
+// erases it. This is the same class of bug already fixed for live
+// patrolman locations by splitting them into per-patrolman keys (see the
+// module comment above) — ops:jobs can't be split the same way since the
+// board needs it as one list, so instead: any job id the incoming write
+// doesn't even mention is assumed to belong to a concurrent write that
+// landed since this client's last poll, and is carried forward rather
+// than dropped. The incoming write only ever wins for ids it actually
+// names. An empty array is always honored as-is — the one deliberate way
+// this array is meant to shrink (see handleResetJobs in App.jsx).
+async function mergeJobsWrite(incomingJson) {
+  let incoming;
+  try {
+    incoming = JSON.parse(incomingJson);
+  } catch (e) {
+    throw new Error("Malformed jobs payload");
+  }
+  if (!Array.isArray(incoming) || incoming.length === 0) {
+    await kvSet(JOBS_KEY, incomingJson);
+    return incomingJson;
+  }
+
+  const currentRaw = await kvGet(JOBS_KEY);
+  const current = currentRaw ? JSON.parse(currentRaw) : [];
+  const incomingIds = new Set(incoming.map((j) => j.id));
+  const missingFromIncoming = current.filter((j) => !incomingIds.has(j.id));
+  const merged = missingFromIncoming.length ? [...incoming, ...missingFromIncoming] : incoming;
+  const mergedJson = JSON.stringify(merged);
+  await kvSet(JOBS_KEY, mergedJson);
+  return mergedJson;
+}
+
 // Attendance photos live in their own per-job key instead of embedded in
 // the job record, so the board's every-4-second poll (every signed-in
 // device, all day) never has to move photo bytes — only the small job
@@ -267,8 +303,13 @@ export default async function handler(req, res) {
     const { value } = req.body || {};
     if (value === undefined) return res.status(400).json({ error: "value is required" });
     try {
-      await kvSet(key, value);
-      return res.status(200).json({ key, value });
+      let finalValue = value;
+      if (key === JOBS_KEY) {
+        finalValue = await mergeJobsWrite(value);
+      } else {
+        await kvSet(key, value);
+      }
+      return res.status(200).json({ key, value: finalValue });
     } catch (err) {
       console.error("kv POST failed:", err);
       return res.status(500).json({ error: String(err?.message || err) });
