@@ -13,12 +13,18 @@ self.addEventListener("push", (event) => {
     data = {};
   }
   const title = data.title || "New job dispatched";
+  // Dispatch/stand-down notices share one tag per job so a re-send
+  // replaces the last one instead of piling up — but a chat message is
+  // meant to read like a text thread, so each one gets its own untagged
+  // notification and they stack in the notification shade instead of
+  // collapsing into just the latest.
+  const isChat = data.kind === "chat";
   const options = {
     body: data.body || "",
     icon: "/icon-192.png",
     badge: "/icon-192.png",
-    tag: data.jobId ? `job-${data.jobId}` : undefined,
-    renotify: !!data.jobId,
+    tag: !isChat && data.jobId ? `job-${data.jobId}` : undefined,
+    renotify: !isChat && !!data.jobId,
     requireInteraction: true,
     data: { jobId: data.jobId, ackToken: data.ackToken, url: data.url || "/", kind: data.kind },
     // Only stand-down notices get the lock-screen one-tap Acknowledge
