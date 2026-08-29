@@ -523,7 +523,20 @@ export default function SentrylinePrototype() {
     // reason. Stripped here too as a backstop in case a future call site
     // ever passes one through by accident.
     const slim = updated.map(({ photos, ...rest }) => rest);
-    try { await window.storage.set(JOBS_KEY, JSON.stringify(slim), true); } catch (e) { console.error(e); }
+    try {
+      const result = await window.storage.set(JOBS_KEY, JSON.stringify(slim), true);
+      // The server merges in any job this device's write didn't even
+      // mention, on the assumption it was added concurrently by another
+      // device since this one's last poll (see mergeJobsWrite in
+      // api/kv.js) — adopt that result immediately so this tab doesn't
+      // have to wait out a poll cycle to see a job it would otherwise
+      // have no idea exists.
+      const merged = JSON.parse(result.value);
+      if (merged.length !== slim.length) {
+        setJobs(merged);
+        prevJobsRef.current = merged;
+      }
+    } catch (e) { console.error(e); }
   }, []);
 
   const persistZones = useCallback(async (updated) => {

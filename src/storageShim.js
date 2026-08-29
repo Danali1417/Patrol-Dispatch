@@ -43,6 +43,12 @@ window.storage = {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error || `Couldn't save ${key}`);
     }
-    return { key, value, shared: true };
+    // Echo back whatever the server actually stored, not just what was
+    // sent — for ops:jobs specifically, the server may have merged in a
+    // job added concurrently by another device since this one's last
+    // poll (see mergeJobsWrite in api/kv.js), and the caller needs that
+    // merged value to keep its local state in sync.
+    const data = await res.json().catch(() => ({ value }));
+    return { key, value: data.value ?? value, shared: true };
   },
 };
