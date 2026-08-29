@@ -54,6 +54,12 @@ export default async function handler(req, res) {
         jobId,
         ackToken,
         url: "/",
+        // Only stand-down notices still get the lock-screen one-tap
+        // Acknowledge action — a new-job dispatch below doesn't set this,
+        // since acknowledging that now requires confirming an ETA first
+        // (see EtaModal in src/App.jsx), which a bare notification tap
+        // can't do. sw.js checks this to decide whether to show the button.
+        kind: "standdown",
       });
       return res.status(200).json({ ok: true, ...result });
     } catch (err) {
