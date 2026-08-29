@@ -199,6 +199,13 @@ function formatLocation(loc) {
   return `${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)}`;
 }
 
+// Each photo is already resized to 480px wide and compressed to a ~72%
+// quality JPEG below (see watermarkPhoto) before it's stored — typically
+// 60-130KB once base64-encoded — so this cap exists only to stay clear of
+// Vercel's 4.5MB request/response ceiling on the job photos save, not
+// because a handful of photos is expensive on its own.
+const MAX_ATTENDANCE_PHOTOS = 20;
+
 function watermarkPhoto(file, label, location, locationName) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -3045,7 +3052,7 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
     const location = await getCurrentLocation();
     const locationName = location ? await reverseGeocode(location.lat, location.lon) : null;
     const results = [];
-    for (const f of files.slice(0, 4 - photos.length)) {
+    for (const f of files.slice(0, MAX_ATTENDANCE_PHOTOS - photos.length)) {
       try { results.push(await watermarkPhoto(f, job.jobNumber, location, locationName)); } catch (err) { /* skip bad file */ }
     }
     setPhotos((p) => [...p, ...results]);
@@ -3183,7 +3190,7 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
                 <button onClick={() => setPhotos(photos.filter((_, idx) => idx !== i))} style={{ position: "absolute", top: -6, right: -6, background: "var(--breach)", border: "none", borderRadius: "50%", width: 18, height: 18, color: "#fff", cursor: "pointer" }}><X size={11} /></button>
               </div>
             ))}
-            {photos.length < 4 && (
+            {photos.length < MAX_ATTENDANCE_PHOTOS && (
               <button onClick={() => fileRef.current?.click()} disabled={busy} style={{ width: 84, height: 84, borderRadius: 6, border: "1px dashed var(--border)", background: "var(--panel)", color: "var(--text-dim)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, cursor: "pointer" }}>
                 <Camera size={17} /><span style={{ fontSize: 10 }}>{busy ? "…" : "Add photo"}</span>
               </button>
