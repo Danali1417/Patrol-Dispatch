@@ -30,6 +30,33 @@ const STATIONARY_ALERT_MS = 30 * 60 * 1000;
 
 const JOBS_KEY = "ops:jobs";
 
+// Best-effort "how recently was this job touched" — the max timestamp
+// found anywhere on it (every ISO-ish string field, plus activityLog and
+// standDowns entries). Not every mutation logs an activity entry (e.g.
+// the patrolman's markOnsite/submit actions don't), so this can't just
+// use activityLog length; scanning every timestamp-shaped field instead
+// means any current or future timestamp field is picked up automatically.
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+function latestTouch(job) {
+  let latest = 0;
+  for (const [k, v] of Object.entries(job)) {
+    if (k === "activityLog" || k === "standDowns") continue;
+    if (typeof v === "string" && ISO_DATE_RE.test(v)) {
+      const t = Date.parse(v);
+      if (t > latest) latest = t;
+    }
+  }
+  for (const entry of job.activityLog || []) {
+    const t = entry?.ts ? Date.parse(entry.ts) : NaN;
+    if (t > latest) latest = t;
+  }
+  for (const sd of job.standDowns || []) {
+    const t = Math.max(Date.parse(sd?.notifiedAt || 0) || 0, Date.parse(sd?.acknowledgedAt || 0) || 0);
+    if (t > latest) latest = t;
+  }
+  return latest;
+}
+
 // Every write to ops:jobs is computed client-side from whatever that
 // device last polled (up to 8s stale) and sent as a full replacement
 // array — a plain overwrite here would let two concurrent writes (two
@@ -38,12 +65,20 @@ const JOBS_KEY = "ops:jobs";
 // erases it. This is the same class of bug already fixed for live
 // patrolman locations by splitting them into per-patrolman keys (see the
 // module comment above) — ops:jobs can't be split the same way since the
-// board needs it as one list, so instead: any job id the incoming write
-// doesn't even mention is assumed to belong to a concurrent write that
-// landed since this client's last poll, and is carried forward rather
-// than dropped. The incoming write only ever wins for ids it actually
-// names. An empty array is always honored as-is — the one deliberate way
-// this array is meant to shrink (see handleResetJobs in App.jsx).
+// board needs it as one list, so instead:
+//   - any job id the incoming write doesn't even mention is assumed to
+//     belong to a concurrent write that landed since this client's last
+//     poll, and is carried forward rather than dropped;
+//   - for a job id present on BOTH sides, whichever copy was touched more
+//     recently wins — almost always the incoming one (this write's own
+//     change just stamped a fresh timestamp), unless incoming is only
+//     carrying that job along unchanged from a stale base, in which case
+//     blindly taking it would silently revert a more recent change made
+//     elsewhere (e.g. a job a patrolman just closed reverting back to
+//     "dispatched" because an unrelated, slightly-stale write elsewhere
+//     still had the old pre-close copy).
+// An empty array is always honored as-is — the one deliberate way this
+// array is meant to shrink (see handleResetJobs in App.jsx).
 async function mergeJobsWrite(incomingJson) {
   let incoming;
   try {
@@ -58,9 +93,16 @@ async function mergeJobsWrite(incomingJson) {
 
   const currentRaw = await kvGet(JOBS_KEY);
   const current = currentRaw ? JSON.parse(currentRaw) : [];
+  const currentById = new Map(current.map((j) => [j.id, j]));
   const incomingIds = new Set(incoming.map((j) => j.id));
+
+  const reconciled = incoming.map((j) => {
+    const theirs = currentById.get(j.id);
+    if (!theirs) return j; // genuinely new — nothing to compare against
+    return latestTouch(theirs) > latestTouch(j) ? theirs : j;
+  });
   const missingFromIncoming = current.filter((j) => !incomingIds.has(j.id));
-  const merged = missingFromIncoming.length ? [...incoming, ...missingFromIncoming] : incoming;
+  const merged = missingFromIncoming.length ? [...reconciled, ...missingFromIncoming] : reconciled;
   const mergedJson = JSON.stringify(merged);
   await kvSet(JOBS_KEY, mergedJson);
   return mergedJson;
