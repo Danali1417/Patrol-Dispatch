@@ -3249,10 +3249,17 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
     if (job.photoCount > 0) fetchJobPhotos(job.id).then(setPhotos);
   }, [job.id, job.photoCount]);
 
-  // Quick-phrases just fill in a starting point — always appended (not
-  // replacing anything already typed) so the field stays fully editable.
+  // Quick-phrases just fill in a starting point — appended (not replacing
+  // anything already typed) so the field stays fully editable. Skipped if
+  // the field already ends with this exact phrase, so a fumbled double-tap
+  // on the chip doesn't paste it in twice.
   function applyPhrase(text) {
-    setOutcome((prev) => (prev.trim() ? `${prev.trim()} ${text}`.toUpperCase() : text.toUpperCase()));
+    const upper = text.toUpperCase();
+    setOutcome((prev) => {
+      const trimmed = prev.trim();
+      if (trimmed.toUpperCase().endsWith(upper)) return prev;
+      return trimmed ? `${trimmed} ${upper}` : upper;
+    });
   }
 
   async function handleFiles(e) {
