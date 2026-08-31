@@ -2559,7 +2559,7 @@ function loadImageSize(dataUrl) {
 // Shared branding for every PDF this app generates for download — the
 // uploaded company logo (see LogoUploader) top-right on the first page,
 // and Ausgroup's licensing details at the bottom of every page.
-const PDF_FOOTER_TEXT = "Master Licence No. 000103153   ·   Ausgroup Security Services   ·   admin@ausgroupsec.com.au   ·   1300 988 993";
+const PDF_FOOTER_TEXT = "Ausgroup Security Services   ·   Master Licence No. 000103153   ·   admin@ausgroupsec.com.au   ·   1300 988 993";
 
 async function addPdfLogo(doc, logoUrl, marginX, maxH = 34, topY = 16) {
   if (!logoUrl) return;
