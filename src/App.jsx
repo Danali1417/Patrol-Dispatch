@@ -2525,6 +2525,7 @@ async function sendPhotoBackupEmail(job) {
   const subject = `Attendance photo backup — ${job.jobNumber}${job.siteName ? ` — ${job.siteName}` : ""}`;
   const text = [
     `Job ${job.jobNumber} — ${job.siteName || "—"}`,
+    `Address: ${job.address || "—"}`,
     `Status: ${job.status === "cancelled" ? "Cancelled" : "Closed"}`,
     `Patrolman: ${job.assigneeName || "—"}`,
     `Dispatched: ${fmtDateTime(job.dispatchTime)}`,

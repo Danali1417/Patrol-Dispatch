@@ -116,6 +116,7 @@ async function backupAndDeletePhotos(job, { transporter } = {}) {
   const subject = `Attendance photo backup — ${job.jobNumber || job.id}${job.siteName ? ` — ${job.siteName}` : ""}`;
   const text = [
     `Job ${job.jobNumber || job.id} — ${job.siteName || "—"}`,
+    `Address: ${job.address || "—"}`,
     `Status: ${job.status === "cancelled" ? "Cancelled" : "Closed"}`,
     `Patrolman: ${job.assigneeName || "—"}`,
     `Dispatched: ${fmtDateTime(job.dispatchTime, REPORT_TIMEZONE)}`,
