@@ -2680,10 +2680,11 @@ function LogsOverview({ jobs, now }) {
 
   const byCompany = {};
   jobsInWindow.forEach((j) => {
-    byCompany[j.monitoringCo] = byCompany[j.monitoringCo] || { count: 0, respSum: 0, respN: 0, cancelled: 0 };
-    byCompany[j.monitoringCo].count++;
-    if (j.status === "cancelled") byCompany[j.monitoringCo].cancelled++;
-    if (j.onsiteTime) { byCompany[j.monitoringCo].respSum += jobTiming(j, now).elapsed; byCompany[j.monitoringCo].respN++; }
+    const key = j.bureau || "—";
+    byCompany[key] = byCompany[key] || { count: 0, respSum: 0, respN: 0, cancelled: 0 };
+    byCompany[key].count++;
+    if (j.status === "cancelled") byCompany[key].cancelled++;
+    if (j.onsiteTime) { byCompany[key].respSum += jobTiming(j, now).elapsed; byCompany[key].respN++; }
   });
 
   return (
@@ -2699,7 +2700,7 @@ function LogsOverview({ jobs, now }) {
         <Stat label="SLA breaches" value={breaches} accent={breaches > 0 ? "var(--breach)" : "var(--ok)"} />
         <Stat label="Cancelled / stood down" value={cancelled.length} />
       </div>
-      <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text-dim)", marginBottom: 8 }}>By monitoring company</div>
+      <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text-dim)", marginBottom: 8 }}>By bureau</div>
       <div style={{ border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
         {Object.entries(byCompany).sort((a, b) => b[1].count - a[1].count).map(([name, d], i) => (
           <div key={name} style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", fontSize: 12.5, borderTop: i ? "1px solid var(--border)" : "none", background: "var(--panel)" }}>
