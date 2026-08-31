@@ -1385,6 +1385,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
   const [keyInfo, setKeyInfo] = useState("");
   const [alarmCode, setAlarmCode] = useState("");
   const [addingSite, setAddingSite] = useState(false);
+  const [dispatching, setDispatching] = useState(false);
 
   const site = sites.find((s) => s.id === siteId);
 
@@ -1452,7 +1453,23 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
 
   const canDispatch = site && description.trim() && assigneeId && jobNumber.trim();
 
+  // Guards against a double-click (or a slow network making someone tap
+  // "Dispatch" again, thinking the first tap didn't register) creating
+  // two separate job records for the same alarm — canDispatch alone only
+  // checks the form is filled in, not whether a dispatch is already in
+  // flight, and the form fields it's built from don't clear until this
+  // whole function (including the await) finishes.
   async function dispatch() {
+    if (dispatching) return;
+    setDispatching(true);
+    try {
+      await doDispatch();
+    } finally {
+      setDispatching(false);
+    }
+  }
+
+  async function doDispatch() {
     const assignee = assigneeCandidates.find((r) => r.loginName === assigneeId);
     const job = {
       id: `job_${Date.now()}`,
@@ -1591,8 +1608,8 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
         </select>
       </Field>
 
-      <button disabled={!canDispatch} onClick={dispatch} style={{ ...primaryBtn, width: "100%", marginTop: 6, opacity: canDispatch ? 1 : 0.4, cursor: canDispatch ? "pointer" : "not-allowed" }}>
-        <Send size={14} /> Dispatch job
+      <button disabled={!canDispatch || dispatching} onClick={dispatch} style={{ ...primaryBtn, width: "100%", marginTop: 6, opacity: canDispatch && !dispatching ? 1 : 0.4, cursor: canDispatch && !dispatching ? "pointer" : "not-allowed" }}>
+        <Send size={14} /> {dispatching ? "Dispatching…" : "Dispatch job"}
       </button>
     </div>
   );
