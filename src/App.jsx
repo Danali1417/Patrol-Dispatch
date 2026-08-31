@@ -2315,7 +2315,7 @@ function buildAdviceEmail(job, companyName) {
   const status = job.status === "cancelled" ? "Cancelled" : "Complete";
   const times = `Dispatched ${fmtTime(job.dispatchTime)} On site ${fmtTime(job.onsiteTime)} Off site ${fmtTime(job.offsiteTime)} Advised ${fmtTime(new Date().toISOString())}`;
   const location = [job.siteName, job.address].filter(Boolean).join("<br>");
-  const outcome = (job.reviewNotes || "").replace(/\n/g, "<br>");
+  const outcome = (job.reviewNotes || job.cancelReason || "").replace(/\n/g, "<br>");
 
   const rows = [
     adviceRow("Advice From:", (companyName || "Ausgroup").toUpperCase() + " SECURITY"),
@@ -2346,7 +2346,7 @@ function buildAdviceEmail(job, companyName) {
     ["Location", [job.siteName, job.address].filter(Boolean).join(", ")],
     ["Request", job.description || "—"],
     ["Status", status],
-    ["Outcome", job.reviewNotes || "—"],
+    ["Outcome", job.reviewNotes || job.cancelReason || "—"],
     ["Provider", provider],
     ["Times", times],
   ];
@@ -2447,7 +2447,7 @@ async function downloadJobAttendancePdf(job, companyName, now) {
     ["Offsite", job.offsiteTime ? fmtDateTime(job.offsiteTime) : "—"],
     ["Offsite location", job.offsiteLocation ? (job.offsiteLocationName || formatLocation(job.offsiteLocation)) : "—"],
     ["Response time", job.onsiteTime ? `${t.elapsed}m (SLA ${t.slaMin}m)` : "—"],
-    ["Outcome / notes", job.reviewNotes || job.outcomeNotes || "—"],
+    ["Outcome / notes", job.reviewNotes || job.outcomeNotes || job.cancelReason || "—"],
   ];
 
   doc.setFontSize(10);
