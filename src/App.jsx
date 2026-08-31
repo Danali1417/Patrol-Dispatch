@@ -1734,6 +1734,14 @@ function AddSiteInline({ zones, initialName = "", onCancel, onAdded }) {
 // someone actually confirms monitoring's been told, since that's the
 // one outcome worth recording.
 function EtaDelayModal({ etaMinutes, slaMin, onAcknowledge, onDismiss }) {
+  const [advisedTo, setAdvisedTo] = useState("");
+  const canConfirm = advisedTo.trim();
+
+  function confirm() {
+    if (!canConfirm) return;
+    onAcknowledge(advisedTo.trim());
+  }
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "#000000aa", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
       <div style={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10, width: 400, maxWidth: "90%", padding: 20 }}>
@@ -1741,13 +1749,27 @@ function EtaDelayModal({ etaMinutes, slaMin, onAcknowledge, onDismiss }) {
           <SectionTitle icon={AlertTriangle} title="Delay exceeds SLA" small />
           <button onClick={onDismiss} style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer" }}><X size={16} /></button>
         </div>
-        <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 16, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 14, lineHeight: 1.5 }}>
           The patrolman's ETA (<b style={{ color: "var(--text)" }}>{etaMinutes} min</b>) is longer than this site's <b style={{ color: "var(--text)" }}>{slaMin}-minute</b> SLA. Have you advised monitoring about this delay?
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <Field label="Who did you advise? (name)">
+          <input
+            value={advisedTo}
+            onChange={(e) => setAdvisedTo(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") confirm(); }}
+            placeholder="e.g. Sarah at SECOM"
+            style={selectStyle}
+            autoFocus
+          />
+        </Field>
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
           <button onClick={onDismiss} style={secondaryBtn}>Not yet</button>
-          <button onClick={onAcknowledge} style={{ ...primaryBtn, flex: 1, justifyContent: "center" }}>
-            <CheckCircle2 size={14} /> Yes, monitoring advised
+          <button
+            onClick={confirm}
+            disabled={!canConfirm}
+            style={{ ...primaryBtn, flex: 1, justifyContent: "center", opacity: canConfirm ? 1 : 0.5, cursor: canConfirm ? "pointer" : "not-allowed" }}
+          >
+            <CheckCircle2 size={14} /> Confirm
           </button>
         </div>
       </div>
@@ -1855,8 +1877,12 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
     // eslint-disable-next-line
   }, [job.id, job.eta, job.acknowledgedAt, job.etaDelayAdvisedAt]);
 
-  function acknowledgeEtaDelay() {
-    logAction("Monitoring advised of ETA delay", `Patrolman ETA ${etaMinutes}m exceeds ${t.slaMin}m SLA`, { etaDelayAdvisedAt: new Date().toISOString() });
+  function acknowledgeEtaDelay(advisedTo) {
+    logAction(
+      "Monitoring advised of ETA delay",
+      `Advised ${advisedTo} — patrolman ETA ${etaMinutes}m exceeds ${t.slaMin}m SLA`,
+      { etaDelayAdvisedAt: new Date().toISOString(), etaDelayAdvisedTo: advisedTo }
+    );
     setShowEtaDelayModal(false);
   }
 
