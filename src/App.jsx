@@ -4,7 +4,7 @@ import {
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
   ShieldAlert, ArrowLeft, Building2, Settings, Lock, Eye, EyeOff,
   Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone, CalendarDays, Ban,
-  FileText, Download, Archive, Pencil, MessageSquare
+  FileText, Download, Archive, Pencil, MessageSquare, Navigation
 } from "lucide-react";
 import {
   STATUS_META, fmtTime, fmtDateTime, isoDateOnly, isoTimeOnly,
@@ -191,6 +191,28 @@ function jobTiming(job, now) {
   if (remaining <= 0) level = "breach";
   else if (remaining <= 15) level = "warn";
   return { slaMin, elapsed, remaining, level };
+}
+
+// The ETA field is free text (see EtaModal) — this pulls out the first
+// number in it and treats it as minutes, e.g. "60 minutes" or "90mins —
+// stuck in traffic" both give 90. Returns null when nothing parses (a
+// patrolman who typed "on my way now" with no number, for instance),
+// since there's nothing to count down to in that case.
+function parseEtaMinutes(eta) {
+  if (!eta?.label) return null;
+  const m = /(\d+)/.exec(eta.label);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+// Minutes remaining until the patrolman's stated ETA, counted from the
+// moment they acknowledged — negative once that ETA has passed. Distinct
+// from jobTiming's SLA countdown: this tracks what the patrolman actually
+// told Control Room to expect, not the site's contracted response window.
+function etaCountdown(job, now) {
+  const etaMinutes = parseEtaMinutes(job.eta);
+  if (etaMinutes === null || !job.acknowledgedAt) return null;
+  const deadline = new Date(job.acknowledgedAt).getTime() + etaMinutes * 60000;
+  return Math.round((deadline - now) / 60000);
 }
 
 function beep(pattern = [880]) {
@@ -1098,6 +1120,23 @@ function SlaChip({ job, now }) {
   );
 }
 
+// Separate from SlaChip on purpose — this counts down to what the
+// patrolman actually said, not the site's SLA, so Control Room can watch
+// both side by side and see immediately if one is running out while the
+// other still has runway.
+function EtaChip({ job, now }) {
+  if (job.status !== "dispatched" || job.onsiteTime) return null;
+  const remaining = etaCountdown(job, now);
+  if (remaining === null) return null;
+  const color = remaining < 0 ? "var(--breach)" : remaining <= 10 ? "var(--warn)" : "var(--info)";
+  const label = remaining >= 0 ? `ETA ${remaining}m left` : `ETA ${Math.abs(remaining)}m over`;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, color, border: `1px solid ${color}66`, padding: "3px 8px", borderRadius: 20 }}>
+      <Navigation size={11} /> {label}
+    </span>
+  );
+}
+
 // Six-step lifecycle used by JobProgressBar. Returns null for cancelled
 // jobs (they don't have a meaningful "next milestone" to show progress
 // toward — the cancelled banner shown elsewhere covers that case).
@@ -1687,6 +1726,35 @@ function AddSiteInline({ zones, initialName = "", onCancel, onAdded }) {
   );
 }
 
+// Prompted the moment Control Room opens a job whose patrolman has given
+// an ETA longer than the site's SLA, and not already advised — a
+// proactive heads-up (the patrolman said 90 minutes, the SLA is 60)
+// rather than waiting for the SLA to actually lapse. "Not yet" just
+// closes this viewing; it reappears next time the job is reopened until
+// someone actually confirms monitoring's been told, since that's the
+// one outcome worth recording.
+function EtaDelayModal({ etaMinutes, slaMin, onAcknowledge, onDismiss }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#000000aa", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
+      <div style={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10, width: 400, maxWidth: "90%", padding: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <SectionTitle icon={AlertTriangle} title="Delay exceeds SLA" small />
+          <button onClick={onDismiss} style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer" }}><X size={16} /></button>
+        </div>
+        <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 16, lineHeight: 1.5 }}>
+          The patrolman's ETA (<b style={{ color: "var(--text)" }}>{etaMinutes} min</b>) is longer than this site's <b style={{ color: "var(--text)" }}>{slaMin}-minute</b> SLA. Have you advised monitoring about this delay?
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={onDismiss} style={secondaryBtn}>Not yet</button>
+          <button onClick={onAcknowledge} style={{ ...primaryBtn, flex: 1, justifyContent: "center" }}>
+            <CheckCircle2 size={14} /> Yes, monitoring advised
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------------- Operator job detail ---------------------- */
 
 function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now, onBack, companyName }) {
@@ -1701,6 +1769,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   const [offsiteEdit, setOffsiteEdit] = useState(toLocalInputValue(job.offsiteTime));
   const [photos, setPhotos] = useState([]);
   const [photosLoaded, setPhotosLoaded] = useState(false);
+  const [showEtaDelayModal, setShowEtaDelayModal] = useState(false);
   const [showEditJob, setShowEditJob] = useState(false);
   const [editJobNumber, setEditJobNumber] = useState(job.jobNumber || "");
   const [editOrderNo, setEditOrderNo] = useState(job.orderNo || "");
@@ -1767,6 +1836,28 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   // persisted update rather than a separate round trip.
   function logAction(action, detail, patch = {}) {
     return update({ ...patch, activityLog: [...(job.activityLog || []), logEntry(session, action, detail)] });
+  }
+
+  // A job with status "dispatched" is never an archived one (only
+  // terminal jobs move to the archive — see jobArchive.js), so no extra
+  // isArchived check is needed here.
+  const etaMinutes = parseEtaMinutes(job.eta);
+  const etaExceedsSla = job.status === "dispatched" && !!job.acknowledgedAt && etaMinutes !== null && etaMinutes > t.slaMin;
+
+  // Prompts once per fresh view of a job whose stated ETA already exceeds
+  // the SLA — proactive, ahead of the SLA actually lapsing, since by then
+  // the delay is already known from what the patrolman said. "Not yet"
+  // only closes this viewing (job.etaDelayAdvisedAt stays unset), so it
+  // comes back next time the job is reopened until someone actually
+  // confirms monitoring's been told.
+  useEffect(() => {
+    if (etaExceedsSla && !job.etaDelayAdvisedAt) setShowEtaDelayModal(true);
+    // eslint-disable-next-line
+  }, [job.id, job.eta, job.acknowledgedAt, job.etaDelayAdvisedAt]);
+
+  function acknowledgeEtaDelay() {
+    logAction("Monitoring advised of ETA delay", `Patrolman ETA ${etaMinutes}m exceeds ${t.slaMin}m SLA`, { etaDelayAdvisedAt: new Date().toISOString() });
+    setShowEtaDelayModal(false);
   }
 
   const onsiteChanged = toLocalInputValue(job.onsiteTime) !== onsiteEdit;
@@ -1962,9 +2053,10 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       {!job.onsiteTime && job.status !== "cancelled" && (
         <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
           {job.acknowledgedAt ? (
-            <span style={{ color: "var(--ok)", display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ color: "var(--ok)", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
               <CheckCircle2 size={13} /> Acknowledged by {job.assigneeName} at {fmtTime(job.acknowledgedAt)}
               {job.eta && <> — ETA <b>{job.eta.label === "Other" ? job.eta.detail : job.eta.label}</b></>}
+              <EtaChip job={job} now={now} />
             </span>
           ) : (
             <span style={{ color: "var(--warn)", display: "flex", alignItems: "center", gap: 6 }}>
@@ -2166,6 +2258,15 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       />
 
       <ActivityLogSection log={job.activityLog} />
+
+      {showEtaDelayModal && (
+        <EtaDelayModal
+          etaMinutes={etaMinutes}
+          slaMin={t.slaMin}
+          onAcknowledge={acknowledgeEtaDelay}
+          onDismiss={() => setShowEtaDelayModal(false)}
+        />
+      )}
 
       {showEmail && (
         <EmailModal
