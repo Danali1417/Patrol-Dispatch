@@ -84,7 +84,7 @@ export function reportRow(job, reportType, timeZone) {
     ...base,
     job.onsiteTime ? fmtDateTime(job.onsiteTime, timeZone) : "—",
     job.offsiteTime ? fmtDateTime(job.offsiteTime, timeZone) : "—",
-    job.reviewNotes || job.outcomeNotes || "—",
+    job.reviewNotes || job.outcomeNotes || job.cancelReason || "—",
     job.description || "—",
   ];
 }
