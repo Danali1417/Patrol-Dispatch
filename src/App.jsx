@@ -86,6 +86,25 @@ function todayISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// Night Patrol runs 1800-0600, spanning midnight — a roster entry for an
+// overnight shift is stored under the date it starts (the evening it's
+// rostered from), so looking it up by the literal calendar date would
+// stop finding that patrolman the moment the clock ticks past midnight,
+// even though their shift still has hours left to run — leaving a job
+// dispatched to them after midnight with no run recorded. Rolling the
+// "roster day" over at 6am instead of midnight, matching the night
+// shift's own end time, keeps every roster lookup resolving to the
+// right entry for as long as a shift that started the previous evening
+// is still active. Day Patrol is unaffected either way, since it only
+// runs during hours already past this rollover.
+const ROSTER_DAY_ROLLOVER_HOUR = 6;
+
+function rosterDateISO() {
+  const d = new Date();
+  if (d.getHours() < ROSTER_DAY_ROLLOVER_HOUR) d.setDate(d.getDate() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 /* ---------------------------------------------------------------
    HELPERS
 ---------------------------------------------------------------- */
@@ -363,7 +382,7 @@ export default function SentrylinePrototype() {
   // current position: each report overwrites the last one, and the
   // location is deleted the moment this stops (sign-out, tab closed,
   // or rostered day ends and this effect re-evaluates).
-  const isPatrolmanRosteredToday = session?.role === "patrolman" && roster.some((r) => r.date === todayISO() && r.patrolmanLoginName === session.loginName);
+  const isPatrolmanRosteredToday = session?.role === "patrolman" && roster.some((r) => r.date === rosterDateISO() && r.patrolmanLoginName === session.loginName);
   useEffect(() => {
     if (!isPatrolmanRosteredToday || !navigator.geolocation) return;
     const loginName = session.loginName;
@@ -967,7 +986,7 @@ function TopBar({ session, roster, onSignOut, onOpenSettings, now, logoUrl, comp
   // The session's own "run" is a snapshot of the account's default run
   // taken at login — if today's roster puts this patrolman on a
   // different run, show that instead so it matches what's on their jobs.
-  const todaysRun = roster?.find((r) => r.date === todayISO() && r.patrolmanLoginName === session.loginName)?.run || session.run;
+  const todaysRun = roster?.find((r) => r.date === rosterDateISO() && r.patrolmanLoginName === session.loginName)?.run || session.run;
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", rowGap: 10, padding: "12px 20px", borderBottom: "1px solid var(--border)", background: "var(--panel)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
@@ -1389,7 +1408,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
 
   const site = sites.find((s) => s.id === siteId);
 
-  const todaysEntries = roster.filter((r) => r.date === todayISO());
+  const todaysEntries = roster.filter((r) => r.date === rosterDateISO());
   function rosteredPatrolmenFor(run) {
     const seen = new Set();
     return todaysEntries
@@ -1806,7 +1825,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
     if (!p || p.loginName === job.assigneeId) return;
     const previousLoginName = job.assigneeId;
     const previousName = job.assigneeName;
-    const todaysEntry = roster.find((r) => r.date === todayISO() && r.patrolmanLoginName === loginName);
+    const todaysEntry = roster.find((r) => r.date === rosterDateISO() && r.patrolmanLoginName === loginName);
     await logAction(
       "Reassigned",
       previousName ? `From ${previousName} to ${p.displayName}` : `To ${p.displayName}`,
@@ -2987,8 +3006,8 @@ function PatrolmanView({ session, roster, jobs, persist, outcomePhrases, now }) 
   const [selectedId, setSelectedId] = useState(null);
   const mine = jobs.filter((j) => j.assigneeId === session.id).sort((a, b) => new Date(b.dispatchTime) - new Date(a.dispatchTime));
   const selected = mine.find((j) => j.id === selectedId);
-  const todaysRun = roster?.find((r) => r.date === todayISO() && r.patrolmanLoginName === session.loginName)?.run || session.run;
-  const isRosteredToday = roster?.some((r) => r.date === todayISO() && r.patrolmanLoginName === session.loginName);
+  const todaysRun = roster?.find((r) => r.date === rosterDateISO() && r.patrolmanLoginName === session.loginName)?.run || session.run;
+  const isRosteredToday = roster?.some((r) => r.date === rosterDateISO() && r.patrolmanLoginName === session.loginName);
 
   if (selected) {
     return <div style={{ padding: 20, maxWidth: 520 }}><JobDetailPatrolman job={selected} jobs={jobs} session={session} persist={persist} outcomePhrases={outcomePhrases} now={now} onBack={() => setSelectedId(null)} /></div>;
