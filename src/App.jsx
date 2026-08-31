@@ -2593,7 +2593,7 @@ async function downloadJobAttendancePdf(job, companyName, now, logoUrl) {
   const marginX = 40;
   let y = 44;
 
-  await addPdfLogo(doc, logoUrl, marginX);
+  await addPdfLogo(doc, logoUrl, marginX, 50);
 
   const name = companyName || "Ausgroup";
   doc.setFontSize(14);
@@ -2934,7 +2934,7 @@ function Reports({ jobs, companyName, logoUrl }) {
     const [{ jsPDF }, autoTableModule] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
     const autoTable = autoTableModule.default;
     const doc = new jsPDF({ orientation: reportType === "detailed" ? "landscape" : "portrait", unit: "pt" });
-    await addPdfLogo(doc, logoUrl, 40);
+    await addPdfLogo(doc, logoUrl, 40, 50);
     const name = companyName || "Ausgroup";
     doc.setFontSize(14);
     doc.text(`${name} Alarm Response Dispatch — ${reportType === "brief" ? "Brief" : "Detailed"} Report`, 40, 40);
