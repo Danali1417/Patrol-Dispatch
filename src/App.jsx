@@ -2619,11 +2619,8 @@ async function downloadJobAttendancePdf(job, companyName, now, logoUrl) {
     ["Attending patrolman", [job.assigneeName, job.run].filter(Boolean).join(" — ") || "—"],
     ["Dispatched", fmtDateTime(job.dispatchTime)],
     ["Acknowledged", job.acknowledgedAt ? fmtDateTime(job.acknowledgedAt) : "—"],
-    ["ETA given", job.eta ? (job.eta.label === "Other" ? job.eta.detail : job.eta.label) : "—"],
     ["Onsite", job.onsiteTime ? fmtDateTime(job.onsiteTime) : "—"],
-    ["Onsite location", job.onsiteLocation ? (job.onsiteLocationName || formatLocation(job.onsiteLocation)) : "—"],
     ["Offsite", job.offsiteTime ? fmtDateTime(job.offsiteTime) : "—"],
-    ["Offsite location", job.offsiteLocation ? (job.offsiteLocationName || formatLocation(job.offsiteLocation)) : "—"],
     ["Response time", job.onsiteTime ? `${t.elapsed}m (SLA ${t.slaMin}m)` : "—"],
     ["Outcome / notes", job.reviewNotes || job.outcomeNotes || job.cancelReason || "—"],
   ];
