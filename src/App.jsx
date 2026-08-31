@@ -2901,41 +2901,57 @@ function Reports({ jobs, companyName }) {
 
   function clearFilters() { setDateFrom(""); setDateTo(""); setTimeFrom(""); setTimeTo(""); }
 
+  async function buildReportDoc() {
+    const [{ jsPDF }, autoTableModule] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
+    const autoTable = autoTableModule.default;
+    const doc = new jsPDF({ orientation: reportType === "detailed" ? "landscape" : "portrait", unit: "pt" });
+    const name = companyName || "Ausgroup";
+    doc.setFontSize(14);
+    doc.text(`${name} Alarm Response Dispatch — ${reportType === "brief" ? "Brief" : "Detailed"} Report`, 40, 40);
+    doc.setFontSize(9);
+    doc.setTextColor(90);
+    doc.text(`Date range: ${dateFrom || "any"} to ${dateTo || "any"}${timeFrom || timeTo ? `  ·  Time: ${timeFrom || "any"} to ${timeTo || "any"}` : ""}`, 40, 58);
+    doc.text(`Generated ${fmtDateTime(new Date().toISOString())}`, 40, 72);
+    autoTable(doc, {
+      startY: 86,
+      head: [columns],
+      body: rows,
+      styles: { fontSize: 8, cellPadding: 4, overflow: "linebreak" },
+      headStyles: { fillColor: [255, 176, 32], textColor: [20, 20, 20] },
+      columnStyles: reportType === "detailed" ? { 11: { cellWidth: 160 }, 12: { cellWidth: 160 } } : undefined,
+    });
+
+    const summaryStartY = (doc.lastAutoTable?.finalY || 86) + 26;
+    doc.setFontSize(11);
+    doc.setTextColor(20);
+    doc.text("Patrolman response summary", 40, summaryStartY);
+    autoTable(doc, {
+      startY: summaryStartY + 8,
+      head: [["Patrolman", "Run", "Responses"]],
+      body: summary.map((s) => [s.patrolman, s.run, String(s.count)]),
+      styles: { fontSize: 8, cellPadding: 4 },
+      headStyles: { fillColor: [255, 176, 32], textColor: [20, 20, 20] },
+      tableWidth: 300,
+    });
+
+    return doc;
+  }
+
+  async function previewPdf() {
+    setBusy(true);
+    try {
+      const doc = await buildReportDoc();
+      window.open(doc.output("bloburl"), "_blank");
+    } catch (e) {
+      showToast("Couldn't generate the preview — try again.", "error");
+    }
+    setBusy(false);
+  }
+
   async function downloadPdf() {
     setBusy(true);
     try {
-      const [{ jsPDF }, autoTableModule] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
-      const autoTable = autoTableModule.default;
-      const doc = new jsPDF({ orientation: reportType === "detailed" ? "landscape" : "portrait", unit: "pt" });
-      const name = companyName || "Ausgroup";
-      doc.setFontSize(14);
-      doc.text(`${name} Alarm Response Dispatch — ${reportType === "brief" ? "Brief" : "Detailed"} Report`, 40, 40);
-      doc.setFontSize(9);
-      doc.setTextColor(90);
-      doc.text(`Date range: ${dateFrom || "any"} to ${dateTo || "any"}${timeFrom || timeTo ? `  ·  Time: ${timeFrom || "any"} to ${timeTo || "any"}` : ""}`, 40, 58);
-      doc.text(`Generated ${fmtDateTime(new Date().toISOString())}`, 40, 72);
-      autoTable(doc, {
-        startY: 86,
-        head: [columns],
-        body: rows,
-        styles: { fontSize: 8, cellPadding: 4, overflow: "linebreak" },
-        headStyles: { fillColor: [255, 176, 32], textColor: [20, 20, 20] },
-        columnStyles: reportType === "detailed" ? { 11: { cellWidth: 160 }, 12: { cellWidth: 160 } } : undefined,
-      });
-
-      const summaryStartY = (doc.lastAutoTable?.finalY || 86) + 26;
-      doc.setFontSize(11);
-      doc.setTextColor(20);
-      doc.text("Patrolman response summary", 40, summaryStartY);
-      autoTable(doc, {
-        startY: summaryStartY + 8,
-        head: [["Patrolman", "Run", "Responses"]],
-        body: summary.map((s) => [s.patrolman, s.run, String(s.count)]),
-        styles: { fontSize: 8, cellPadding: 4 },
-        headStyles: { fillColor: [255, 176, 32], textColor: [20, 20, 20] },
-        tableWidth: 300,
-      });
-
+      const doc = await buildReportDoc();
       doc.save(`${reportType}-report-${todayISO()}.pdf`);
       showToast("Report downloaded.");
     } catch (e) {
@@ -2975,9 +2991,16 @@ function Reports({ jobs, companyName }) {
         </Field>
         {hasFilter && <button onClick={clearFilters} style={{ ...secondaryBtn, marginBottom: 0 }}><X size={13} /> Clear filters</button>}
         <button
+          onClick={previewPdf}
+          disabled={busy || rows.length === 0}
+          style={{ ...secondaryBtn, marginBottom: 0, marginLeft: "auto", opacity: rows.length === 0 || busy ? 0.5 : 1, cursor: rows.length === 0 || busy ? "not-allowed" : "pointer" }}
+        >
+          <Eye size={14} /> {busy ? "Generating…" : "Preview"}
+        </button>
+        <button
           onClick={downloadPdf}
           disabled={busy || rows.length === 0}
-          style={{ ...primaryBtn, marginBottom: 0, marginLeft: "auto", opacity: rows.length === 0 || busy ? 0.5 : 1, cursor: rows.length === 0 || busy ? "not-allowed" : "pointer" }}
+          style={{ ...primaryBtn, marginBottom: 0, opacity: rows.length === 0 || busy ? 0.5 : 1, cursor: rows.length === 0 || busy ? "not-allowed" : "pointer" }}
         >
           <Download size={14} /> {busy ? "Generating…" : "Download PDF"}
         </button>
