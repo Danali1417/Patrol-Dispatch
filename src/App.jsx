@@ -733,7 +733,7 @@ export default function SentrylinePrototype() {
           ) : session.role === "manager" ? (
             <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
           ) : session.role === "operator" ? (
-            <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} />
+            <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} logoUrl={logoUrl} />
           ) : (
             <PatrolmanView session={session} roster={roster} jobs={jobs} persist={persistJobs} outcomePhrases={outcomePhrases} now={now} />
           )}
@@ -1191,7 +1191,7 @@ function JobProgressBar({ job, compact }) {
    OPERATOR VIEW
 ---------------------------------------------------------------- */
 
-function OperatorView({ session, jobs, accounts, sites, persistSites, zones, roster, persistRoster, persist, now, companyName }) {
+function OperatorView({ session, jobs, accounts, sites, persistSites, zones, roster, persistRoster, persist, now, companyName, logoUrl }) {
   const [tab, setTab] = useState("board");
   const [selectedId, setSelectedId] = useState(null);
   // Jobs closed/cancelled 48h+ ago live off the board (see jobArchive.js).
@@ -1229,7 +1229,7 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
         {tab === "cancelled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="cancelled" />}
         {tab === "closed" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="emailed" />}
         {(tab === "board" || tab === "cancelled" || tab === "closed") && selected && (
-          <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} roster={roster} persist={persist} now={now} session={session} companyName={companyName} onBack={() => selectJob(null)} />
+          <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} roster={roster} persist={persist} now={now} session={session} companyName={companyName} logoUrl={logoUrl} onBack={() => selectJob(null)} />
         )}
         {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} roster={roster} session={session} persist={persist} onCreated={(id) => { setTab("board"); selectJob(id); }} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
@@ -1779,7 +1779,7 @@ function EtaDelayModal({ etaMinutes, slaMin, onAcknowledge, onDismiss }) {
 
 /* ---------------------- Operator job detail ---------------------- */
 
-function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now, onBack, companyName }) {
+function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now, onBack, companyName, logoUrl }) {
   const [notes, setNotes] = useState(job.reviewNotes || job.outcomeNotes);
   const [delayText, setDelayText] = useState("");
   const [showEmail, setShowEmail] = useState(false);
@@ -1839,7 +1839,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   async function downloadPdf() {
     setPdfBusy(true);
     try {
-      await downloadJobAttendancePdf(jobWithPhotos, companyName, now);
+      await downloadJobAttendancePdf(jobWithPhotos, companyName, now, logoUrl);
     } catch (e) {
       showToast("Couldn't generate the PDF — try again.", "error");
     }
@@ -2556,13 +2556,44 @@ function loadImageSize(dataUrl) {
   });
 }
 
-async function downloadJobAttendancePdf(job, companyName, now) {
+// Shared branding for every PDF this app generates for download — the
+// uploaded company logo (see LogoUploader) top-right on the first page,
+// and Ausgroup's licensing details at the bottom of every page.
+const PDF_FOOTER_TEXT = "Master Licence No. 000103153   ·   Ausgroup Security Services   ·   admin@ausgroupsec.com.au   ·   1300 988 993";
+
+async function addPdfLogo(doc, logoUrl, marginX, maxH = 34, topY = 16) {
+  if (!logoUrl) return;
+  try {
+    const size = await loadImageSize(logoUrl);
+    const w = maxH * (size.width / size.height);
+    const pageW = doc.internal.pageSize.getWidth();
+    doc.addImage(logoUrl, "PNG", pageW - marginX - w, topY, w, maxH);
+  } catch (e) { /* skip if the stored logo fails to embed */ }
+}
+
+function stampPdfFooter(doc) {
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const pages = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= pages; i++) {
+    doc.setPage(i);
+    doc.setDrawColor(220);
+    doc.line(40, pageH - 34, pageW - 40, pageH - 34);
+    doc.setFontSize(8);
+    doc.setTextColor(130);
+    doc.text(PDF_FOOTER_TEXT, pageW / 2, pageH - 20, { align: "center" });
+  }
+}
+
+async function downloadJobAttendancePdf(job, companyName, now, logoUrl) {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "pt" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const marginX = 40;
   let y = 44;
+
+  await addPdfLogo(doc, logoUrl, marginX);
 
   const name = companyName || "Ausgroup";
   doc.setFontSize(14);
@@ -2669,6 +2700,7 @@ async function downloadJobAttendancePdf(job, companyName, now) {
     }
   }
 
+  stampPdfFooter(doc);
   doc.save(`${job.jobNumber}-attendance.pdf`);
 }
 
@@ -2752,7 +2784,7 @@ function EmailModal({ job, companyName, onClose, onSent }) {
 
 /* ---------------------- Logs ---------------------- */
 
-function Logs({ jobs, now, role, companyName }) {
+function Logs({ jobs, now, role, companyName, logoUrl }) {
   const [subTab, setSubTab] = useState("overview");
   const showReports = role === "manager";
 
@@ -2782,7 +2814,7 @@ function Logs({ jobs, now, role, companyName }) {
         ))}
       </div>
       {subTab === "overview" && <LogsOverview jobs={jobs} now={now} />}
-      {subTab === "reports" && <Reports jobs={jobs} companyName={companyName} />}
+      {subTab === "reports" && <Reports jobs={jobs} companyName={companyName} logoUrl={logoUrl} />}
     </div>
   );
 }
@@ -2859,7 +2891,7 @@ function LogsOverview({ jobs, now }) {
   );
 }
 
-function Reports({ jobs, companyName }) {
+function Reports({ jobs, companyName, logoUrl }) {
   const [reportType, setReportType] = useState("brief");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -2905,6 +2937,7 @@ function Reports({ jobs, companyName }) {
     const [{ jsPDF }, autoTableModule] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
     const autoTable = autoTableModule.default;
     const doc = new jsPDF({ orientation: reportType === "detailed" ? "landscape" : "portrait", unit: "pt" });
+    await addPdfLogo(doc, logoUrl, 40);
     const name = companyName || "Ausgroup";
     doc.setFontSize(14);
     doc.text(`${name} Alarm Response Dispatch — ${reportType === "brief" ? "Brief" : "Detailed"} Report`, 40, 40);
@@ -2919,6 +2952,7 @@ function Reports({ jobs, companyName }) {
       styles: { fontSize: 8, cellPadding: 4, overflow: "linebreak" },
       headStyles: { fillColor: [255, 176, 32], textColor: [20, 20, 20] },
       columnStyles: reportType === "detailed" ? { 11: { cellWidth: 160 }, 12: { cellWidth: 160 } } : undefined,
+      margin: { bottom: 50 },
     });
 
     const summaryStartY = (doc.lastAutoTable?.finalY || 86) + 26;
@@ -2932,8 +2966,10 @@ function Reports({ jobs, companyName }) {
       styles: { fontSize: 8, cellPadding: 4 },
       headStyles: { fillColor: [255, 176, 32], textColor: [20, 20, 20] },
       tableWidth: 300,
+      margin: { bottom: 50 },
     });
 
+    stampPdfFooter(doc);
     return doc;
   }
 
@@ -3507,7 +3543,7 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
         {tab === "phrases" && <OutcomePhrasesEditor outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} />}
         {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
-        {tab === "logs" && <Logs jobs={jobs} now={now} role="manager" companyName={companyName} />}
+        {tab === "logs" && <Logs jobs={jobs} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} />}
       </div>
     </div>
   );
