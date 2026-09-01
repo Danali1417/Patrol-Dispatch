@@ -4,7 +4,7 @@ import {
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
   ShieldAlert, ArrowLeft, Building2, Settings, Lock, Eye, EyeOff,
   Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone, CalendarDays, Ban,
-  FileText, Download, Archive, Pencil, MessageSquare, Navigation, Activity
+  FileText, Download, Archive, Pencil, MessageSquare, Navigation, Activity, RefreshCw
 } from "lucide-react";
 import {
   STATUS_META, fmtTime, fmtDateTime, isoDateOnly, isoTimeOnly,
@@ -153,6 +153,34 @@ async function endOperatorSession(sid) {
     const updated = list.map((s) => (s.sid === sid ? { ...s, lastSeenAt: now, endedAt: now } : s));
     await window.storage.set(OPERATOR_SESSIONS_KEY, JSON.stringify(updated), true);
   } catch (e) { /* best-effort — worst case this session's end is inferred from its last heartbeat instead */ }
+}
+
+// Detects a new deploy while a tab is left open, so a shift-long session
+// doesn't silently run stale code (see the Operator Activity presence
+// tracking, which only starts once a tab actually reloads onto the build
+// that has it). Vite content-hashes the built entry script's filename, and
+// index.html references it by name — so a changed filename after a
+// no-cache refetch of index.html means a new build is live. In dev this
+// only ever compares "/src/main.jsx" to itself, so it never fires there.
+const UPDATE_CHECK_MS = 5 * 60 * 1000;
+
+function currentEntryScriptSrc() {
+  const entry = Array.from(document.querySelectorAll("script[src]")).find(
+    (s) => s.src.includes("/assets/index-") || s.src.includes("/src/main.jsx")
+  );
+  return entry ? entry.getAttribute("src") : null;
+}
+
+async function fetchLatestEntryScriptSrc() {
+  try {
+    const res = await fetch("/index.html", { cache: "no-store" });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const match = html.match(/<script[^>]+src="([^"]+)"[^>]*><\/script>/);
+    return match ? match[1] : null;
+  } catch (e) {
+    return null;
+  }
 }
 
 function todayISO() {
@@ -424,6 +452,7 @@ export default function SentrylinePrototype() {
   const [companyName, setCompanyName] = useState(DEFAULT_COMPANY_NAME);
   const [now, setNow] = useState(Date.now());
   const [banner, setBanner] = useState(null);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   // null | "inactivity" | "superseded" | "expired" — why the Login screen
   // is showing a "you were signed out" banner, if at all.
@@ -449,6 +478,28 @@ export default function SentrylinePrototype() {
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 15000);
     return () => clearInterval(t);
+  }, []);
+
+  // Runs regardless of role or sign-in state — anyone with the tab left
+  // open across a deploy should get prompted, not just signed-in users.
+  useEffect(() => {
+    const baseline = currentEntryScriptSrc();
+    if (!baseline) return;
+    let cancelled = false;
+    async function check() {
+      const latest = await fetchLatestEntryScriptSrc();
+      if (!cancelled && latest && latest !== baseline) setUpdateAvailable(true);
+    }
+    const t = setInterval(check, UPDATE_CHECK_MS);
+    function onVisible() {
+      if (document.visibilityState === "visible") check();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
 
   // Auto sign out Control Room after 30 minutes with no activity in the window
@@ -854,6 +905,7 @@ export default function SentrylinePrototype() {
       <ToastContext.Provider value={showToast}>
         <ConfirmContext.Provider value={showConfirm}>
           <Shell>
+            {updateAvailable && <UpdateAvailableBanner />}
             <Login
               logoutReason={logoutReason}
               logoUrl={logoUrl}
@@ -873,6 +925,7 @@ export default function SentrylinePrototype() {
       <ConfirmContext.Provider value={showConfirm}>
         <Shell>
           <TopBar session={session} roster={roster} onSignOut={handleSignOut} onOpenSettings={() => setShowSettings(true)} now={now} logoUrl={logoUrl} companyName={companyName} />
+          {updateAvailable && <UpdateAvailableBanner />}
           {banner && <NotifBanner banner={banner} onDismiss={() => setBanner(null)} />}
           {showSettings && (
             <SettingsModal session={session} onClose={() => setShowSettings(false)} />
@@ -1196,6 +1249,21 @@ function NotifBanner({ banner, onDismiss }) {
       <style.Icon size={15} />
       <span style={{ flex: 1 }}>{banner.text}</span>
       <button onClick={onDismiss} style={{ background: "none", border: "none", color: "inherit", cursor: "pointer" }}><X size={14} /></button>
+    </div>
+  );
+}
+
+// Deliberately no dismiss button — unlike NotifBanner this doesn't
+// auto-clear either, since the point is to keep asking until the tab
+// actually reloads onto the new build.
+function UpdateAvailableBanner() {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", background: "#EFF6FF", borderBottom: "1px solid var(--info)", color: "#1D4ED8", fontSize: 12.5 }}>
+      <RefreshCw size={15} />
+      <span style={{ flex: 1 }}>A new version of this app is available.</span>
+      <button onClick={() => window.location.reload()} style={{ background: "var(--info)", border: "none", borderRadius: 6, padding: "6px 12px", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+        Refresh now
+      </button>
     </div>
   );
 }
