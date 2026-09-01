@@ -1849,9 +1849,11 @@ function AddSiteInline({ zones, initialName = "", monitoringCompanies, bureaus, 
       return;
     }
     setError("");
-    const match = sites.find((s) => normalizeSiteName(s.name) === normalizeSiteName(form.name));
+    const nName = normalizeSiteName(form.name);
+    const nAddress = normalizeSiteName(form.address);
+    const match = sites.find((s) => normalizeSiteName(s.name) === nName || normalizeSiteName(s.address) === nAddress);
     if (match) {
-      setDuplicateMatch(match);
+      setDuplicateMatch({ site: match, nameMatches: normalizeSiteName(match.name) === nName, addressMatches: normalizeSiteName(match.address) === nAddress });
       return;
     }
     onAdded(buildSite());
@@ -1906,10 +1908,16 @@ function AddSiteInline({ zones, initialName = "", monitoringCompanies, bureaus, 
               <button onClick={() => setDuplicateMatch(null)} style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer" }}><X size={16} /></button>
             </div>
             <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 16, lineHeight: 1.5 }}>
-              A site named <b style={{ color: "var(--text)" }}>{duplicateMatch.name}</b> already exists at <b style={{ color: "var(--text)" }}>{duplicateMatch.address}</b>. Use the existing site instead of creating a duplicate?
+              {duplicateMatch.nameMatches && duplicateMatch.addressMatches ? (
+                <>A site named <b style={{ color: "var(--text)" }}>{duplicateMatch.site.name}</b> already exists at <b style={{ color: "var(--text)" }}>{duplicateMatch.site.address}</b>.</>
+              ) : duplicateMatch.nameMatches ? (
+                <>A site named <b style={{ color: "var(--text)" }}>{duplicateMatch.site.name}</b> already exists, at a different address: <b style={{ color: "var(--text)" }}>{duplicateMatch.site.address}</b>.</>
+              ) : (
+                <>A site already exists at this address — <b style={{ color: "var(--text)" }}>{duplicateMatch.site.name}</b> (<b style={{ color: "var(--text)" }}>{duplicateMatch.site.address}</b>).</>
+              )}{" "}Use the existing site instead of creating a duplicate?
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <button onClick={() => onUseExisting(duplicateMatch)} style={{ ...primaryBtn, justifyContent: "center" }}>
+              <button onClick={() => onUseExisting(duplicateMatch.site)} style={{ ...primaryBtn, justifyContent: "center" }}>
                 <MapPin size={13} /> Use existing site
               </button>
               <button onClick={() => { setDuplicateMatch(null); onAdded(buildSite()); }} style={{ ...secondaryBtn, justifyContent: "center" }}>
