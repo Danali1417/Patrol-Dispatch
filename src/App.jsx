@@ -54,6 +54,8 @@ const LOGO_KEY = "ops:logo";
 const COMPANY_NAME_KEY = "ops:companyName";
 const DEFAULT_COMPANY_NAME = "Ausgroup";
 const OUTCOME_PHRASES_KEY = "ops:outcomePhrases";
+const MONITORING_COMPANIES_KEY = "ops:monitoringCompanies";
+const BUREAUS_KEY = "ops:bureaus";
 
 // Each phrase has a short `name` (what patrolmen see on the tappable
 // chip — easy to scan/judge at a glance) and the full `text` that's
@@ -69,6 +71,21 @@ const DEFAULT_OUTCOME_PHRASES = [
   { id: "p7", name: "No access — keyholder unreachable", text: "Unable to gain access — keyholder not contactable." },
   { id: "p8", name: "Police attended", text: "Police attended — no further action required." },
 ];
+
+// Case-insensitive de-dupe (first-seen casing wins) + alphabetical sort —
+// used for the Monitoring companies / Bureaus lists, which are built up
+// from manual adds, Excel imports, and "New Client" picks that could
+// easily introduce the same name twice with different casing.
+function dedupeSorted(names) {
+  const seen = new Map();
+  names.forEach((n) => {
+    const trimmed = (n || "").trim();
+    if (!trimmed) return;
+    const key = trimmed.toLowerCase();
+    if (!seen.has(key)) seen.set(key, trimmed);
+  });
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
 
 function makePhraseId() {
   return `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -343,6 +360,8 @@ export default function SentrylinePrototype() {
   const [sitesLoaded, setSitesLoaded] = useState(false);
   const [roster, setRoster] = useState([]);
   const [outcomePhrases, setOutcomePhrases] = useState([]);
+  const [monitoringCompanies, setMonitoringCompanies] = useState([]);
+  const [bureaus, setBureaus] = useState([]);
   const [logoUrl, setLogoUrl] = useState("");
   const [companyName, setCompanyName] = useState(DEFAULT_COMPANY_NAME);
   const [now, setNow] = useState(Date.now());
@@ -558,6 +577,24 @@ export default function SentrylinePrototype() {
     })();
   }, [session]);
 
+  // Load the Monitoring companies / Bureaus master lists (editable from
+  // Manager > Monitoring & Bureau) — empty until a manager first adds or
+  // imports something, unlike the other lists above, since there's no
+  // sensible default set of client names to seed.
+  useEffect(() => {
+    if (!session) return;
+    (async () => {
+      try {
+        const res = await window.storage.get(MONITORING_COMPANIES_KEY, true);
+        if (res && res.value) setMonitoringCompanies(JSON.parse(res.value));
+      } catch (e) { /* nothing stored yet */ }
+      try {
+        const res = await window.storage.get(BUREAUS_KEY, true);
+        if (res && res.value) setBureaus(JSON.parse(res.value));
+      } catch (e) { /* nothing stored yet */ }
+    })();
+  }, [session]);
+
   // Load company logo (uploaded by a Manager, shown on every login type —
   // stays public/unauthenticated so it renders before anyone signs in)
   useEffect(() => {
@@ -621,6 +658,21 @@ export default function SentrylinePrototype() {
   const persistOutcomePhrases = useCallback(async (updated) => {
     setOutcomePhrases(updated);
     try { await window.storage.set(OUTCOME_PHRASES_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
+  }, []);
+
+  // Sorted + case-insensitively deduped on every save, since both lists
+  // are built up piecemeal (manual adds, Excel imports, "New Client" picks
+  // from the dispatch screen) and nothing else enforces uniqueness.
+  const persistMonitoringCompanies = useCallback(async (updated) => {
+    const clean = dedupeSorted(updated);
+    setMonitoringCompanies(clean);
+    try { await window.storage.set(MONITORING_COMPANIES_KEY, JSON.stringify(clean), true); } catch (e) { console.error(e); }
+  }, []);
+
+  const persistBureaus = useCallback(async (updated) => {
+    const clean = dedupeSorted(updated);
+    setBureaus(clean);
+    try { await window.storage.set(BUREAUS_KEY, JSON.stringify(clean), true); } catch (e) { console.error(e); }
   }, []);
 
   const persistLogo = useCallback(async (dataUrl) => {
@@ -731,9 +783,9 @@ export default function SentrylinePrototype() {
           {!accountsLoaded || !sitesLoaded ? (
             <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
           ) : session.role === "manager" ? (
-            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
+            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
           ) : session.role === "operator" ? (
-            <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} logoUrl={logoUrl} />
+            <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} logoUrl={logoUrl} monitoringCompanies={monitoringCompanies} bureaus={bureaus} />
           ) : (
             <PatrolmanView session={session} roster={roster} jobs={jobs} persist={persistJobs} outcomePhrases={outcomePhrases} now={now} />
           )}
@@ -1191,7 +1243,7 @@ function JobProgressBar({ job, compact }) {
    OPERATOR VIEW
 ---------------------------------------------------------------- */
 
-function OperatorView({ session, jobs, accounts, sites, persistSites, zones, roster, persistRoster, persist, now, companyName, logoUrl }) {
+function OperatorView({ session, jobs, accounts, sites, persistSites, zones, roster, persistRoster, persist, now, companyName, logoUrl, monitoringCompanies, bureaus }) {
   const [tab, setTab] = useState("board");
   const [selectedId, setSelectedId] = useState(null);
   // Jobs closed/cancelled 48h+ ago live off the board (see jobArchive.js).
@@ -1231,7 +1283,7 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
         {(tab === "board" || tab === "cancelled" || tab === "closed") && selected && (
           <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} roster={roster} persist={persist} now={now} session={session} companyName={companyName} logoUrl={logoUrl} onBack={() => selectJob(null)} />
         )}
-        {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} roster={roster} session={session} persist={persist} onCreated={(id) => { setTab("board"); selectJob(id); }} />}
+        {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} roster={roster} session={session} persist={persist} monitoringCompanies={monitoringCompanies} bureaus={bureaus} onCreated={(id) => { setTab("board"); selectJob(id); }} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
         {tab === "live" && (
           <div>
@@ -1432,7 +1484,7 @@ function Empty({ text }) {
 
 /* ---------------------- New job form ---------------------- */
 
-function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, session, persist, onCreated }) {
+function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, session, persist, monitoringCompanies, bureaus, onCreated }) {
   const showToast = useToast();
   const [siteId, setSiteId] = useState("");
   const [siteQuery, setSiteQuery] = useState("");
@@ -1624,7 +1676,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       </Field>
 
       {addingSite && (
-        <AddSiteInline zones={zones} initialName={site ? "" : siteQuery} onCancel={() => setAddingSite(false)} onAdded={handleSiteAdded} />
+        <AddSiteInline zones={zones} initialName={site ? "" : siteQuery} monitoringCompanies={monitoringCompanies} bureaus={bureaus} onCancel={() => setAddingSite(false)} onAdded={handleSiteAdded} />
       )}
 
       {site && !addingSite && (
@@ -1673,9 +1725,81 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
   );
 }
 
+// A searchable "pick from the list, or add as a New Client" combobox for
+// Monitoring/Bureau names. Filters as you type (closest starts-with
+// matches first) so a long list is still fast to narrow down by just the
+// first few letters; offers "+ New Client" the moment what's typed isn't
+// already in the list, so an unlisted name is never a dead end. Typing
+// alone never counts as a selection — onChange fires "" on every
+// keystroke and only a real value once something is actually picked (from
+// the list, or via New Client) — so callers that require a confirmed pick
+// (see AddSiteInline) can't be satisfied by half-typed text left in the box.
+function ComboSelect({ label, value, options, onChange, onNewClient, placeholder, style }) {
+  const [query, setQuery] = useState(value || "");
+  const [open, setOpen] = useState(false);
+  const blurTimer = useRef(null);
+
+  useEffect(() => { setQuery(value || ""); }, [value]);
+  useEffect(() => () => { if (blurTimer.current) clearTimeout(blurTimer.current); }, []);
+
+  const q = query.trim().toLowerCase();
+  const matches = (q ? options.filter((o) => o.toLowerCase().includes(q)) : options)
+    .slice()
+    .sort((a, b) => {
+      const aStarts = a.toLowerCase().startsWith(q) ? 0 : 1;
+      const bStarts = b.toLowerCase().startsWith(q) ? 0 : 1;
+      return aStarts - bStarts || a.localeCompare(b);
+    })
+    .slice(0, 30);
+  const exactMatch = options.some((o) => o.toLowerCase() === q);
+
+  function select(name) {
+    setQuery(name);
+    onChange(name);
+    setOpen(false);
+  }
+
+  function addAsNewClient() {
+    const name = query.trim();
+    if (!name) return;
+    setQuery(name);
+    onChange(name);
+    onNewClient(name);
+    setOpen(false);
+  }
+
+  return (
+    <div style={{ position: "relative", ...style }}>
+      <Field label={label}>
+        <input
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); onChange(""); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => { blurTimer.current = setTimeout(() => setOpen(false), 150); }}
+          placeholder={placeholder}
+          style={selectStyle}
+        />
+      </Field>
+      {open && (
+        <div style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, marginTop: -8, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 7, maxHeight: 220, overflowY: "auto", boxShadow: "0 4px 16px rgba(0,0,0,0.3)" }}>
+          {matches.map((o) => (
+            <div key={o} onMouseDown={() => select(o)} style={{ padding: "8px 10px", cursor: "pointer", fontSize: 12.5 }}>{o}</div>
+          ))}
+          {matches.length === 0 && !q && <div style={{ padding: "8px 10px", fontSize: 12, color: "var(--text-dim)" }}>Nothing in the list yet.</div>}
+          {q && !exactMatch && (
+            <div onMouseDown={addAsNewClient} style={{ padding: "8px 10px", cursor: "pointer", fontSize: 12.5, color: "var(--accent)", fontWeight: 700, borderTop: matches.length ? "1px solid var(--border)" : "none" }}>
+              + New Client: "{query.trim()}"
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------------------- Inline "add a new site" (Control Room) ---------------------- */
 
-function AddSiteInline({ zones, initialName = "", onCancel, onAdded }) {
+function AddSiteInline({ zones, initialName = "", monitoringCompanies, bureaus, onCancel, onAdded }) {
   const blank = { name: initialName, address: "", poNumber: "", monitoringCo: "", monitoringEmail: "", bureau: "", run: zones[0] || "Unassigned" };
   const [form, setForm] = useState(blank);
   const [error, setError] = useState("");
@@ -1683,7 +1807,10 @@ function AddSiteInline({ zones, initialName = "", onCancel, onAdded }) {
   function set(field, value) { setForm((f) => ({ ...f, [field]: value })); }
 
   function save() {
-    if (!form.name.trim() || !form.address.trim()) { setError("Site name and address are required."); return; }
+    if (!form.name.trim() || !form.address.trim() || !form.monitoringCo.trim() || !form.bureau.trim()) {
+      setError("Site name, address, monitoring company and bureau are all required.");
+      return;
+    }
     onAdded({
       id: `site_${Date.now()}`,
       name: form.name.trim(),
@@ -1713,8 +1840,24 @@ function AddSiteInline({ zones, initialName = "", onCancel, onAdded }) {
         </Field>
       </div>
       <div style={{ display: "flex", gap: 12 }}>
-        <Field label="Monitoring" style={{ flex: 1 }}><input value={form.monitoringCo} onChange={(e) => set("monitoringCo", e.target.value)} placeholder="Who dispatches the alarm to us" style={selectStyle} /></Field>
-        <Field label="Bureau" style={{ flex: 1 }}><input value={form.bureau} onChange={(e) => set("bureau", e.target.value)} placeholder="Who we invoice, if different" style={selectStyle} /></Field>
+        <ComboSelect
+          label="Monitoring"
+          value={form.monitoringCo}
+          options={monitoringCompanies}
+          placeholder="Search or add who dispatches the alarm to us"
+          onChange={(v) => set("monitoringCo", v)}
+          onNewClient={(name) => notifyNewClient("Monitoring", name, form.name.trim())}
+          style={{ flex: 1 }}
+        />
+        <ComboSelect
+          label="Bureau"
+          value={form.bureau}
+          options={bureaus}
+          placeholder="Search or add who we invoice, if different"
+          onChange={(v) => set("bureau", v)}
+          onNewClient={(name) => notifyNewClient("Bureau", name, form.name.trim())}
+          style={{ flex: 1 }}
+        />
       </div>
       <Field label="Monitoring email (optional)"><input type="email" value={form.monitoringEmail} onChange={(e) => set("monitoringEmail", e.target.value)} placeholder="Where to send the outcome report" style={selectStyle} /></Field>
       {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
@@ -2545,6 +2688,28 @@ async function sendPhotoBackupEmail(job) {
   } catch (e) {
     return { sent: false };
   }
+}
+
+// Fired the moment someone picks "+ New Client" while adding a new site
+// (see ComboSelect) — not deferred until the site is actually saved, so
+// whoever maintains the Monitoring/Bureau list hears about it right away
+// even if the form gets abandoned before saving. Best-effort, same as the
+// other internal alert emails in this app: a failed send never blocks
+// site creation, it just means this one follow-up got missed.
+async function notifyNewClient(field, name, siteName) {
+  const subject = `New Client needs follow-up — ${field}: "${name}"`;
+  const text = [
+    `A new ${field.toLowerCase()} — "${name}" — was entered while creating a site${siteName ? ` ("${siteName}")` : ""}, but it isn't in the ${field} list yet.`,
+    ``,
+    `Add it from Manager > Monitoring & Bureau so it shows up in the dropdown next time.`,
+  ].join("\n");
+  try {
+    await fetch("/api/send-client-email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-App-Secret": import.meta.env.VITE_APP_MAIL_SECRET || "" },
+      body: JSON.stringify({ internalAlert: true, subject, text }),
+    });
+  } catch (e) { /* best-effort — the name is already on the site either way */ }
 }
 
 function loadImageSize(dataUrl) {
@@ -3495,7 +3660,7 @@ function DetailRow({ icon: Icon, label, value }) {
    MANAGER VIEW — create & manage logins
 ---------------------------------------------------------------- */
 
-function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
+function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
   const [tab, setTab] = useState("accounts");
   const showConfirm = useConfirm();
   const showToast = useToast();
@@ -3523,6 +3688,7 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
           { id: "sites", label: "Sites & runs", icon: MapPin },
           { id: "roster", label: "Roster", icon: CalendarDays },
           { id: "phrases", label: "Standard Phrases", icon: FileText },
+          { id: "clients", label: "Monitoring & Bureau", icon: Building2 },
           { id: "logs", label: "Logs & analysis", icon: BarChart3 },
         ].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", marginBottom: 4, borderRadius: 7, border: "none", cursor: "pointer", textAlign: "left", fontSize: 12.5, fontWeight: 600, background: tab === t.id ? "var(--accent-dim)" : "transparent", color: tab === t.id ? "var(--accent)" : "var(--text-dim)" }}>
@@ -3538,6 +3704,7 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
       <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
         {tab === "accounts" && <AccountsManager accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />}
         {tab === "phrases" && <OutcomePhrasesEditor outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} />}
+        {tab === "clients" && <ClientListsManager monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} />}
         {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
         {tab === "logs" && <Logs jobs={jobs} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} />}
@@ -3762,6 +3929,130 @@ function OutcomePhrasesEditor({ outcomePhrases, persistOutcomePhrases }) {
         <button onClick={addPhrase} style={{ ...secondaryBtn, alignSelf: "flex-start" }}>Add phrase</button>
       </div>
       {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 8 }}>{error}</div>}
+    </div>
+  );
+}
+
+function ClientListsManager({ monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus }) {
+  return (
+    <div>
+      <SectionTitle icon={Building2} title="Monitoring & Bureau" />
+      <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 20, maxWidth: 720 }}>
+        These two lists are what Control Room picks from when adding a new site — searchable as they type, with a
+        "New Client" option the moment a name isn't listed yet (which emails a follow-up here so it can be added
+        properly). Add names one at a time below, or upload a spreadsheet with a column of names.
+      </div>
+      <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+        <NameListEditor title="Monitoring companies" singular="Monitoring company" items={monitoringCompanies} persistItems={persistMonitoringCompanies} columnHints={["monitoring"]} />
+        <NameListEditor title="Bureaus" singular="Bureau" items={bureaus} persistItems={persistBureaus} columnHints={["bureau"]} />
+      </div>
+    </div>
+  );
+}
+
+function NameListEditor({ title, singular, items, persistItems, columnHints }) {
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const fileRef = useRef(null);
+  const showToast = useToast();
+  const showConfirm = useConfirm();
+
+  function addName() {
+    setError("");
+    const trimmed = name.trim();
+    if (!trimmed) { setError("Enter a name."); return; }
+    if (items.some((i) => i.toLowerCase() === trimmed.toLowerCase())) { setError("That name is already in the list."); return; }
+    persistItems([...items, trimmed]);
+    setName("");
+    showToast(`${singular} added.`);
+  }
+
+  function removeName(n) {
+    showConfirm(`Remove "${n}" from ${title.toLowerCase()}?`, () => {
+      persistItems(items.filter((i) => i !== n));
+      showToast("Removed.");
+    });
+  }
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy(true);
+    setImportResult(null);
+    setError("");
+    try {
+      const XLSX = await import("xlsx");
+      const buf = await file.arrayBuffer();
+      const workbook = XLSX.read(buf, { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      if (!rows.length) { setError("That file has no rows to import."); setBusy(false); return; }
+
+      // Same flexible header-matching as SitesImport — falls back to the
+      // sheet's first column when nothing matches a hint, so a plain
+      // single-column list of names with no header works too.
+      const headers = Object.keys(rows[0]);
+      const nameHeader = headers.find((h) => columnHints.some((hint) => normalizeHeader(h).includes(hint))) || headers[0];
+
+      const existing = new Set(items.map((i) => i.toLowerCase()));
+      const seen = new Set();
+      const imported = [];
+      rows.forEach((row) => {
+        const n = String(row[nameHeader] ?? "").trim();
+        if (!n) return;
+        const key = n.toLowerCase();
+        if (existing.has(key) || seen.has(key)) return;
+        seen.add(key);
+        imported.push(n);
+      });
+
+      if (imported.length) persistItems([...items, ...imported]);
+      setImportResult({ imported: imported.length, total: rows.length });
+    } catch (err) {
+      setError("Couldn't read that file — make sure it's a valid .xlsx, .xls, or .csv export.");
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div style={{ flex: "1 1 320px", minWidth: 280, maxWidth: 400 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>{title}</div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12, maxHeight: 280, overflowY: "auto" }}>
+        {items.length === 0 && <Empty text="None added yet." />}
+        {items.map((n) => (
+          <div key={n} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12.5 }}>
+            <span style={{ flex: 1 }}>{n}</span>
+            <button onClick={() => removeName(n)} title="Remove" style={iconBtn}><Trash2 size={12} color="var(--breach)" /></button>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") addName(); }}
+          placeholder="Add a name…"
+          style={{ ...selectStyle, flex: 1 }}
+        />
+        <button onClick={addName} style={secondaryBtn}>Add</button>
+      </div>
+
+      <button onClick={() => fileRef.current?.click()} disabled={busy} style={{ ...secondaryBtn, width: "100%", justifyContent: "center" }}>
+        <Upload size={13} /> {busy ? "Importing…" : "Upload spreadsheet"}
+      </button>
+      <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={handleFile} />
+
+      {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 8 }}>{error}</div>}
+      {importResult && (
+        <div style={{ color: "var(--ok)", fontSize: 12, marginTop: 8 }}>
+          Added {importResult.imported} of {importResult.total} row(s) (duplicates and blanks skipped).
+        </div>
+      )}
     </div>
   );
 }
