@@ -44,10 +44,18 @@ const SENT_DATE_KEY = "ops:dailyReportSentDate";
 // window. Best-effort and uses the same Gmail credentials as the report
 // itself, so it can't help when those credentials are what's broken —
 // there's no second channel configured to fall back to.
-async function sendFailureAlert(reason, detail) {
+async function sendFailureAlert(req, reason, detail) {
   const to = process.env.REPORT_RECIPIENTS;
   if (!to || !process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) return;
   try {
+    // Built from the request that's hitting this endpoint right now, rather
+    // than a hardcoded placeholder — a copy-pasted "your-app.vercel.app"
+    // example domain is indistinguishable from a real one and can land
+    // someone on a stranger's unrelated site instead of their own app.
+    const host = req.headers["x-forwarded-host"] || req.headers.host;
+    const proto = req.headers["x-forwarded-proto"] || "https";
+    const retryUrl = host ? `${proto}://${host}/api/daily-report?test=1&secret=YOUR_CRON_SECRET` : null;
+
     const transporter = nodemailer.createTransport({
       service: "gmail",
       auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
@@ -62,8 +70,8 @@ async function sendFailureAlert(reason, detail) {
         `Reason: ${reason}`,
         detail ? `Details: ${detail}` : null,
         "",
-        "To send it now, visit (with your real CRON_SECRET):",
-        "https://<your-app>.vercel.app/api/daily-report?test=1&secret=YOUR_CRON_SECRET",
+        retryUrl ? "To send it now, visit (replacing YOUR_CRON_SECRET with the real one):" : null,
+        retryUrl,
       ].filter((l) => l !== null).join("\n"),
     });
   } catch (err) {
@@ -107,6 +115,7 @@ export default async function handler(req, res) {
 
   if (!testMode && !inSendWindow) {
     await sendFailureAlert(
+      req,
       "cron fired outside the expected send window",
       `Ran at ${String(zonedNow.hour).padStart(2, "0")}:${String(zonedNow.minute).padStart(2, "0")} ${timeZone}, target is ${sendHour}:00 ± ${toleranceMinutes}m.`
     );
@@ -150,7 +159,7 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error("daily-report failed:", err);
-    await sendFailureAlert("unexpected error while building or sending the report", String(err?.message || err));
+    await sendFailureAlert(req, "unexpected error while building or sending the report", String(err?.message || err));
     return res.status(500).json({ error: String(err?.message || err) });
   }
 }
