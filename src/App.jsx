@@ -4235,9 +4235,15 @@ function computeOperatorActivity(allJobs, sessions, operatorAccounts, dateFrom, 
   const startMs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : -Infinity;
   const endMs = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : Infinity;
   const byLogin = new Map();
+  // job.activityLog is written by every role (patrolmen included — e.g.
+  // "Took handling of job", "Results updated"), so without this guard a
+  // patrolman who touched a job in range would get a row here too. This
+  // report is Control Room only, so anyone not currently an operator
+  // account is dropped rather than given a row.
+  const operatorLogins = new Set(operatorAccounts.map((a) => a.loginName));
 
   function ensure(loginName, displayName) {
-    if (!loginName) return null;
+    if (!loginName || !operatorLogins.has(loginName)) return null;
     if (!byLogin.has(loginName)) {
       byLogin.set(loginName, { loginName, displayName: displayName || loginName, onlineMs: 0, sessionCount: 0, dispatched: 0, reviewed: 0, finalized: 0, totalActions: 0 });
     }
