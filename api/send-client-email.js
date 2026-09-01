@@ -9,6 +9,9 @@
 //     skips re-sending a job whose backup already went out this way. `to`
 //     is never accepted from the client for this one; REPORT_RECIPIENTS is
 //     a server-only env var precisely so the browser never needs to know it.
+//   - Picking "New Client" while adding a site (internalAlert: true) also
+//     routes to REPORT_RECIPIENTS the same way — see notifyNewClient in
+//     src/App.jsx.
 //
 // Required env vars (already set for the daily report — reused here):
 //   GMAIL_USER, GMAIL_APP_PASSWORD, REPORT_RECIPIENTS (internalBackup only)
@@ -34,10 +37,10 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: secret ? "Unauthorized" : "VITE_APP_MAIL_SECRET is not configured on the server" });
   }
 
-  const { to: requestedTo, subject, text, html, attachments, internalBackup } = req.body || {};
+  const { to: requestedTo, subject, text, html, attachments, internalBackup, internalAlert } = req.body || {};
 
   let to;
-  if (internalBackup === true) {
+  if (internalBackup === true || internalAlert === true) {
     to = process.env.REPORT_RECIPIENTS;
     if (!to) {
       return res.status(500).json({ error: "REPORT_RECIPIENTS is not configured" });

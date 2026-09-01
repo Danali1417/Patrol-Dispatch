@@ -20,9 +20,13 @@ import { sendPushToRole, sendPushToPatrolman } from "./_lib/push.js";
 import { JOB_ARCHIVE_PREFIX, JOB_PHOTOS_PREFIX, JOB_CHAT_PREFIX } from "./_lib/jobArchive.js";
 
 const PUBLIC_READ_KEYS = new Set(["ops:logo", "ops:companyName"]);
-const MANAGER_ONLY_WRITE_KEYS = new Set(["ops:logo", "ops:companyName", "ops:outcomePhrases"]);
+// Only a manager edits the Monitoring/Bureau master lists (Manager >
+// Monitoring & Bureau) — Control Room only reads them (for the New Site
+// dropdown) and never writes, so these sit alongside ops:outcomePhrases,
+// not ops:sites.
+const MANAGER_ONLY_WRITE_KEYS = new Set(["ops:logo", "ops:companyName", "ops:outcomePhrases", "ops:monitoringCompanies", "ops:bureaus"]);
 const OPERATOR_UP_WRITE_KEYS = new Set(["ops:sites", "ops:zones", "ops:roster"]);
-const KNOWN_KEYS = new Set(["ops:jobs", "ops:sites", "ops:zones", "ops:roster", "ops:logo", "ops:companyName", "ops:outcomePhrases"]);
+const KNOWN_KEYS = new Set(["ops:jobs", "ops:sites", "ops:zones", "ops:roster", "ops:logo", "ops:companyName", "ops:outcomePhrases", "ops:monitoringCompanies", "ops:bureaus"]);
 
 const LIVELOC_PREFIX = "ops:liveloc:";
 const STATIONARY_RADIUS_M = 50; // GPS jitter tolerance — "hasn't left this spot"
