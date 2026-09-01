@@ -162,6 +162,13 @@ send. It responds with JSON showing what happened (jobs found, recipients,
 or any error) — useful for confirming Gmail delivery actually works before
 relying on the schedule.
 
+**If a day's report fails to send** (a Gmail error, or the single daily
+cron fire landing outside the accepted window), the same recipients get a
+short alert email saying so, with a link to the `test=1` URL above to send
+it immediately — so a bad day shows up in an inbox instead of only in
+Vercel's function logs. This alert reuses the same Gmail credentials as the
+report itself, so it can't help if those credentials are what's broken.
+
 Optional environment variables:
 
 | Name | Default | Purpose |
