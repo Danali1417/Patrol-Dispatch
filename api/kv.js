@@ -25,8 +25,13 @@ const PUBLIC_READ_KEYS = new Set(["ops:logo", "ops:companyName"]);
 // dropdown) and never writes, so these sit alongside ops:outcomePhrases,
 // not ops:sites.
 const MANAGER_ONLY_WRITE_KEYS = new Set(["ops:logo", "ops:companyName", "ops:outcomePhrases", "ops:monitoringCompanies", "ops:bureaus"]);
-const OPERATOR_UP_WRITE_KEYS = new Set(["ops:sites", "ops:zones", "ops:roster"]);
-const KNOWN_KEYS = new Set(["ops:jobs", "ops:sites", "ops:zones", "ops:roster", "ops:logo", "ops:companyName", "ops:outcomePhrases", "ops:monitoringCompanies", "ops:bureaus"]);
+const OPERATOR_UP_WRITE_KEYS = new Set(["ops:sites", "ops:zones", "ops:roster", "ops:operatorSessions"]);
+// ops:operatorSessions (Manager > Operator Activity) needs read-modify-write
+// from an operator's own session (to log its own presence) as well as read
+// access from a manager (to view the report), so it sits at the same
+// any-authenticated-session read tier as ops:sites/ops:roster rather than
+// being manager-only-read — the UI only surfaces it on the Manager tab.
+const KNOWN_KEYS = new Set(["ops:jobs", "ops:sites", "ops:zones", "ops:roster", "ops:logo", "ops:companyName", "ops:outcomePhrases", "ops:monitoringCompanies", "ops:bureaus", "ops:operatorSessions"]);
 
 const LIVELOC_PREFIX = "ops:liveloc:";
 const STATIONARY_RADIUS_M = 50; // GPS jitter tolerance — "hasn't left this spot"
