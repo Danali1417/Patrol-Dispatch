@@ -70,7 +70,12 @@ export async function login(loginName, password, role) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Sign-in failed (${res.status})`);
   setToken(data.token);
-  return { ...data.account, id: data.account.loginName };
+  // Merge in the token's own payload (notably `sid`) so a freshly-logged-in
+  // session object matches what restoreSession() produces after a reload —
+  // without this, anything keyed on session.sid (e.g. presence tracking)
+  // silently wouldn't work until the page was reloaded once.
+  const payload = decodeJwtPayload(data.token);
+  return { ...data.account, ...(payload || {}), id: data.account.loginName };
 }
 
 export function logout() {
