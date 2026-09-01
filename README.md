@@ -110,8 +110,11 @@ an older deployment that had plain-text passwords, visit this URL once
 (with your real `MIGRATE_SECRET`) to hash them in place:
 
 ```
-https://your-app.vercel.app/api/migrate-passwords?secret=YOUR_MIGRATE_SECRET
+https://YOUR-DEPLOYMENT-DOMAIN.vercel.app/api/migrate-passwords?secret=YOUR_MIGRATE_SECRET
 ```
+
+Replace `YOUR-DEPLOYMENT-DOMAIN` with your actual live URL from step 5 above
+(or whatever you normally type in to open the app) — not literal text.
 
 It's safe to run more than once — it only hashes accounts that still have
 a plain-text password and leaves already-hashed ones untouched.
@@ -154,8 +157,11 @@ cron jobs, so it's a single fire rather than a poll — see
 real `CRON_SECRET`):
 
 ```
-https://your-app.vercel.app/api/daily-report?test=1&secret=YOUR_CRON_SECRET
+https://YOUR-DEPLOYMENT-DOMAIN.vercel.app/api/daily-report?test=1&secret=YOUR_CRON_SECRET
 ```
+
+Replace `YOUR-DEPLOYMENT-DOMAIN` with your actual live URL (the same one
+you use to log into the app day-to-day) — not literal text.
 
 This sends a real email right away without affecting the next scheduled
 send. It responds with JSON showing what happened (jobs found, recipients,
