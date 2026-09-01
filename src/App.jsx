@@ -1552,6 +1552,15 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
     setAddingSite(false);
   }
 
+  // Picked "Use existing site" off the duplicate-name prompt in
+  // AddSiteInline — just selects it, exactly as if it had been found via
+  // the site search above, instead of creating a near-duplicate record.
+  function handleUseExistingSite(existingSite) {
+    setSiteId(existingSite.id);
+    setSiteQuery(siteLabel(existingSite));
+    setAddingSite(false);
+  }
+
   function clearSite() {
     setSiteId("");
     setSiteQuery("");
@@ -1676,7 +1685,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       </Field>
 
       {addingSite && (
-        <AddSiteInline zones={zones} initialName={site ? "" : siteQuery} monitoringCompanies={monitoringCompanies} bureaus={bureaus} onCancel={() => setAddingSite(false)} onAdded={handleSiteAdded} />
+        <AddSiteInline zones={zones} initialName={site ? "" : siteQuery} monitoringCompanies={monitoringCompanies} bureaus={bureaus} sites={sites} onCancel={() => setAddingSite(false)} onAdded={handleSiteAdded} onUseExisting={handleUseExistingSite} />
       )}
 
       {site && !addingSite && (
@@ -1692,10 +1701,10 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
 
       <div style={{ display: "flex", gap: 12 }}>
         <Field label="Job number" style={{ flex: 1 }}>
-          <input value={jobNumber} onChange={(e) => setJobNumber(e.target.value)} placeholder="Our own job reference" style={selectStyle} />
+          <input value={jobNumber} onChange={(e) => setJobNumber(e.target.value.toUpperCase())} placeholder="Our own job reference" style={selectStyle} />
         </Field>
         <Field label="Order number (optional)" style={{ flex: 1 }}>
-          <input value={orderNo} onChange={(e) => setOrderNo(e.target.value)} placeholder="Client / monitoring company's reference" style={selectStyle} />
+          <input value={orderNo} onChange={(e) => setOrderNo(e.target.value.toUpperCase())} placeholder="Client / monitoring company's reference" style={selectStyle} />
         </Field>
       </div>
 
@@ -1704,8 +1713,8 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       </Field>
 
       <div style={{ display: "flex", gap: 12 }}>
-        <Field label="Key number / code" style={{ flex: 1 }}><input value={keyInfo} onChange={(e) => setKeyInfo(e.target.value)} style={selectStyle} /></Field>
-        <Field label="Alarm code" style={{ width: 130 }}><input value={alarmCode} onChange={(e) => setAlarmCode(e.target.value)} style={selectStyle} /></Field>
+        <Field label="Key number / code" style={{ flex: 1 }}><input value={keyInfo} onChange={(e) => setKeyInfo(e.target.value.toUpperCase())} style={selectStyle} /></Field>
+        <Field label="Alarm code" style={{ width: 130 }}><input value={alarmCode} onChange={(e) => setAlarmCode(e.target.value.toUpperCase())} style={selectStyle} /></Field>
       </div>
 
       <Field label="Dispatch to">
@@ -1773,7 +1782,7 @@ function ComboSelect({ label, value, options, onChange, onNewClient, placeholder
       <Field label={label}>
         <input
           value={query}
-          onChange={(e) => { setQuery(e.target.value); onChange(""); setOpen(true); }}
+          onChange={(e) => { setQuery(e.target.value.toUpperCase()); onChange(""); setOpen(true); }}
           onFocus={() => setOpen(true)}
           onBlur={() => { blurTimer.current = setTimeout(() => setOpen(false), 150); }}
           placeholder={placeholder}
@@ -1799,19 +1808,28 @@ function ComboSelect({ label, value, options, onChange, onNewClient, placeholder
 
 /* ---------------------- Inline "add a new site" (Control Room) ---------------------- */
 
-function AddSiteInline({ zones, initialName = "", monitoringCompanies, bureaus, onCancel, onAdded }) {
+// Ignores case/punctuation/spacing so "Storage King (Brookvale)" and
+// "storage king brookvale" flag as the same site, without the false
+// positives a looser "contains" match would give between genuinely
+// different sites that just share a word (e.g. two different "Storage
+// King" branches).
+function normalizeSiteName(s) {
+  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function AddSiteInline({ zones, initialName = "", monitoringCompanies, bureaus, sites, onCancel, onAdded, onUseExisting }) {
   const blank = { name: initialName, address: "", poNumber: "", monitoringCo: "", monitoringEmail: "", bureau: "", run: zones[0] || "Unassigned" };
   const [form, setForm] = useState(blank);
   const [error, setError] = useState("");
+  // The existing site a duplicate-name check just flagged — set only long
+  // enough to show the "use existing?" prompt; save() itself decides
+  // whether to show it, "create anyway" clears it and saves regardless.
+  const [duplicateMatch, setDuplicateMatch] = useState(null);
 
   function set(field, value) { setForm((f) => ({ ...f, [field]: value })); }
 
-  function save() {
-    if (!form.name.trim() || !form.address.trim() || !form.monitoringCo.trim() || !form.bureau.trim()) {
-      setError("Site name, address, monitoring company and bureau are all required.");
-      return;
-    }
-    onAdded({
+  function buildSite() {
+    return {
       id: `site_${Date.now()}`,
       name: form.name.trim(),
       address: form.address.trim(),
@@ -1822,16 +1840,30 @@ function AddSiteInline({ zones, initialName = "", monitoringCompanies, bureaus, 
       run: form.run,
       keyInfo: "",
       alarmCode: "",
-    });
+    };
+  }
+
+  function save() {
+    if (!form.name.trim() || !form.address.trim() || !form.monitoringCo.trim() || !form.bureau.trim()) {
+      setError("Site name, address, monitoring company and bureau are all required.");
+      return;
+    }
+    setError("");
+    const match = sites.find((s) => normalizeSiteName(s.name) === normalizeSiteName(form.name));
+    if (match) {
+      setDuplicateMatch(match);
+      return;
+    }
+    onAdded(buildSite());
   }
 
   return (
     <div style={{ padding: 14, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel-alt)", marginBottom: 14 }}>
       <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>New site</div>
-      <Field label="Site name"><input value={form.name} onChange={(e) => set("name", e.target.value)} style={selectStyle} /></Field>
-      <Field label="Address"><input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, suburb, state" style={selectStyle} /></Field>
+      <Field label="Site name"><input value={form.name} onChange={(e) => set("name", e.target.value.toUpperCase())} style={selectStyle} /></Field>
+      <Field label="Address"><input value={form.address} onChange={(e) => set("address", e.target.value.toUpperCase())} placeholder="Street, suburb, state" style={selectStyle} /></Field>
       <div style={{ display: "flex", gap: 12 }}>
-        <Field label="PO number" style={{ flex: 1 }}><input value={form.poNumber} onChange={(e) => set("poNumber", e.target.value)} style={selectStyle} /></Field>
+        <Field label="PO number" style={{ flex: 1 }}><input value={form.poNumber} onChange={(e) => set("poNumber", e.target.value.toUpperCase())} style={selectStyle} /></Field>
         <Field label="Run / zone" style={{ width: 160 }}>
           <select value={form.run} onChange={(e) => set("run", e.target.value)} style={selectStyle}>
             <option value="Unassigned">Unassigned</option>
@@ -1865,6 +1897,28 @@ function AddSiteInline({ zones, initialName = "", monitoringCompanies, bureaus, 
         <button onClick={save} style={secondaryBtn}><MapPin size={13} /> Save site</button>
         <button onClick={onCancel} style={iconBtn}><X size={13} /></button>
       </div>
+
+      {duplicateMatch && (
+        <div style={{ position: "fixed", inset: 0, background: "#000000aa", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
+          <div style={{ background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 10, width: 420, maxWidth: "90%", padding: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <SectionTitle icon={AlertTriangle} title="Site already exists" small />
+              <button onClick={() => setDuplicateMatch(null)} style={{ background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer" }}><X size={16} /></button>
+            </div>
+            <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 16, lineHeight: 1.5 }}>
+              A site named <b style={{ color: "var(--text)" }}>{duplicateMatch.name}</b> already exists at <b style={{ color: "var(--text)" }}>{duplicateMatch.address}</b>. Use the existing site instead of creating a duplicate?
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <button onClick={() => onUseExisting(duplicateMatch)} style={{ ...primaryBtn, justifyContent: "center" }}>
+                <MapPin size={13} /> Use existing site
+              </button>
+              <button onClick={() => { setDuplicateMatch(null); onAdded(buildSite()); }} style={{ ...secondaryBtn, justifyContent: "center" }}>
+                No, create a new site anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2163,27 +2217,27 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
           <SectionTitle icon={Pencil} title="Edit job details" small />
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 10 }}>
             <Field label="Job number" style={{ flex: "1 1 140px" }}>
-              <input value={editJobNumber} onChange={(e) => setEditJobNumber(e.target.value)} style={selectStyle} />
+              <input value={editJobNumber} onChange={(e) => setEditJobNumber(e.target.value.toUpperCase())} style={selectStyle} />
             </Field>
             <Field label="Order No" style={{ flex: "1 1 140px" }}>
-              <input value={editOrderNo} onChange={(e) => setEditOrderNo(e.target.value)} style={selectStyle} />
+              <input value={editOrderNo} onChange={(e) => setEditOrderNo(e.target.value.toUpperCase())} style={selectStyle} />
             </Field>
             <Field label="Docket No" style={{ flex: "1 1 140px" }}>
-              <input value={editDocketNo} onChange={(e) => setEditDocketNo(e.target.value)} style={selectStyle} />
+              <input value={editDocketNo} onChange={(e) => setEditDocketNo(e.target.value.toUpperCase())} style={selectStyle} />
             </Field>
           </div>
           <Field label="Site name">
-            <input value={editSiteName} onChange={(e) => setEditSiteName(e.target.value)} style={selectStyle} />
+            <input value={editSiteName} onChange={(e) => setEditSiteName(e.target.value.toUpperCase())} style={selectStyle} />
           </Field>
           <Field label="Address">
-            <input value={editAddress} onChange={(e) => setEditAddress(e.target.value)} style={selectStyle} />
+            <input value={editAddress} onChange={(e) => setEditAddress(e.target.value.toUpperCase())} style={selectStyle} />
           </Field>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <Field label="Monitoring company" style={{ flex: "1 1 160px" }}>
-              <input value={editMonitoringCo} onChange={(e) => setEditMonitoringCo(e.target.value)} style={selectStyle} />
+              <input value={editMonitoringCo} onChange={(e) => setEditMonitoringCo(e.target.value.toUpperCase())} style={selectStyle} />
             </Field>
             <Field label="Bureau" style={{ flex: "1 1 160px" }}>
-              <input value={editBureau} onChange={(e) => setEditBureau(e.target.value)} style={selectStyle} />
+              <input value={editBureau} onChange={(e) => setEditBureau(e.target.value.toUpperCase())} style={selectStyle} />
             </Field>
           </div>
           <Field label="Alarm description / area(s) in alarm">
@@ -2270,7 +2324,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
           <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#B91C1C", fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>
             <Ban size={14} /> Cancel this job — the patrolman will be notified to stand down
           </div>
-          <textarea rows={2} value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder="e.g. Monitoring advised stand down — client cancelled the alarm" style={{ ...selectStyle, resize: "vertical" }} />
+          <textarea rows={2} value={cancelReason} onChange={(e) => setCancelReason(e.target.value.toUpperCase())} placeholder="e.g. Monitoring advised stand down — client cancelled the alarm" style={{ ...selectStyle, resize: "vertical" }} />
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <button onClick={confirmCancel} disabled={cancelBusy} style={{ ...primaryBtn, background: "var(--breach)", opacity: cancelBusy ? 0.6 : 1, cursor: cancelBusy ? "not-allowed" : "pointer" }}>
               <Ban size={14} /> {cancelBusy ? "Cancelling…" : "Confirm cancel"}
@@ -2291,7 +2345,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
           <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#B91C1C", fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>
             <AlertTriangle size={14} /> Response time exceeded — log a reason and advise the client
           </div>
-          <textarea rows={2} value={delayText} onChange={(e) => setDelayText(e.target.value)} placeholder="e.g. Traffic incident on route, ETA 15 min — client notified by phone at 21:42" style={{ ...selectStyle, resize: "vertical" }} />
+          <textarea rows={2} value={delayText} onChange={(e) => setDelayText(e.target.value.toUpperCase())} placeholder="e.g. Traffic incident on route, ETA 15 min — client notified by phone at 21:42" style={{ ...selectStyle, resize: "vertical" }} />
           <button disabled={!delayText.trim()} onClick={() => logAction("Delay logged", delayText.trim(), { delayReason: delayText.trim(), delayLoggedAt: new Date().toISOString() })} style={{ ...primaryBtn, marginTop: 8, opacity: delayText.trim() ? 1 : 0.4 }}>
             Save delay reason
           </button>
@@ -2370,7 +2424,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
           {isArchived ? (
             <div style={{ ...selectStyle, minHeight: 84, whiteSpace: "pre-wrap", color: "var(--text)" }}>{notes || "—"}</div>
           ) : (
-            <textarea rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} style={{ ...selectStyle, resize: "vertical" }} />
+            <textarea rows={4} value={notes} onChange={(e) => setNotes(e.target.value.toUpperCase())} style={{ ...selectStyle, resize: "vertical" }} />
           )}
           {isArchived && photosLoaded && photos.length === 0 && job.photoCount > 0 && (
             <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 8 }}>
