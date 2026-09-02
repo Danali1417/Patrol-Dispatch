@@ -21,6 +21,7 @@ import { getPushStatus, enableJobAlerts, disableJobAlerts, resyncJobAlertsIfEnab
 import { reverseGeocode, fetchStaticMap } from "./geocode.js";
 import { reportLiveLocation, stopSharingLiveLocation } from "./liveLocation.js";
 import { fetchJobPhotos, persistJobPhotos } from "./jobPhotos.js";
+import { loadJobDraft, saveJobDraft, clearJobDraft } from "./jobDraft.js";
 import { fetchJobChat, sendJobChatMessage } from "./jobChat.js";
 import { searchArchivedJobs, fetchArchivedJobsInRange, resetArchiveAndPhotos } from "./jobArchive.js";
 
@@ -764,9 +765,22 @@ export default function SentrylinePrototype() {
     })();
   }, []);
 
-  const persistJobs = useCallback(async (updated) => {
-    setJobs(updated);
-    prevJobsRef.current = updated;
+  const persistJobs = useCallback(async (updated, { throwOnError = false } = {}) => {
+    // The default path is optimistic — instant UI feedback, with a failed
+    // write just silently reconciled by the next poll, which is the right
+    // tradeoff for routine actions where a retry costs nothing. The
+    // patrolman's final job submission (see JobDetailPatrolman's submit())
+    // is different: its local "submitted" status is also what tells that
+    // screen it's safe to delete the offline draft holding the outcome
+    // text and photos (jobDraft.js) — an optimistic flip here would erase
+    // that safety net the instant a write silently failed, which is
+    // exactly the data loss this was built to prevent. throwOnError skips
+    // the optimistic update and only reflects — or throws — once the
+    // write is actually confirmed.
+    if (!throwOnError) {
+      setJobs(updated);
+      prevJobsRef.current = updated;
+    }
     // Photos never belong in this blob — every signed-in device polls it,
     // and photos are stored separately (jobPhotos.js) for exactly that
     // reason. Stripped here too as a backstop in case a future call site
@@ -781,11 +795,18 @@ export default function SentrylinePrototype() {
       // have to wait out a poll cycle to see a job it would otherwise
       // have no idea exists.
       const merged = JSON.parse(result.value);
-      if (merged.length !== slim.length) {
+      if (throwOnError) {
+        const finalJobs = merged.length === slim.length ? updated : merged;
+        setJobs(finalJobs);
+        prevJobsRef.current = finalJobs;
+      } else if (merged.length !== slim.length) {
         setJobs(merged);
         prevJobsRef.current = merged;
       }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      if (throwOnError) throw e;
+    }
   }, []);
 
   const persistZones = useCallback(async (updated) => {
@@ -3656,23 +3677,45 @@ function EtaModal({ onConfirm, onClose }) {
 }
 
 function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, onBack }) {
-  const [outcome, setOutcome] = useState(job.outcomeNotes || "");
-  const [docketNo, setDocketNo] = useState(job.docketNo || "");
-  const [photos, setPhotos] = useState([]);
+  const isCancelled = job.status === "cancelled";
+  const submitted = job.status !== "dispatched" && !isCancelled;
+  // A still-in-progress job restores whatever outcome text, docket number,
+  // and photos were last saved before the tab closed, crashed, or lost
+  // signal — see jobDraft.js. A job the server already shows as
+  // submitted/cancelled never needs one, so none is loaded for it.
+  const initialDraft = !submitted && !isCancelled ? loadJobDraft(job.id) : null;
+  const [outcome, setOutcome] = useState(initialDraft?.outcome ?? job.outcomeNotes ?? "");
+  const [docketNo, setDocketNo] = useState(initialDraft?.docketNo ?? job.docketNo ?? "");
+  const [photos, setPhotos] = useState(initialDraft?.photos ?? []);
   const [busy, setBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [showEtaModal, setShowEtaModal] = useState(false);
   const fileRef = useRef(null);
   const showToast = useToast();
-  const isCancelled = job.status === "cancelled";
-  const submitted = job.status !== "dispatched" && !isCancelled;
   const isOnsite = !!job.onsiteTime;
 
   // Already-submitted jobs have their photos in their own key, not on
-  // `job` — see jobPhotos.js. A job still being worked has none to fetch yet.
+  // `job` — see jobPhotos.js. A job still being worked has none to fetch yet
+  // (unless a draft above already restored some).
   useEffect(() => {
     if (job.photoCount > 0) fetchJobPhotos(job.id).then(setPhotos);
   }, [job.id, job.photoCount]);
+
+  // Mirrors outcome/docketNo/photos into localStorage as they change, so a
+  // dropped connection or a killed tab never costs the patrolman the work —
+  // cleared only once submit() actually confirms the job saved, never on a
+  // failure. Debounced so typing doesn't re-serialize the whole draft
+  // (photos included) on every keystroke. Once the server shows this job as
+  // already submitted/cancelled — including right after this component's
+  // own successful submit() — any draft is stale and removed.
+  useEffect(() => {
+    if (submitted || isCancelled) {
+      clearJobDraft(job.id);
+      return;
+    }
+    const t = setTimeout(() => saveJobDraft(job.id, { outcome, docketNo, photos }), 400);
+    return () => clearTimeout(t);
+  }, [job.id, submitted, isCancelled, outcome, docketNo, photos]);
 
   // Quick-phrases just fill in a starting point — appended (not replacing
   // anything already typed) so the field stays fully editable. Skipped if
@@ -3733,25 +3776,41 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
 
   async function submit() {
     setActionBusy(true);
-    const location = await getCurrentLocation();
-    const locationName = location ? await reverseGeocode(location.lat, location.lon) : null;
-    // Photos are saved to their own key first (see jobPhotos.js) — the job
-    // record itself only carries the count, so the board's poll never has
-    // to move photo bytes. Sequenced so a job is never marked submitted
-    // with a photoCount pointing at photos that failed to save.
-    if (photos.length > 0) await persistJobPhotos(job.id, photos);
-    const updated = jobs.map((j) => (j.id === job.id ? {
-      ...j,
-      status: "submitted",
-      outcomeNotes: outcome.trim(),
-      docketNo: docketNo.trim(),
-      photoCount: photos.length,
-      offsiteTime: new Date().toISOString(),
-      offsiteLocation: location ? { lat: location.lat, lon: location.lon } : null,
-      offsiteLocationName: locationName,
-    } : j));
-    await persist(updated);
-    onBack();
+    try {
+      const location = await getCurrentLocation();
+      const locationName = location ? await reverseGeocode(location.lat, location.lon) : null;
+      // Photos are saved to their own key first (see jobPhotos.js) — the job
+      // record itself only carries the count, so the board's poll never has
+      // to move photo bytes. Sequenced so a job is never marked submitted
+      // with a photoCount pointing at photos that failed to save.
+      if (photos.length > 0) await persistJobPhotos(job.id, photos);
+      const updated = jobs.map((j) => (j.id === job.id ? {
+        ...j,
+        status: "submitted",
+        outcomeNotes: outcome.trim(),
+        docketNo: docketNo.trim(),
+        photoCount: photos.length,
+        offsiteTime: new Date().toISOString(),
+        offsiteLocation: location ? { lat: location.lat, lon: location.lon } : null,
+        offsiteLocationName: locationName,
+      } : j));
+      // throwOnError: this write must be confirmed before the local job
+      // state is allowed to look "submitted" — otherwise the optimistic
+      // default would flip it locally even on a failed write, and the
+      // effect above would then delete the very draft meant to survive
+      // that failure (see persistJobs's own comment for the full reason).
+      await persist(updated, { throwOnError: true });
+      clearJobDraft(job.id);
+      onBack();
+    } catch (err) {
+      // Network drop mid-submit — the outcome text and photos are already
+      // safe in the draft (see the effect above), so staying on this
+      // screen costs nothing; leaving it would make the patrolman think
+      // they need to redo the work they've already done.
+      showToast("Couldn't save — check your connection and try Mark offsite again.", "error");
+    } finally {
+      setActionBusy(false);
+    }
   }
 
   return (
