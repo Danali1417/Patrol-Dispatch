@@ -38,6 +38,7 @@ const STATIONARY_RADIUS_M = 50; // GPS jitter tolerance — "hasn't left this sp
 const STATIONARY_ALERT_MS = 30 * 60 * 1000;
 
 const JOBS_KEY = "ops:jobs";
+const OPERATOR_SESSIONS_KEY = "ops:operatorSessions";
 
 // Best-effort "how recently was this job touched" — the max timestamp
 // found anywhere on it (every ISO-ish string field, plus activityLog and
@@ -114,6 +115,44 @@ async function mergeJobsWrite(incomingJson) {
   const merged = missingFromIncoming.length ? [...reconciled, ...missingFromIncoming] : reconciled;
   const mergedJson = JSON.stringify(merged);
   await kvSet(JOBS_KEY, mergedJson);
+  return mergedJson;
+}
+
+// Same concurrent-write race as ops:jobs, on a busy shift with several
+// Control Room tabs all writing this one shared array at once (a session
+// start on sign-in, a heartbeat every 25s per tab, an end on sign-out) —
+// a plain whole-array overwrite could and did silently drop someone's
+// newly-started session when two writes landed close together. Simpler
+// than the jobs merge though: each record is owned by exactly one sid
+// (only that browser tab's own start/heartbeat/end calls ever touch it),
+// so there's no same-record conflict to resolve — a write's own sid
+// always wins over whatever's currently stored for it, and any other sid
+// present in current storage but missing from this write's payload
+// (another tab's session, added or updated after this client's own last
+// read) is kept rather than dropped. 90-day pruning happens here, once,
+// on the merged result, instead of relying on every client's own local
+// filter to agree.
+async function mergeOperatorSessionsWrite(incomingJson) {
+  let incoming;
+  try {
+    incoming = JSON.parse(incomingJson);
+  } catch (e) {
+    throw new Error("Malformed operator sessions payload");
+  }
+  if (!Array.isArray(incoming)) {
+    await kvSet(OPERATOR_SESSIONS_KEY, incomingJson);
+    return incomingJson;
+  }
+
+  const currentRaw = await kvGet(OPERATOR_SESSIONS_KEY);
+  const current = currentRaw ? JSON.parse(currentRaw) : [];
+  const bySid = new Map(current.map((s) => [s.sid, s]));
+  for (const s of incoming) bySid.set(s.sid, s);
+
+  const cutoffMs = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  const merged = [...bySid.values()].filter((s) => new Date(s.startedAt).getTime() >= cutoffMs);
+  const mergedJson = JSON.stringify(merged);
+  await kvSet(OPERATOR_SESSIONS_KEY, mergedJson);
   return mergedJson;
 }
 
@@ -434,6 +473,8 @@ export default async function handler(req, res) {
       let finalValue = value;
       if (key === JOBS_KEY) {
         finalValue = await mergeJobsWrite(value);
+      } else if (key === OPERATOR_SESSIONS_KEY) {
+        finalValue = await mergeOperatorSessionsWrite(value);
       } else {
         await kvSet(key, value);
       }
