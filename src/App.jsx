@@ -4,7 +4,7 @@ import {
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
   ShieldAlert, ArrowLeft, Building2, Settings, Lock, Eye, EyeOff,
   Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone, CalendarDays, Ban,
-  FileText, Download, Archive, Pencil, MessageSquare, Navigation, Activity, RefreshCw
+  FileText, Download, Archive, Pencil, MessageSquare, Navigation, Activity, RefreshCw, Image as ImageIcon
 } from "lucide-react";
 import {
   STATUS_META, fmtTime, fmtDateTime, isoDateOnly, isoTimeOnly,
@@ -411,6 +411,37 @@ function watermarkPhoto(file, label, location, locationName) {
           location: location ? { lat: location.lat, lon: location.lon } : null,
           locationName: locationName || null,
         });
+      };
+      img.onerror = reject;
+      img.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// A gallery pick is deliberately left plain — no burned-in timestamp/GPS
+// overlay and no ts/location recorded on the record at all. Those fields
+// exist to prove a patrolman was on site *right now*; stamping today's
+// date and current GPS onto a photo that might be days old (or taken
+// somewhere else entirely) would misrepresent it, not document it. Same
+// resize/compression as watermarkPhoto, just without the canvas overlay.
+function resizePhotoPlain(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxW = 480;
+        const scale = Math.min(1, maxW / img.width);
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve({ dataUrl: canvas.toDataURL("image/jpeg", 0.72), ts: null, location: null, locationName: null });
       };
       img.onerror = reject;
       img.src = reader.result;
@@ -3740,7 +3771,8 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
   const [busy, setBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [showEtaModal, setShowEtaModal] = useState(false);
-  const fileRef = useRef(null);
+  const cameraFileRef = useRef(null);
+  const galleryFileRef = useRef(null);
   const showToast = useToast();
   const isOnsite = !!job.onsiteTime;
 
@@ -3780,7 +3812,10 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
     });
   }
 
-  async function handleFiles(e) {
+  // capture="environment" on this input forces the camera app open
+  // directly, so anything arriving through it is a fresh, right-now photo
+  // — watermarked with the current time and location to prove it.
+  async function handleCameraFiles(e) {
     const files = Array.from(e.target.files || []);
     setBusy(true);
     const location = await getCurrentLocation();
@@ -3788,6 +3823,22 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
     const results = [];
     for (const f of files.slice(0, MAX_ATTENDANCE_PHOTOS - photos.length)) {
       try { results.push(await watermarkPhoto(f, job.jobNumber, location, locationName)); } catch (err) { /* skip bad file */ }
+    }
+    setPhotos((p) => [...p, ...results]);
+    setBusy(false);
+    e.target.value = "";
+  }
+
+  // No capture attribute here — this is the plain gallery picker. A
+  // picked photo could be from any time or place, so it's left plain
+  // rather than stamped with today's date and the patrolman's current
+  // GPS position, which would misrepresent it as taken right now.
+  async function handleGalleryFiles(e) {
+    const files = Array.from(e.target.files || []);
+    setBusy(true);
+    const results = [];
+    for (const f of files.slice(0, MAX_ATTENDANCE_PHOTOS - photos.length)) {
+      try { results.push(await resizePhotoPlain(f)); } catch (err) { /* skip bad file */ }
     }
     setPhotos((p) => [...p, ...results]);
     setBusy(false);
@@ -3941,13 +3992,19 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
               </div>
             ))}
             {photos.length < MAX_ATTENDANCE_PHOTOS && (
-              <button onClick={() => fileRef.current?.click()} disabled={busy} style={{ width: 84, height: 84, borderRadius: 6, border: "1px dashed var(--border)", background: "var(--panel)", color: "var(--text-dim)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, cursor: "pointer" }}>
-                <Camera size={17} /><span style={{ fontSize: 10 }}>{busy ? "…" : "Add photo"}</span>
-              </button>
+              <>
+                <button onClick={() => cameraFileRef.current?.click()} disabled={busy} style={{ width: 84, height: 84, borderRadius: 6, border: "1px dashed var(--border)", background: "var(--panel)", color: "var(--text-dim)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, cursor: "pointer" }}>
+                  <Camera size={17} /><span style={{ fontSize: 10 }}>{busy ? "…" : "Take photo"}</span>
+                </button>
+                <button onClick={() => galleryFileRef.current?.click()} disabled={busy} style={{ width: 84, height: 84, borderRadius: 6, border: "1px dashed var(--border)", background: "var(--panel)", color: "var(--text-dim)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, cursor: "pointer" }}>
+                  <ImageIcon size={17} /><span style={{ fontSize: 10 }}>{busy ? "…" : "From gallery"}</span>
+                </button>
+              </>
             )}
-            <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={handleFiles} />
+            <input ref={cameraFileRef} type="file" accept="image/*" capture="environment" multiple hidden onChange={handleCameraFiles} />
+            <input ref={galleryFileRef} type="file" accept="image/*" multiple hidden onChange={handleGalleryFiles} />
           </div>
-          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 6 }}>Photos are timestamped automatically on capture.</div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 6 }}>Photos taken with "Take photo" are timestamped and geo-tagged automatically. Photos added from the gallery are not.</div>
           <button disabled={!outcome.trim() || actionBusy} onClick={submit} style={{ ...primaryBtn, width: "100%", marginTop: 16, justifyContent: "center", opacity: outcome.trim() && !actionBusy ? 1 : 0.4 }}>
             <Send size={14} /> {actionBusy ? "Getting your location…" : "Mark offsite & submit"}
           </button>
