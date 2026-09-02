@@ -156,9 +156,18 @@ async function mergeOperatorSessionsWrite(incomingJson) {
   // manager's own device clock) while its own start-to-end duration still
   // adds up fine, since that math never leaves the one skewed clock. One
   // clock for every record removes that mismatch entirely.
-  const serverNow = new Date().toISOString();
+  const serverNowMs = Date.now();
+  const serverNow = new Date(serverNowMs).toISOString();
   for (const s of incoming) {
     const existing = bySid.get(s.sid);
+    // idleForMs is how long that tab's own clock says it's been since real
+    // user activity — a relative duration, not an absolute timestamp, so
+    // (unlike lastSeenAt above) it's safe to trust from the client: a
+    // skewed device clock cancels out of a same-device delta. Anchoring it
+    // to the server's own "now" here, the same way lastSeenAt is stamped,
+    // keeps the derived lastActiveAt on the one clock every other
+    // timestamp on this record already uses.
+    const idleForMs = typeof s.idleForMs === "number" && s.idleForMs >= 0 ? s.idleForMs : 0;
     bySid.set(s.sid, {
       sid: s.sid,
       loginName: s.loginName,
@@ -166,6 +175,7 @@ async function mergeOperatorSessionsWrite(incomingJson) {
       startedAt: existing ? existing.startedAt : serverNow,
       lastSeenAt: serverNow,
       endedAt: s.endedAt ? serverNow : null,
+      lastActiveAt: new Date(serverNowMs - idleForMs).toISOString(),
     });
   }
 

@@ -64,6 +64,11 @@ const OPERATOR_SESSIONS_KEY = "ops:operatorSessions";
 const OPERATOR_LIVE_WINDOW_MS = 60000;
 // How often a signed-in Control Room tab refreshes its own heartbeat.
 const OPERATOR_HEARTBEAT_MS = 25000;
+// A tab can be signed in and still heartbeating with nobody actually at
+// the keyboard — this is how long without real activity before "Live now"
+// shows it as idle rather than active. Well short of the 30-minute forced
+// sign-out, since this is just a visual cue, not an auth decision.
+const OPERATOR_IDLE_THRESHOLD_MS = 5 * 60 * 1000;
 
 // Each phrase has a short `name` (what patrolmen see on the tappable
 // chip — easy to scan/judge at a glance) and the full `text` that's
@@ -127,22 +132,30 @@ async function fetchOperatorSessions() {
 // Room logins to clobber each other's write to this shared blob as short
 // as one round trip — the same tradeoff already accepted for ops:sites /
 // ops:roster, just applied per-call here since heartbeats are frequent.
-async function startOperatorSession(session) {
+// idleForMs is how long it's been since this tab last saw real mouse/
+// keyboard/touch activity (see lastActivityRef, shared with the 30-minute
+// inactivity sign-out check) — a relative duration off this device's own
+// clock, not an absolute timestamp, so it can't be thrown off by a
+// skewed device clock the way a raw "last active at" value would be (see
+// mergeOperatorSessionsWrite's own comment for the matching server-side
+// half of this). Lets Manager's "Live now" tell a signed-in-but-idle tab
+// apart from one actually being worked, without forcing a sign-out.
+async function startOperatorSession(session, idleForMs = 0) {
   try {
     const existing = await fetchOperatorSessions();
     const cutoffMs = Date.now() - 90 * 24 * 60 * 60 * 1000; // 90 days
     const pruned = existing.filter((s) => new Date(s.startedAt).getTime() >= cutoffMs);
     const now = new Date().toISOString();
-    const updated = [...pruned, { sid: session.sid, loginName: session.loginName, displayName: session.displayName, startedAt: now, lastSeenAt: now, endedAt: null }];
+    const updated = [...pruned, { sid: session.sid, loginName: session.loginName, displayName: session.displayName, startedAt: now, lastSeenAt: now, endedAt: null, idleForMs }];
     await window.storage.set(OPERATOR_SESSIONS_KEY, JSON.stringify(updated), true);
   } catch (e) { /* best-effort — a missed session start just makes this shift's reporting incomplete, not wrong */ }
 }
 
-async function heartbeatOperatorSession(sid) {
+async function heartbeatOperatorSession(sid, idleForMs = 0) {
   try {
     const list = await fetchOperatorSessions();
     const now = new Date().toISOString();
-    const updated = list.map((s) => (s.sid === sid ? { ...s, lastSeenAt: now } : s));
+    const updated = list.map((s) => (s.sid === sid ? { ...s, lastSeenAt: now, idleForMs } : s));
     await window.storage.set(OPERATOR_SESSIONS_KEY, JSON.stringify(updated), true);
   } catch (e) { /* best-effort */ }
 }
@@ -585,8 +598,12 @@ export default function SentrylinePrototype() {
   // OPERATOR_LIVE_WINDOW_MS rather than appearing online forever.
   useEffect(() => {
     if (session?.role !== "operator" || !session.sid) return;
-    startOperatorSession(session);
-    const hb = setInterval(() => heartbeatOperatorSession(session.sid), OPERATOR_HEARTBEAT_MS);
+    // lastActivityRef is the same ref the 30-minute inactivity check below
+    // updates on every real mouse/keyboard/touch/scroll event — reusing it
+    // here means "idle" reflects genuine inaction, not just how long ago
+    // the tab happened to load.
+    startOperatorSession(session, Date.now() - lastActivityRef.current);
+    const hb = setInterval(() => heartbeatOperatorSession(session.sid, Date.now() - lastActivityRef.current), OPERATOR_HEARTBEAT_MS);
     return () => {
       clearInterval(hb);
       endOperatorSession(session.sid);
@@ -4510,13 +4527,25 @@ function OperatorActivityView({ operatorSessions, accounts, jobs, now }) {
           <Empty text="No Control Room logins currently active." />
         ) : (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {liveNow.map((s) => (
-              <div key={s.sid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 20, background: "var(--panel)", border: "1px solid var(--ok)", fontSize: 12.5 }}>
-                <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--ok)", flexShrink: 0 }} />
-                <b>{s.displayName}</b>
-                <span style={{ color: "var(--text-dim)" }}>· online {fmtDuration(now - new Date(s.startedAt).getTime())}</span>
-              </div>
-            ))}
+            {liveNow.map((s) => {
+              // s.lastActiveAt is stamped server-side (see
+              // mergeOperatorSessionsWrite) from this device's own
+              // reported idle duration — missing only for a session whose
+              // tab hasn't reloaded onto a build that reports it yet, in
+              // which case it's just treated as active rather than idle.
+              const idleMs = s.lastActiveAt ? now - new Date(s.lastActiveAt).getTime() : 0;
+              const isIdle = idleMs > OPERATOR_IDLE_THRESHOLD_MS;
+              return (
+                <div key={s.sid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 20, background: "var(--panel)", border: `1px solid ${isIdle ? "var(--border)" : "var(--ok)"}`, fontSize: 12.5, opacity: isIdle ? 0.6 : 1 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: isIdle ? "var(--text-dim)" : "var(--ok)", flexShrink: 0 }} />
+                  <b>{s.displayName}</b>
+                  <span style={{ color: "var(--text-dim)" }}>
+                    · online {fmtDuration(now - new Date(s.startedAt).getTime())}
+                    {isIdle && ` · idle ${fmtDuration(idleMs)}`}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -4560,7 +4589,7 @@ function OperatorActivityView({ operatorSessions, accounts, jobs, now }) {
         </div>
       )}
       <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 10 }}>
-        "Sign-ins" counts separate times a login started a session in this range — a proxy for how often they checked in, not a literal count of board refreshes. "Time online" is wall-clock time signed in, not a measure of continuous activity.
+        "Sign-ins" counts separate times a login started a session in this range — a proxy for how often they checked in, not a literal count of board refreshes. "Time online" is wall-clock time signed in, not a measure of continuous activity — in "Live now", a dimmed badge with no recent mouse/keyboard activity means the tab is still signed in but likely unattended.
       </div>
     </div>
   );
