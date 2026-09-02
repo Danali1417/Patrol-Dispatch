@@ -455,13 +455,18 @@ export default function SentrylinePrototype() {
   const [banner, setBanner] = useState(null);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  // null | "inactivity" | "superseded" | "expired" — why the Login screen
-  // is showing a "you were signed out" banner, if at all.
+  // null | "inactivity" | "sessionLimit" | "superseded" | "expired" — why
+  // the Login screen is showing a "you were signed out" banner, if at all.
   const [logoutReason, setLogoutReason] = useState(null);
   const [toast, setToast] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
   const prevJobsRef = useRef([]);
   const lastActivityRef = useRef(Date.now());
+  // Mirrors `session` for the unauthorized-callback below, which is
+  // registered once (empty dependency array) and would otherwise only
+  // ever see the session from that first render — see its own comment.
+  const sessionRef = useRef(session);
+  useEffect(() => { sessionRef.current = session; }, [session]);
   const toastTimerRef = useRef(null);
 
   const showToast = useCallback((text, type = "success") => {
@@ -503,7 +508,16 @@ export default function SentrylinePrototype() {
     };
   }, []);
 
-  // Auto sign out Control Room after 30 minutes with no activity in the window
+  // Auto sign out Control Room after 30 minutes with no activity, or after
+  // MAX_SESSION_MS of continuous sign-in regardless of activity — the
+  // latter is a hard cap independent of the inactivity timer, for an
+  // account/terminal simply left signed in across a shift change (a busy
+  // board gets touched often enough to never trip the 30-minute inactivity
+  // check, so that alone won't catch it — see Operator Activity's "Live
+  // now", which is exactly what surfaced this). session.iat (the token's
+  // own issued-at claim) is the sign-in anchor, not a separately tracked
+  // timestamp, so this works the same right after login or after a
+  // restored session following a page reload.
   useEffect(() => {
     if (!session || session.role !== "operator") return;
     const markActivity = () => { lastActivityRef.current = Date.now(); };
@@ -512,13 +526,21 @@ export default function SentrylinePrototype() {
     markActivity();
 
     const INACTIVITY_LIMIT_MS = 30 * 60 * 1000;
-    const check = setInterval(() => {
-      if (Date.now() - lastActivityRef.current >= INACTIVITY_LIMIT_MS) {
-        disableJobAlerts();
-        apiLogout();
-        setSession(null);
-        setLogoutReason("inactivity");
-      }
+    const MAX_SESSION_MS = 12 * 60 * 60 * 1000;
+    const signedInAtMs = session.iat ? session.iat * 1000 : Date.now();
+    const check = setInterval(async () => {
+      const inactiveTooLong = Date.now() - lastActivityRef.current >= INACTIVITY_LIMIT_MS;
+      const sessionTooLong = Date.now() - signedInAtMs >= MAX_SESSION_MS;
+      if (!inactiveTooLong && !sessionTooLong) return;
+      // Same reasoning as handleSignOut: this has to run before apiLogout()
+      // clears the token, or the write goes out unauthenticated and the
+      // presence session is left looking "live" until it ages out on its
+      // own (see endOperatorSession's own comment for the full story).
+      if (session.sid) await endOperatorSession(session.sid);
+      disableJobAlerts();
+      apiLogout();
+      setSession(null);
+      setLogoutReason(inactiveTooLong ? "inactivity" : "sessionLimit");
     }, 30000);
 
     return () => {
@@ -624,6 +646,15 @@ export default function SentrylinePrototype() {
   // out on purpose.
   useEffect(() => {
     setOnUnauthorized((reason) => {
+      // A request already in flight when a deliberate sign-out fires (idle
+      // timeout, the 12-hour hard cap, a manual sign-out) can still land
+      // its own 401 afterwards, using a token that's already been cleared
+      // — this callback is global and would otherwise treat that stale
+      // 401 as a fresh sign-out event too, clobbering an already-set,
+      // more specific reason ("sessionLimit", say) with the generic
+      // "expired" fallback. Once there's no session left to sign out of,
+      // any further 401 has nothing new to report.
+      if (!sessionRef.current) return;
       if (reason === "superseded") disableJobAlerts();
       setSession(null);
       setLogoutReason(reason === "superseded" ? "superseded" : "expired");
@@ -1127,6 +1158,8 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
               <><ShieldAlert size={14} /> Signed out — this login was opened in another window or device.</>
             ) : logoutReason === "inactivity" ? (
               <><Clock size={14} /> Signed out after 30 minutes of inactivity — please sign in again.</>
+            ) : logoutReason === "sessionLimit" ? (
+              <><Clock size={14} /> Signed out after 12 hours — please sign in again to start a fresh shift.</>
             ) : (
               <><Clock size={14} /> Your session expired — please sign in again.</>
             )}
