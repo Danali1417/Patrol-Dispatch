@@ -3945,7 +3945,7 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
                 <Camera size={17} /><span style={{ fontSize: 10 }}>{busy ? "…" : "Add photo"}</span>
               </button>
             )}
-            <input ref={fileRef} type="file" accept="image/*" capture="environment" multiple hidden onChange={handleFiles} />
+            <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={handleFiles} />
           </div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 6 }}>Photos are timestamped automatically on capture.</div>
           <button disabled={!outcome.trim() || actionBusy} onClick={submit} style={{ ...primaryBtn, width: "100%", marginTop: 16, justifyContent: "center", opacity: outcome.trim() && !actionBusy ? 1 : 0.4 }}>
