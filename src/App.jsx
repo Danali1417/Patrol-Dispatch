@@ -2085,7 +2085,7 @@ function normalizeSiteName(s) {
 }
 
 function AddSiteInline({ zones, initialName = "", monitoringCompanies, bureaus, sites, onCancel, onAdded, onUseExisting }) {
-  const blank = { name: initialName, address: "", poNumber: "", monitoringCo: "", monitoringEmail: "", bureau: "", run: zones[0] || "Unassigned" };
+  const blank = { name: initialName, address: "", poNumber: "", monitoringCo: "", monitoringEmail: "", bureau: "", run: zones[0] || "Unassigned", keyInfo: "", alarmCode: "" };
   const [form, setForm] = useState(blank);
   const [error, setError] = useState("");
   // The existing site a duplicate-name check just flagged — set only long
@@ -2105,8 +2105,8 @@ function AddSiteInline({ zones, initialName = "", monitoringCompanies, bureaus, 
       monitoringEmail: form.monitoringEmail.trim(),
       bureau: form.bureau.trim(),
       run: form.run,
-      keyInfo: "",
-      alarmCode: "",
+      keyInfo: form.keyInfo.trim(),
+      alarmCode: form.alarmCode.trim(),
     };
   }
 
@@ -2161,6 +2161,10 @@ function AddSiteInline({ zones, initialName = "", monitoringCompanies, bureaus, 
         />
       </div>
       <Field label="Monitoring email (optional)"><input type="email" value={form.monitoringEmail} onChange={(e) => set("monitoringEmail", e.target.value)} placeholder="Where to send the outcome report" style={selectStyle} /></Field>
+      <div style={{ display: "flex", gap: 12 }}>
+        <Field label="Key / swipe card (optional)" style={{ flex: 1 }}><input value={form.keyInfo} onChange={(e) => set("keyInfo", e.target.value.toUpperCase())} style={selectStyle} /></Field>
+        <Field label="Alarm code (optional)" style={{ width: 130 }}><input value={form.alarmCode} onChange={(e) => set("alarmCode", e.target.value.toUpperCase())} style={selectStyle} /></Field>
+      </div>
       {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
       <div style={{ display: "flex", gap: 8 }}>
         <button onClick={save} style={secondaryBtn}><MapPin size={13} /> Save site</button>
