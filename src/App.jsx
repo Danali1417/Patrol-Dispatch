@@ -4372,7 +4372,7 @@ function computeOperatorActivity(allJobs, sessions, operatorAccounts, dateFrom, 
   function ensure(loginName, displayName) {
     if (!loginName || !operatorLogins.has(loginName)) return null;
     if (!byLogin.has(loginName)) {
-      byLogin.set(loginName, { loginName, displayName: displayName || loginName, onlineMs: 0, sessionCount: 0, dispatched: 0, reviewed: 0, finalized: 0, totalActions: 0 });
+      byLogin.set(loginName, { loginName, displayName: displayName || loginName, onlineMs: 0, sessionCount: 0, dispatched: 0, reviewed: 0, finalized: 0, totalActions: 0, _intervals: [] });
     }
     return byLogin.get(loginName);
   }
@@ -4385,8 +4385,37 @@ function computeOperatorActivity(allJobs, sessions, operatorAccounts, dateFrom, 
     const endedMs = new Date(s.endedAt || s.lastSeenAt).getTime();
     const entry = ensure(s.loginName, s.displayName);
     if (!entry) return;
-    entry.onlineMs += Math.max(0, endedMs - startedMs);
     entry.sessionCount += 1;
+    entry._intervals.push([startedMs, Math.max(startedMs, endedMs)]);
+  });
+
+  // Two overlapping sessions — a second device/tab signed in at the same
+  // time, or a stray session left over from testing that never got a clean
+  // sign-out — must not double-count the wall-clock time they share, or
+  // "time online" can end up reading more hours than the day actually had.
+  // Merging each operator's intervals before summing keeps the total
+  // bounded by real elapsed time no matter how many overlapping sessions
+  // contributed to it.
+  byLogin.forEach((entry) => {
+    const intervals = entry._intervals.sort((a, b) => a[0] - b[0]);
+    let mergedMs = 0;
+    let curStart = null;
+    let curEnd = null;
+    for (const [s, e] of intervals) {
+      if (curStart === null) {
+        curStart = s;
+        curEnd = e;
+      } else if (s <= curEnd) {
+        curEnd = Math.max(curEnd, e);
+      } else {
+        mergedMs += curEnd - curStart;
+        curStart = s;
+        curEnd = e;
+      }
+    }
+    if (curStart !== null) mergedMs += curEnd - curStart;
+    entry.onlineMs = mergedMs;
+    delete entry._intervals;
   });
 
   allJobs.forEach((job) => {
