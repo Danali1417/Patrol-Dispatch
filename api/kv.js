@@ -147,7 +147,27 @@ async function mergeOperatorSessionsWrite(incomingJson) {
   const currentRaw = await kvGet(OPERATOR_SESSIONS_KEY);
   const current = currentRaw ? JSON.parse(currentRaw) : [];
   const bySid = new Map(current.map((s) => [s.sid, s]));
-  for (const s of incoming) bySid.set(s.sid, s);
+
+  // Timestamps are stamped here, with the server's own clock, rather than
+  // trusted from whichever device's browser reported them — a phone or
+  // tablet with a wrong clock (bad timezone, no time sync, dead CMOS
+  // battery) would otherwise make a perfectly healthy session look
+  // permanently stale to "Live now" (compared against the viewing
+  // manager's own device clock) while its own start-to-end duration still
+  // adds up fine, since that math never leaves the one skewed clock. One
+  // clock for every record removes that mismatch entirely.
+  const serverNow = new Date().toISOString();
+  for (const s of incoming) {
+    const existing = bySid.get(s.sid);
+    bySid.set(s.sid, {
+      sid: s.sid,
+      loginName: s.loginName,
+      displayName: s.displayName,
+      startedAt: existing ? existing.startedAt : serverNow,
+      lastSeenAt: serverNow,
+      endedAt: s.endedAt ? serverNow : null,
+    });
+  }
 
   const cutoffMs = Date.now() - 90 * 24 * 60 * 60 * 1000;
   const merged = [...bySid.values()].filter((s) => new Date(s.startedAt).getTime() >= cutoffMs);
