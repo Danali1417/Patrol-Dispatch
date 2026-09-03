@@ -34,6 +34,22 @@ window.storage = {
     const data = await res.json();
     return { key, value: data.value, shared: true };
   },
+  // Same as get, but tells the server "I already have whatever was last
+  // written as of `sinceIso`" — an unchanged key comes back as a tiny
+  // {unchanged:true} instead of the full value. Meant for a frequent poll
+  // (the board) where most ticks see no real change, so most of them cost
+  // almost nothing instead of re-sending the whole thing every time.
+  getIfChanged: async (key, sinceIso) => {
+    const qs = sinceIso ? `&since=${encodeURIComponent(sinceIso)}` : "";
+    const res = await apiFetch(`/api/kv?key=${encodeURIComponent(key)}${qs}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || `key not found: ${key}`);
+    }
+    const data = await res.json();
+    if (data.unchanged) return { key, unchanged: true, updatedAt: data.updatedAt };
+    return { key, value: data.value, updatedAt: data.updatedAt, shared: true };
+  },
   set: async (key, value) => {
     const res = await apiFetch("/api/kv", {
       method: "POST",
