@@ -39,7 +39,7 @@ create index if not exists kv_store_search_idx on kv_store using gin (search);
    table leaves it empty. It's what lets Control Room find and open an
    old job by number, and lets Reports pull in a chosen date range,
    without ever having to fetch the entire job archive at once (see
-   section 11).
+   section 10).
 
    Row-level security is turned on with **no policies at all** — deliberately.
    The app never talks to Supabase from the browser; every request goes
@@ -126,7 +126,7 @@ Every morning, a scheduled job can email a Brief and Detailed report PDF
 sent from a Gmail account.
 
 This same daily job also does something unrelated to email: it sweeps
-jobs closed 48+ hours ago off the live board (see section 9). That
+jobs closed 48+ hours ago off the live board (see section 8). That
 sweep runs every time this endpoint fires, whether or not you set up
 email at all — but it still needs `CRON_SECRET` below configured, since
 that's what lets Vercel's daily trigger call this endpoint in the first
@@ -279,52 +279,7 @@ No setup needed — these work out of the box.
   reviewed, client email sent — is timestamped with who did it, visible
   via "Show activity log" on the job detail screen.
 
-## 8. Live Location for Control Room (optional, no setup needed)
-
-Control Room has a "Live Location" tab showing every patrolman who's on
-today's roster on a live map (free OpenStreetMap tiles via
-[Leaflet](https://leafletjs.com/), no API key), with a name label and an
-online/offline status list alongside it — so Control Room can see who's
-actually signed in and judge who's closest to a given site.
-
-How it works, and what is and isn't kept:
-- A patrolman's browser only reports their position while they're
-  **signed in and rostered for that day** — not outside their shift, and
-  never for managers/operators.
-- Each report **overwrites** the same record; there's no location
-  history, just "where they are right now."
-- The record is deleted the moment they sign out, and Control Room's
-  view treats anyone who hasn't reported in the last 3 minutes as
-  offline (covers a closed tab/app without a proper sign-out) — so a
-  patrolman never lingers on the map after their shift ends.
-- The current position does pass through the same database as the rest
-  of the app's live data (there's no way to relay a live position
-  between two browsers without a server in between) — but nothing about
-  it is ever logged or archived; it's overwritten and deleted, not
-  accumulated.
-
-The map also drops a red pin for every site currently out on a job, so
-Control Room can judge at a glance who's nearest to respond. A site's
-coordinates are geocoded from its address the first time it's needed
-(same free OpenStreetMap lookup used elsewhere) and cached on the site
-record so it's never looked up twice.
-
-**Stationary alerts.** If a patrolman stays within about 50 metres of
-the same spot for 30 minutes or more (a welfare-check nudge, not a
-punctuality check — 50m absorbs normal GPS drift so someone genuinely
-standing still doesn't get flagged for wandering a few metres), their
-marker turns red on the map, their sidebar entry shows "⚠️ Stationary
-N min", and Control Room gets a push notification — repeated every 30
-minutes for as long as they remain in the same spot. It clears itself
-the moment they move on. Push notifications are opt-in per device (a
-"Turn on stationary alerts" banner at the top of the Live Location tab,
-same mechanism as the job-dispatch alerts in section 6) but the red
-marker and sidebar badge work for everyone viewing the map regardless.
-Like the rest of Live Location, nothing here is stored as history —
-it's just the current position plus "since when," overwritten in
-place.
-
-## 9. Attendance photos are stored apart from the job board
+## 8. Attendance photos are stored apart from the job board
 
 Every signed-in device (Control Room, each patrolman) polls the job
 board every 8 seconds so everyone sees new dispatches and status
@@ -343,14 +298,14 @@ automatically and transparently the first time the board is loaded
 after deploying it — nothing to run by hand.
 
 This keeps the board's poll small for photos specifically — see
-section 10 for how the job records themselves are kept small too.
+section 9 for how the job records themselves are kept small too.
 
-## 10. Old jobs are archived off the board automatically
+## 9. Old jobs are archived off the board automatically
 
 Even without photos, a job's own record (site details, description,
 activity log, results) adds up — at even moderate daily volume, the
 board's poll would eventually risk that same 4.5MB platform ceiling
-from section 9, just on a slower timescale (months, not days).
+from section 8, just on a slower timescale (months, not days).
 
 The same daily job described in section 4 sweeps jobs that have been
 **closed out (emailed) or cancelled for 48+ hours** off the live board
@@ -365,7 +320,7 @@ means:
   site** on any board still finds an archived job and opens it —
   shown read-only with an "Archived" label, since edits there have
   nowhere live to save back to. Its attendance photos are a separate
-  story — see section 12.
+  story — see section 11.
 - The Manager's **"Reset test data"** button clears archived jobs too,
   not just what's currently on the board.
 
@@ -373,7 +328,7 @@ This needs `CRON_SECRET` configured (section 4) — without it, Vercel's
 daily trigger can't reach the endpoint that runs the sweep, and the
 board will grow unchecked. The email report itself is still optional.
 
-## 11. How archived jobs are searched and reported on
+## 10. How archived jobs are searched and reported on
 
 **Logs & analysis** covers the live board plus the **last 30 days** of
 archived history automatically — that's a fixed, small window, not
@@ -392,11 +347,11 @@ so it always finds a specific old job however far back it is.
 None of these ever ask the database for "the whole archive" in one go
 — every one of them is scoped, by date range or by search term, no
 matter how many years of jobs pile up. That's the difference between
-this and the original problem in section 9/10: it's not just that
+this and the original problem in section 8/9: it's not just that
 old jobs move out of the way, it's that nothing ever has to read all
 of them back at once again either.
 
-## 12. Attendance photos are backed up by email, then deleted
+## 11. Attendance photos are backed up by email, then deleted
 
 Photos are by far the largest thing this app stores — a job's text
 (result, activity log, times) stays tiny forever, but photos add up
@@ -414,7 +369,7 @@ one of two points:
    "Cancel job") — the common case, so the backup lands within
    seconds rather than waiting.
 2. **As a guaranteed fallback**, right before a job is archived (the
-   same 48-hours-after-closed-or-cancelled sweep from section 10) —
+   same 48-hours-after-closed-or-cancelled sweep from section 9) —
    in case the immediate send never happened or failed (a dropped
    connection, an offline browser). A job never gets emailed twice:
    closing/cancelling it stamps a "backed up" marker the moment the
@@ -422,7 +377,7 @@ one of two points:
    deleting if it sees that marker already set.
 
 The archived job record itself is untouched either way — its text,
-result, and activity log stay searchable forever (section 11). Only
+result, and activity log stay searchable forever (section 10). Only
 the photo bytes are gone; opening an old archived job that had photos
 shows a small note that they were emailed as a backup and removed,
 instead of just silently looking like there never were any.

@@ -92,8 +92,8 @@ export async function sendPushToPatrolman(loginName, role, payload) {
 }
 
 // Broadcasts to every subscribed device across every login of a given
-// role — used for alerts (e.g. "patrolman stationary 30+ min") aimed at
-// whoever's on duty in Control Room, rather than one specific login.
+// role — used for alerts (e.g. a new job chat message) aimed at whoever's
+// on duty in Control Room, rather than one specific login.
 export async function sendPushToRole(role, payload) {
   configureWebPush();
   const subs = await loadSubs();
