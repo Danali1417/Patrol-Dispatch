@@ -2499,6 +2499,13 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       </div>
       <JobHeader job={job} />
 
+      <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10, fontSize: 13 }}>
+        <DetailRow icon={Building2} label="Monitoring company" value={job.monitoringCo} />
+        <DetailRow icon={Building2} label="Bureau" value={job.bureau} />
+        <DetailRow icon={KeyRound} label="Key info" value={job.keyInfo} />
+        <DetailRow icon={KeyRound} label="Alarm code" value={job.alarmCode} />
+      </div>
+
       {showEditJob && !isArchived && (
         <div style={{ marginTop: 14, padding: 14, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel-alt)" }}>
           <SectionTitle icon={Pencil} title="Edit job details" small />
