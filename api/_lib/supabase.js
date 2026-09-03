@@ -34,6 +34,15 @@ export async function kvGet(key) {
   return rows.length ? rows[0].value : null;
 }
 
+// Same lookup as kvGet, plus the row's updated_at — lets a caller (see
+// the `since` handling in kv.js) tell whether a key has changed at all
+// since it last fetched it, without re-sending the value when it hasn't.
+export async function kvGetWithMeta(key) {
+  const res = await sbFetch(`kv_store?key=eq.${encodeURIComponent(key)}&select=value,updated_at`);
+  const rows = await res.json();
+  return rows.length ? rows[0] : null;
+}
+
 export async function kvSet(key, value) {
   await sbFetch("kv_store", {
     method: "POST",

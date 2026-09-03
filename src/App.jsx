@@ -513,6 +513,10 @@ export default function SentrylinePrototype() {
   const [toast, setToast] = useState(null);
   const [confirmState, setConfirmState] = useState(null);
   const prevJobsRef = useRef([]);
+  // Tracks the server's updated_at for ops:jobs so the poll below can ask
+  // "anything new since this?" instead of re-fetching the whole board
+  // every 8 seconds regardless — see that poll's own comment.
+  const jobsUpdatedAtRef = useRef(null);
   const lastActivityRef = useRef(Date.now());
   // Mirrors `session` for the unauthorized-callback below, which is
   // registered once (empty dependency array) and would otherwise only
@@ -727,11 +731,12 @@ export default function SentrylinePrototype() {
     if (!session) return;
     (async () => {
       try {
-        const res = await window.storage.get(JOBS_KEY, true);
+        const res = await window.storage.getIfChanged(JOBS_KEY);
         if (res && res.value) {
           const parsed = JSON.parse(res.value);
           setJobs(parsed);
           prevJobsRef.current = parsed;
+          jobsUpdatedAtRef.current = res.updatedAt || null;
         }
       } catch (e) { /* nothing stored yet */ }
     })();
@@ -950,8 +955,10 @@ export default function SentrylinePrototype() {
     if (!session) return;
     const t = setInterval(async () => {
       try {
-        const res = await window.storage.get(JOBS_KEY, true);
-        if (!res || !res.value) return;
+        const res = await window.storage.getIfChanged(JOBS_KEY, jobsUpdatedAtRef.current);
+        if (!res || res.unchanged) return; // nothing new since last tick — nothing to do
+        if (!res.value) return;
+        jobsUpdatedAtRef.current = res.updatedAt || null;
         const fresh = JSON.parse(res.value);
         const prev = prevJobsRef.current;
 
@@ -999,9 +1006,12 @@ export default function SentrylinePrototype() {
         setJobs(fresh);
         prevJobsRef.current = fresh;
       } catch (e) { /* ignore poll errors */ }
-      // Every signed-in device polls this on its own timer, all day — this
-      // interval is the single biggest driver of Supabase egress usage, so
-      // it's kept as long as dispatch/cancel/SLA-breach alerts can tolerate.
+      // Every signed-in device polls this on its own timer, all day — kept
+      // this frequent because dispatch/cancel/SLA-breach alerts need it.
+      // getIfChanged (see storageShim.js) keeps the cost of that down: a
+      // tick where nothing's changed — most of them — comes back as a few
+      // bytes instead of the whole board, since this was previously the
+      // single biggest driver of egress usage.
     }, 8000);
     return () => clearInterval(t);
   }, [session]);

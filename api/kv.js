@@ -15,7 +15,7 @@
 // Manager can bulk-read all of them via ?prefix=ops:liveloc:.
 
 import { requireRole, requireSession } from "./_lib/auth.js";
-import { kvGet, kvSet, kvGetPrefix, kvQueryPrefix, kvDelete, kvDeletePrefix } from "./_lib/supabase.js";
+import { kvGet, kvGetWithMeta, kvSet, kvGetPrefix, kvQueryPrefix, kvDelete, kvDeletePrefix } from "./_lib/supabase.js";
 import { sendPushToRole, sendPushToPatrolman } from "./_lib/push.js";
 import { JOB_ARCHIVE_PREFIX, JOB_PHOTOS_PREFIX, JOB_CHAT_PREFIX } from "./_lib/jobArchive.js";
 
@@ -478,10 +478,30 @@ export default async function handler(req, res) {
       if (!session) return; // response already sent, with a reason
     }
     try {
-      let value = await kvGet(key);
-      if (value === null) return res.status(404).json({ error: "not found" });
+      // Always fetched with its updated_at, and always returned, even when
+      // `since` isn't given — a caller that isn't asking "anything new?"
+      // yet still needs today's updated_at to ask it on its *next* poll
+      // (see the `since` handling below, and the poll's own comment in
+      // App.jsx). Existing callers that only read `.value` are unaffected
+      // by the extra field.
+      const row = await kvGetWithMeta(key);
+      if (!row) return res.status(404).json({ error: "not found" });
+
+      const since = req.query?.since;
+      if (since) {
+        // A caller that already has whatever was last written at `since`
+        // doesn't need the value re-sent at all — a tiny "still current"
+        // reply is enough. ops:jobs in particular is polled every 8s by
+        // every signed-in device all day, and most of those ticks see no
+        // real change, so this is the single biggest lever on egress.
+        const sinceMs = new Date(since).getTime();
+        if (!Number.isNaN(sinceMs) && new Date(row.updated_at).getTime() <= sinceMs) {
+          return res.status(200).json({ key, unchanged: true, updatedAt: row.updated_at });
+        }
+      }
+      let value = row.value;
       if (key === JOBS_KEY) value = await migrateEmbeddedPhotos(value);
-      return res.status(200).json({ key, value });
+      return res.status(200).json({ key, value, updatedAt: row.updated_at });
     } catch (err) {
       console.error("kv GET failed:", err);
       return res.status(500).json({ error: String(err?.message || err) });
