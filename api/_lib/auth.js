@@ -10,6 +10,19 @@ import { clearSubscriptions } from "./push.js";
 
 const SESSION_EXPIRY = process.env.SESSION_EXPIRY_HOURS ? `${process.env.SESSION_EXPIRY_HOURS}h` : "24h";
 
+// Matches the client-side hard cap on Control Room sessions (App.jsx's
+// 30-second inactivity/session-limit check) — enforced here too rather
+// than trusted to that timer alone. A browser tab left open 24/7 on an
+// unattended terminal can sit backgrounded or minimized for long
+// stretches, and browsers throttle (or entirely pause) a background
+// tab's timers in that state, so the client's own check can silently
+// fail to fire anywhere near on time. Rejecting the token here as soon
+// as it's genuinely 12h old means the very next authenticated request
+// (a heartbeat, the board poll, anything) forces the client's normal
+// 401 handling to sign it out, regardless of whether its own timer ever
+// got a chance to run.
+const OPERATOR_MAX_SESSION_MS = 12 * 60 * 60 * 1000;
+
 export async function hashPassword(plain) {
   return bcrypt.hash(plain, 10);
 }
@@ -79,6 +92,9 @@ async function resolveSession(req) {
     return { session: null, reason: "expired" };
   }
   if (!payload.sid) return { session: null, reason: "expired" };
+  if (payload.role === "operator" && payload.iat && Date.now() - payload.iat * 1000 >= OPERATOR_MAX_SESSION_MS) {
+    return { session: null, reason: "sessionLimit" };
+  }
   const currentSid = await kvGet(activeSessionKey(payload.role, payload.loginName));
   if (currentSid !== payload.sid) return { session: null, reason: "superseded" };
   return { session: payload, reason: null };

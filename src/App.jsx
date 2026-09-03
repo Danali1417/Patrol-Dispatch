@@ -711,9 +711,13 @@ export default function SentrylinePrototype() {
       // "expired" fallback. Once there's no session left to sign out of,
       // any further 401 has nothing new to report.
       if (!sessionRef.current) return;
-      if (reason === "superseded") disableJobAlerts();
+      // "sessionLimit" here is the server's own enforcement of the same
+      // 12-hour cap the effect below already checks client-side — a
+      // backstop for a tab whose own timer got throttled or never ran
+      // (see OPERATOR_MAX_SESSION_MS's comment in api/_lib/auth.js).
+      if (reason === "superseded" || reason === "sessionLimit") disableJobAlerts();
       setSession(null);
-      setLogoutReason(reason === "superseded" ? "superseded" : "expired");
+      setLogoutReason(reason === "superseded" || reason === "sessionLimit" ? reason : "expired");
     });
   }, []);
 
@@ -4507,12 +4511,19 @@ function computeOperatorActivity(allJobs, sessions, operatorAccounts, dateFrom, 
 
   sessions.forEach((s) => {
     const startedMs = new Date(s.startedAt).getTime();
-    if (startedMs < startMs || startedMs > endMs) return;
-    const endedMs = new Date(s.endedAt || s.lastSeenAt).getTime();
+    const endedMs = Math.max(startedMs, new Date(s.endedAt || s.lastSeenAt).getTime());
+    // Clip to the selected range rather than requiring the session to have
+    // *started* inside it — a session still going (or one that ended after
+    // the range) should still contribute whatever portion of it falls
+    // inside, instead of counting for nothing today just because it began
+    // yesterday or earlier.
+    const clippedStart = Math.max(startedMs, startMs);
+    const clippedEnd = Math.min(endedMs, endMs);
+    if (clippedEnd <= clippedStart) return;
     const entry = ensure(s.loginName, s.displayName);
     if (!entry) return;
-    entry.sessionCount += 1;
-    entry._intervals.push([startedMs, Math.max(startedMs, endedMs)]);
+    if (startedMs >= startMs && startedMs <= endMs) entry.sessionCount += 1;
+    entry._intervals.push([clippedStart, clippedEnd]);
   });
 
   // Two overlapping sessions — a second device/tab signed in at the same
