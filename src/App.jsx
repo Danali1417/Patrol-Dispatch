@@ -4,7 +4,7 @@ import {
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
   ShieldAlert, ArrowLeft, Building2, Settings, Lock, Eye, EyeOff,
   Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone, CalendarDays, Ban,
-  FileText, Download, Archive, Pencil, MessageSquare, Navigation, Activity, RefreshCw, Image as ImageIcon
+  FileText, Download, Archive, Pencil, MessageSquare, Navigation, RefreshCw, Image as ImageIcon
 } from "lucide-react";
 import {
   STATUS_META, fmtTime, fmtDateTime, isoDateOnly, isoTimeOnly,
@@ -57,19 +57,6 @@ const DEFAULT_COMPANY_NAME = "Ausgroup";
 const OUTCOME_PHRASES_KEY = "ops:outcomePhrases";
 const MONITORING_COMPANIES_KEY = "ops:monitoringCompanies";
 const BUREAUS_KEY = "ops:bureaus";
-const OPERATOR_SESSIONS_KEY = "ops:operatorSessions";
-// A crashed tab (closed without signing out) never fires the cleanup that
-// marks a session ended — this is how long a session is still trusted as
-// "live" purely on its last heartbeat before being treated as gone.
-const OPERATOR_LIVE_WINDOW_MS = 60000;
-// How often a signed-in Control Room tab refreshes its own heartbeat.
-const OPERATOR_HEARTBEAT_MS = 25000;
-// A tab can be signed in and still heartbeating with nobody actually at
-// the keyboard — this is how long without real activity before "Live now"
-// shows it as idle rather than active. Well short of the 30-minute forced
-// sign-out, since this is just a visual cue, not an auth decision.
-const OPERATOR_IDLE_THRESHOLD_MS = 5 * 60 * 1000;
-
 // Each phrase has a short `name` (what patrolmen see on the tappable
 // chip — easy to scan/judge at a glance) and the full `text` that's
 // actually inserted into the outcome field. Seed list is editable
@@ -111,68 +98,10 @@ function normalizePhrase(p) {
   return p;
 }
 
-// Backs Manager > Operator Activity — one record per Control Room login,
-// identified by that login's JWT `sid` (unique per sign-in, so logging in
-// twice, or on two devices, is two separate rows rather than one being
-// silently overwritten). `endedAt` is set explicitly on sign-out;
-// `lastSeenAt` alone (via the heartbeat) is what a crashed/closed tab
-// leaves behind, and is what "how long were they on" falls back to for
-// that case — see OPERATOR_LIVE_WINDOW_MS for how "still live" is judged.
-async function fetchOperatorSessions() {
-  try {
-    const res = await window.storage.get(OPERATOR_SESSIONS_KEY, true);
-    return res?.value ? JSON.parse(res.value) : [];
-  } catch (e) {
-    return [];
-  }
-}
-
-// Each mutator re-fetches right before writing rather than trusting
-// whatever's already in React state, keeping the window for two Control
-// Room logins to clobber each other's write to this shared blob as short
-// as one round trip — the same tradeoff already accepted for ops:sites /
-// ops:roster, just applied per-call here since heartbeats are frequent.
-// idleForMs is how long it's been since this tab last saw real mouse/
-// keyboard/touch activity (see lastActivityRef, shared with the 30-minute
-// inactivity sign-out check) — a relative duration off this device's own
-// clock, not an absolute timestamp, so it can't be thrown off by a
-// skewed device clock the way a raw "last active at" value would be (see
-// mergeOperatorSessionsWrite's own comment for the matching server-side
-// half of this). Lets Manager's "Live now" tell a signed-in-but-idle tab
-// apart from one actually being worked, without forcing a sign-out.
-async function startOperatorSession(session, idleForMs = 0) {
-  try {
-    const existing = await fetchOperatorSessions();
-    const cutoffMs = Date.now() - 90 * 24 * 60 * 60 * 1000; // 90 days
-    const pruned = existing.filter((s) => new Date(s.startedAt).getTime() >= cutoffMs);
-    const now = new Date().toISOString();
-    const updated = [...pruned, { sid: session.sid, loginName: session.loginName, displayName: session.displayName, startedAt: now, lastSeenAt: now, endedAt: null, idleForMs }];
-    await window.storage.set(OPERATOR_SESSIONS_KEY, JSON.stringify(updated), true);
-  } catch (e) { /* best-effort — a missed session start just makes this shift's reporting incomplete, not wrong */ }
-}
-
-async function heartbeatOperatorSession(sid, idleForMs = 0) {
-  try {
-    const list = await fetchOperatorSessions();
-    const now = new Date().toISOString();
-    const updated = list.map((s) => (s.sid === sid ? { ...s, lastSeenAt: now, idleForMs } : s));
-    await window.storage.set(OPERATOR_SESSIONS_KEY, JSON.stringify(updated), true);
-  } catch (e) { /* best-effort */ }
-}
-
-async function endOperatorSession(sid) {
-  try {
-    const list = await fetchOperatorSessions();
-    const now = new Date().toISOString();
-    const updated = list.map((s) => (s.sid === sid ? { ...s, lastSeenAt: now, endedAt: now } : s));
-    await window.storage.set(OPERATOR_SESSIONS_KEY, JSON.stringify(updated), true);
-  } catch (e) { /* best-effort — worst case this session's end is inferred from its last heartbeat instead */ }
-}
-
 // Detects a new deploy while a tab is left open, so a shift-long session
-// doesn't silently run stale code (see the Operator Activity presence
-// tracking, which only starts once a tab actually reloads onto the build
-// that has it). Vite content-hashes the built entry script's filename, and
+// doesn't silently run stale code — this only starts reporting once a tab
+// actually reloads onto the build that has it. Vite content-hashes the
+// built entry script's filename, and
 // index.html references it by name — so a changed filename after a
 // no-cache refetch of index.html means a new build is live. In dev this
 // only ever compares "/src/main.jsx" to itself, so it never fires there.
@@ -500,7 +429,6 @@ export default function SentrylinePrototype() {
   const [outcomePhrases, setOutcomePhrases] = useState([]);
   const [monitoringCompanies, setMonitoringCompanies] = useState([]);
   const [bureaus, setBureaus] = useState([]);
-  const [operatorSessions, setOperatorSessions] = useState([]);
   const [logoUrl, setLogoUrl] = useState("");
   const [companyName, setCompanyName] = useState(DEFAULT_COMPANY_NAME);
   const [now, setNow] = useState(Date.now());
@@ -569,11 +497,13 @@ export default function SentrylinePrototype() {
   // latter is a hard cap independent of the inactivity timer, for an
   // account/terminal simply left signed in across a shift change (a busy
   // board gets touched often enough to never trip the 30-minute inactivity
-  // check, so that alone won't catch it — see Operator Activity's "Live
-  // now", which is exactly what surfaced this). session.iat (the token's
-  // own issued-at claim) is the sign-in anchor, not a separately tracked
+  // check, so that alone won't catch it). session.iat (the token's own
+  // issued-at claim) is the sign-in anchor, not a separately tracked
   // timestamp, so this works the same right after login or after a
-  // restored session following a page reload.
+  // restored session following a page reload. The server enforces the
+  // same 12-hour cap independently (see OPERATOR_MAX_SESSION_MS in
+  // api/_lib/auth.js) as a backstop for a tab whose own timer here never
+  // gets a chance to run (e.g. backgrounded/throttled).
   useEffect(() => {
     if (!session || session.role !== "operator") return;
     const markActivity = () => { lastActivityRef.current = Date.now(); };
@@ -588,11 +518,6 @@ export default function SentrylinePrototype() {
       const inactiveTooLong = Date.now() - lastActivityRef.current >= INACTIVITY_LIMIT_MS;
       const sessionTooLong = Date.now() - signedInAtMs >= MAX_SESSION_MS;
       if (!inactiveTooLong && !sessionTooLong) return;
-      // Same reasoning as handleSignOut: this has to run before apiLogout()
-      // clears the token, or the write goes out unauthenticated and the
-      // presence session is left looking "live" until it ages out on its
-      // own (see endOperatorSession's own comment for the full story).
-      if (session.sid) await endOperatorSession(session.sid);
       disableJobAlerts();
       apiLogout();
       setSession(null);
@@ -632,42 +557,6 @@ export default function SentrylinePrototype() {
     };
   }, [isPatrolmanRosteredToday, session?.loginName]);
 
-  // Tracks Control Room presence for Manager's Operator Activity screen —
-  // same "heartbeat while here, cleared the moment it stops" shape as the
-  // patrolman live-location effect above. Keyed on session.sid (unique per
-  // sign-in, not just role) so logging in again starts a fresh record
-  // instead of overwriting the last one, and a closed/crashed tab — which
-  // never runs this cleanup — still ages out of "live" on its own via
-  // OPERATOR_LIVE_WINDOW_MS rather than appearing online forever.
-  useEffect(() => {
-    if (session?.role !== "operator" || !session.sid) return;
-    // lastActivityRef is the same ref the 30-minute inactivity check below
-    // updates on every real mouse/keyboard/touch/scroll event — reusing it
-    // here means "idle" reflects genuine inaction, not just how long ago
-    // the tab happened to load.
-    startOperatorSession(session, Date.now() - lastActivityRef.current);
-    const hb = setInterval(() => heartbeatOperatorSession(session.sid, Date.now() - lastActivityRef.current), OPERATOR_HEARTBEAT_MS);
-    return () => {
-      clearInterval(hb);
-      endOperatorSession(session.sid);
-    };
-  }, [session?.role, session?.sid]);
-
-  // Manager's Operator Activity screen polls this independently of the
-  // effect above (it's watching everyone else's presence, not reporting
-  // its own), refreshing often enough that "who's online now" doesn't
-  // look stale for more than a few seconds.
-  useEffect(() => {
-    if (session?.role !== "manager") return;
-    let cancelled = false;
-    function load() {
-      fetchOperatorSessions().then((list) => { if (!cancelled) setOperatorSessions(list); });
-    }
-    load();
-    const t = setInterval(load, OPERATOR_HEARTBEAT_MS);
-    return () => { cancelled = true; clearInterval(t); };
-  }, [session?.role]);
-
   const handleSignOut = useCallback(async () => {
     // Fired before apiLogout() clears the auth token — the effect
     // cleanup above would otherwise run after the token's already gone
@@ -675,15 +564,8 @@ export default function SentrylinePrototype() {
     // fallback for other exits, e.g. just closing the tab). Same reason
     // disableJobAlerts() runs here too: signing out should stop job
     // alerts landing on this device immediately, not just once someone
-    // else eventually logs in on this same account elsewhere. The
-    // operator-presence effect's cleanup has the identical problem, made
-    // worse by endOperatorSession() being a read-then-write: it's awaited
-    // here, before apiLogout(), because its second (write) request reads
-    // the token fresh on its own turn of the event loop — if apiLogout()
-    // had already run by then, that write would go out with no token and
-    // silently fail, leaving this session looking perpetually "live".
+    // else eventually logs in on this same account elsewhere.
     if (session?.role === "patrolman") stopSharingLiveLocation(session.loginName);
-    if (session?.role === "operator" && session.sid) await endOperatorSession(session.sid);
     disableJobAlerts();
     apiLogout();
     setSession(null);
@@ -1055,7 +937,7 @@ export default function SentrylinePrototype() {
           {!accountsLoaded || !sitesLoaded ? (
             <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
           ) : session.role === "manager" ? (
-            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} operatorSessions={operatorSessions} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
+            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
           ) : session.role === "operator" ? (
             <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} logoUrl={logoUrl} monitoringCompanies={monitoringCompanies} bureaus={bureaus} />
           ) : (
@@ -4086,7 +3968,7 @@ function DetailRow({ icon: Icon, label, value }) {
    MANAGER VIEW — create & manage logins
 ---------------------------------------------------------------- */
 
-function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, operatorSessions, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
+function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
   const [tab, setTab] = useState("accounts");
   const showConfirm = useConfirm();
   const showToast = useToast();
@@ -4115,7 +3997,6 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
           { id: "roster", label: "Roster", icon: CalendarDays },
           { id: "phrases", label: "Standard Phrases", icon: FileText },
           { id: "clients", label: "Monitoring & Bureau", icon: Building2 },
-          { id: "activity", label: "Operator Activity", icon: Activity },
           { id: "logs", label: "Logs & analysis", icon: BarChart3 },
         ].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", marginBottom: 4, borderRadius: 7, border: "none", cursor: "pointer", textAlign: "left", fontSize: 12.5, fontWeight: 600, background: tab === t.id ? "var(--accent-dim)" : "transparent", color: tab === t.id ? "var(--accent)" : "var(--text-dim)" }}>
@@ -4132,7 +4013,6 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
         {tab === "accounts" && <AccountsManager accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />}
         {tab === "phrases" && <OutcomePhrasesEditor outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} />}
         {tab === "clients" && <ClientListsManager monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} />}
-        {tab === "activity" && <OperatorActivityView operatorSessions={operatorSessions} accounts={accounts} jobs={jobs} now={now} />}
         {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
         {tab === "logs" && <Logs jobs={jobs} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} />}
@@ -4481,213 +4361,6 @@ function NameListEditor({ title, singular, items, persistItems, columnHints }) {
           Added {importResult.imported} of {importResult.total} row(s) (duplicates and blanks skipped).
         </div>
       )}
-    </div>
-  );
-}
-
-function fmtDuration(ms) {
-  const totalMin = Math.max(0, Math.round(ms / 60000));
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
-  return h === 0 ? `${m}m` : `${h}h ${m}m`;
-}
-
-// One row per Control Room account for the selected date range — pre-seeded
-// from `operatorAccounts` so someone who didn't log in at all that day shows
-// up as all zeros instead of just being absent, which is itself the answer
-// to "how active were they". Job-action counts come straight from
-// job.activityLog (live + archived jobs both, same window Reports uses),
-// keyed by whoever actually clicked the action.
-function computeOperatorActivity(allJobs, sessions, operatorAccounts, dateFrom, dateTo) {
-  const startMs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : -Infinity;
-  const endMs = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : Infinity;
-  const byLogin = new Map();
-  // job.activityLog is written by every role (patrolmen included — e.g.
-  // "Took handling of job", "Results updated"), so without this guard a
-  // patrolman who touched a job in range would get a row here too. This
-  // report is Control Room only, so anyone not currently an operator
-  // account is dropped rather than given a row.
-  const operatorLogins = new Set(operatorAccounts.map((a) => a.loginName));
-
-  function ensure(loginName, displayName) {
-    if (!loginName || !operatorLogins.has(loginName)) return null;
-    if (!byLogin.has(loginName)) {
-      byLogin.set(loginName, { loginName, displayName: displayName || loginName, onlineMs: 0, sessionCount: 0, dispatched: 0, reviewed: 0, finalized: 0, totalActions: 0, _intervals: [] });
-    }
-    return byLogin.get(loginName);
-  }
-
-  operatorAccounts.forEach((a) => ensure(a.loginName, a.displayName));
-
-  sessions.forEach((s) => {
-    const startedMs = new Date(s.startedAt).getTime();
-    const endedMs = Math.max(startedMs, new Date(s.endedAt || s.lastSeenAt).getTime());
-    // Clip to the selected range rather than requiring the session to have
-    // *started* inside it — a session still going (or one that ended after
-    // the range) should still contribute whatever portion of it falls
-    // inside, instead of counting for nothing today just because it began
-    // yesterday or earlier.
-    const clippedStart = Math.max(startedMs, startMs);
-    const clippedEnd = Math.min(endedMs, endMs);
-    if (clippedEnd <= clippedStart) return;
-    const entry = ensure(s.loginName, s.displayName);
-    if (!entry) return;
-    if (startedMs >= startMs && startedMs <= endMs) entry.sessionCount += 1;
-    entry._intervals.push([clippedStart, clippedEnd]);
-  });
-
-  // Two overlapping sessions — a second device/tab signed in at the same
-  // time, or a stray session left over from testing that never got a clean
-  // sign-out — must not double-count the wall-clock time they share, or
-  // "time online" can end up reading more hours than the day actually had.
-  // Merging each operator's intervals before summing keeps the total
-  // bounded by real elapsed time no matter how many overlapping sessions
-  // contributed to it.
-  byLogin.forEach((entry) => {
-    const intervals = entry._intervals.sort((a, b) => a[0] - b[0]);
-    let mergedMs = 0;
-    let curStart = null;
-    let curEnd = null;
-    for (const [s, e] of intervals) {
-      if (curStart === null) {
-        curStart = s;
-        curEnd = e;
-      } else if (s <= curEnd) {
-        curEnd = Math.max(curEnd, e);
-      } else {
-        mergedMs += curEnd - curStart;
-        curStart = s;
-        curEnd = e;
-      }
-    }
-    if (curStart !== null) mergedMs += curEnd - curStart;
-    entry.onlineMs = mergedMs;
-    delete entry._intervals;
-  });
-
-  allJobs.forEach((job) => {
-    (job.activityLog || []).forEach((e) => {
-      const ts = new Date(e.ts).getTime();
-      if (ts < startMs || ts > endMs) return;
-      const entry = ensure(e.actorLoginName, e.actorName);
-      if (!entry) return;
-      entry.totalActions += 1;
-      if (e.action === "Dispatched") entry.dispatched += 1;
-      else if (e.action === "Marked reviewed") entry.reviewed += 1;
-      else if (e.action === "Client email sent" || e.action === "Client email marked sent") entry.finalized += 1;
-    });
-  });
-
-  return [...byLogin.values()].sort((a, b) => b.onlineMs - a.onlineMs || a.displayName.localeCompare(b.displayName));
-}
-
-function OperatorActivityView({ operatorSessions, accounts, jobs, now }) {
-  const [dateFrom, setDateFrom] = useState(todayISO());
-  const [dateTo, setDateTo] = useState(todayISO());
-  const [archived, setArchived] = useState([]);
-  const operatorAccounts = useMemo(() => accounts.filter((a) => a.role === "operator"), [accounts]);
-
-  useEffect(() => {
-    if (!dateFrom) { setArchived([]); return; }
-    fetchArchivedJobsInRange(dateFrom, dateTo || todayISO()).then(setArchived);
-  }, [dateFrom, dateTo]);
-
-  const allJobs = useMemo(() => [...jobs, ...archived], [jobs, archived]);
-
-  // Whoever has a session with no endedAt and a heartbeat within the last
-  // minute — de-duped to one row per login even if they somehow have two
-  // tabs open, keeping the earlier startedAt so "online Xm" reflects when
-  // this stretch actually began.
-  const liveNow = useMemo(() => {
-    const byLogin = new Map();
-    operatorSessions.forEach((s) => {
-      if (s.endedAt) return;
-      if (now - new Date(s.lastSeenAt).getTime() > OPERATOR_LIVE_WINDOW_MS) return;
-      const existing = byLogin.get(s.loginName);
-      if (!existing || new Date(s.startedAt) < new Date(existing.startedAt)) byLogin.set(s.loginName, s);
-    });
-    return [...byLogin.values()].sort((a, b) => a.displayName.localeCompare(b.displayName));
-  }, [operatorSessions, now]);
-
-  const rows = useMemo(
-    () => computeOperatorActivity(allJobs, operatorSessions, operatorAccounts, dateFrom, dateTo),
-    [allJobs, operatorSessions, operatorAccounts, dateFrom, dateTo]
-  );
-
-  return (
-    <div>
-      <SectionTitle icon={Activity} title="Operator Activity" />
-
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text-dim)", marginBottom: 8 }}>Live now</div>
-        {liveNow.length === 0 ? (
-          <Empty text="No Control Room logins currently active." />
-        ) : (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {liveNow.map((s) => {
-              // s.lastActiveAt is stamped server-side (see
-              // mergeOperatorSessionsWrite) from this device's own
-              // reported idle duration — missing only for a session whose
-              // tab hasn't reloaded onto a build that reports it yet, in
-              // which case it's just treated as active rather than idle.
-              const idleMs = s.lastActiveAt ? now - new Date(s.lastActiveAt).getTime() : 0;
-              const isIdle = idleMs > OPERATOR_IDLE_THRESHOLD_MS;
-              return (
-                <div key={s.sid} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 20, background: "var(--panel)", border: `1px solid ${isIdle ? "var(--border)" : "var(--ok)"}`, fontSize: 12.5, opacity: isIdle ? 0.6 : 1 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: "50%", background: isIdle ? "var(--text-dim)" : "var(--ok)", flexShrink: 0 }} />
-                  <b>{s.displayName}</b>
-                  <span style={{ color: "var(--text-dim)" }}>
-                    · online {fmtDuration(now - new Date(s.startedAt).getTime())}
-                    {isIdle && ` · idle ${fmtDuration(idleMs)}`}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap", marginBottom: 18, padding: 12, borderRadius: 8, background: "var(--panel-alt)", border: "1px solid var(--border)" }}>
-        <Field label="Date from" style={{ marginBottom: 0 }}>
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
-        </Field>
-        <Field label="Date to" style={{ marginBottom: 0 }}>
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
-        </Field>
-        <button onClick={() => { setDateFrom(todayISO()); setDateTo(todayISO()); }} style={{ ...secondaryBtn, marginBottom: 0 }}>Today</button>
-      </div>
-
-      {rows.length === 0 ? (
-        <Empty text="No Control Room accounts to report on." />
-      ) : (
-        <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 8 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead>
-              <tr style={{ background: "var(--panel-alt)" }}>
-                {["Operator", "Time online", "Sign-ins", "Dispatched", "Reviewed", "Sent to client", "Total actions"].map((h) => (
-                  <th key={h} style={{ textAlign: "left", padding: "8px 10px", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.loginName} style={{ background: "var(--panel)" }}>
-                  <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)", fontWeight: 600 }}>{r.displayName}</td>
-                  <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>{fmtDuration(r.onlineMs)}</td>
-                  <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>{r.sessionCount}</td>
-                  <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>{r.dispatched}</td>
-                  <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>{r.reviewed}</td>
-                  <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>{r.finalized}</td>
-                  <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>{r.totalActions}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-      <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 10 }}>
-        "Sign-ins" counts separate times a login started a session in this range — a proxy for how often they checked in, not a literal count of board refreshes. "Time online" is wall-clock time signed in, not a measure of continuous activity — in "Live now", a dimmed badge with no recent mouse/keyboard activity means the tab is still signed in but likely unattended.
-      </div>
     </div>
   );
 }

@@ -25,20 +25,14 @@ const PUBLIC_READ_KEYS = new Set(["ops:logo", "ops:companyName"]);
 // dropdown) and never writes, so these sit alongside ops:outcomePhrases,
 // not ops:sites.
 const MANAGER_ONLY_WRITE_KEYS = new Set(["ops:logo", "ops:companyName", "ops:outcomePhrases", "ops:monitoringCompanies", "ops:bureaus"]);
-const OPERATOR_UP_WRITE_KEYS = new Set(["ops:sites", "ops:zones", "ops:roster", "ops:operatorSessions"]);
-// ops:operatorSessions (Manager > Operator Activity) needs read-modify-write
-// from an operator's own session (to log its own presence) as well as read
-// access from a manager (to view the report), so it sits at the same
-// any-authenticated-session read tier as ops:sites/ops:roster rather than
-// being manager-only-read — the UI only surfaces it on the Manager tab.
-const KNOWN_KEYS = new Set(["ops:jobs", "ops:sites", "ops:zones", "ops:roster", "ops:logo", "ops:companyName", "ops:outcomePhrases", "ops:monitoringCompanies", "ops:bureaus", "ops:operatorSessions"]);
+const OPERATOR_UP_WRITE_KEYS = new Set(["ops:sites", "ops:zones", "ops:roster"]);
+const KNOWN_KEYS = new Set(["ops:jobs", "ops:sites", "ops:zones", "ops:roster", "ops:logo", "ops:companyName", "ops:outcomePhrases", "ops:monitoringCompanies", "ops:bureaus"]);
 
 const LIVELOC_PREFIX = "ops:liveloc:";
 const STATIONARY_RADIUS_M = 50; // GPS jitter tolerance — "hasn't left this spot"
 const STATIONARY_ALERT_MS = 30 * 60 * 1000;
 
 const JOBS_KEY = "ops:jobs";
-const OPERATOR_SESSIONS_KEY = "ops:operatorSessions";
 
 // Best-effort "how recently was this job touched" — the max timestamp
 // found anywhere on it (every ISO-ish string field, plus activityLog and
@@ -115,74 +109,6 @@ async function mergeJobsWrite(incomingJson) {
   const merged = missingFromIncoming.length ? [...reconciled, ...missingFromIncoming] : reconciled;
   const mergedJson = JSON.stringify(merged);
   await kvSet(JOBS_KEY, mergedJson);
-  return mergedJson;
-}
-
-// Same concurrent-write race as ops:jobs, on a busy shift with several
-// Control Room tabs all writing this one shared array at once (a session
-// start on sign-in, a heartbeat every 25s per tab, an end on sign-out) —
-// a plain whole-array overwrite could and did silently drop someone's
-// newly-started session when two writes landed close together. Simpler
-// than the jobs merge though: each record is owned by exactly one sid
-// (only that browser tab's own start/heartbeat/end calls ever touch it),
-// so there's no same-record conflict to resolve — a write's own sid
-// always wins over whatever's currently stored for it, and any other sid
-// present in current storage but missing from this write's payload
-// (another tab's session, added or updated after this client's own last
-// read) is kept rather than dropped. 90-day pruning happens here, once,
-// on the merged result, instead of relying on every client's own local
-// filter to agree.
-async function mergeOperatorSessionsWrite(incomingJson) {
-  let incoming;
-  try {
-    incoming = JSON.parse(incomingJson);
-  } catch (e) {
-    throw new Error("Malformed operator sessions payload");
-  }
-  if (!Array.isArray(incoming)) {
-    await kvSet(OPERATOR_SESSIONS_KEY, incomingJson);
-    return incomingJson;
-  }
-
-  const currentRaw = await kvGet(OPERATOR_SESSIONS_KEY);
-  const current = currentRaw ? JSON.parse(currentRaw) : [];
-  const bySid = new Map(current.map((s) => [s.sid, s]));
-
-  // Timestamps are stamped here, with the server's own clock, rather than
-  // trusted from whichever device's browser reported them — a phone or
-  // tablet with a wrong clock (bad timezone, no time sync, dead CMOS
-  // battery) would otherwise make a perfectly healthy session look
-  // permanently stale to "Live now" (compared against the viewing
-  // manager's own device clock) while its own start-to-end duration still
-  // adds up fine, since that math never leaves the one skewed clock. One
-  // clock for every record removes that mismatch entirely.
-  const serverNowMs = Date.now();
-  const serverNow = new Date(serverNowMs).toISOString();
-  for (const s of incoming) {
-    const existing = bySid.get(s.sid);
-    // idleForMs is how long that tab's own clock says it's been since real
-    // user activity — a relative duration, not an absolute timestamp, so
-    // (unlike lastSeenAt above) it's safe to trust from the client: a
-    // skewed device clock cancels out of a same-device delta. Anchoring it
-    // to the server's own "now" here, the same way lastSeenAt is stamped,
-    // keeps the derived lastActiveAt on the one clock every other
-    // timestamp on this record already uses.
-    const idleForMs = typeof s.idleForMs === "number" && s.idleForMs >= 0 ? s.idleForMs : 0;
-    bySid.set(s.sid, {
-      sid: s.sid,
-      loginName: s.loginName,
-      displayName: s.displayName,
-      startedAt: existing ? existing.startedAt : serverNow,
-      lastSeenAt: serverNow,
-      endedAt: s.endedAt ? serverNow : null,
-      lastActiveAt: new Date(serverNowMs - idleForMs).toISOString(),
-    });
-  }
-
-  const cutoffMs = Date.now() - 90 * 24 * 60 * 60 * 1000;
-  const merged = [...bySid.values()].filter((s) => new Date(s.startedAt).getTime() >= cutoffMs);
-  const mergedJson = JSON.stringify(merged);
-  await kvSet(OPERATOR_SESSIONS_KEY, mergedJson);
   return mergedJson;
 }
 
@@ -523,8 +449,6 @@ export default async function handler(req, res) {
       let finalValue = value;
       if (key === JOBS_KEY) {
         finalValue = await mergeJobsWrite(value);
-      } else if (key === OPERATOR_SESSIONS_KEY) {
-        finalValue = await mergeOperatorSessionsWrite(value);
       } else {
         await kvSet(key, value);
       }
