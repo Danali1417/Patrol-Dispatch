@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback, useContext, createContext, Suspense, lazy } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback, useContext, createContext } from "react";
 import {
   Bell, Camera, CheckCircle2, AlertTriangle, Clock, LogOut, Mail,
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
@@ -19,13 +19,10 @@ import {
 } from "./accountsApi.js";
 import { getPushStatus, enableJobAlerts, disableJobAlerts, resyncJobAlertsIfEnabled, notifyJobDispatch, notifyStandDown } from "./push.js";
 import { reverseGeocode, fetchStaticMap } from "./geocode.js";
-import { reportLiveLocation, stopSharingLiveLocation } from "./liveLocation.js";
 import { fetchJobPhotos, persistJobPhotos } from "./jobPhotos.js";
 import { loadJobDraft, saveJobDraft, clearJobDraft } from "./jobDraft.js";
 import { fetchJobChat, sendJobChatMessage } from "./jobChat.js";
 import { searchArchivedJobs, fetchArchivedJobsInRange, resetArchiveAndPhotos } from "./jobArchive.js";
-
-const LiveLocationMap = lazy(() => import("./LiveLocationMap.jsx"));
 
 /* ---------------------------------------------------------------
    SEED / REFERENCE DATA
@@ -530,46 +527,14 @@ export default function SentrylinePrototype() {
     };
   }, [session]);
 
-  // Live location sharing for Control Room's Live Location tab — only
-  // while signed in and only on days a patrolman is actually rostered,
-  // matching "active only during shift". Nothing is kept beyond the
-  // current position: each report overwrites the last one, and the
-  // location is deleted the moment this stops (sign-out, tab closed,
-  // or rostered day ends and this effect re-evaluates).
-  const isPatrolmanRosteredToday = session?.role === "patrolman" && roster.some((r) => r.date === rosterDateISO() && r.patrolmanLoginName === session.loginName);
-  useEffect(() => {
-    if (!isPatrolmanRosteredToday || !navigator.geolocation) return;
-    const loginName = session.loginName;
-    let lastReport = 0;
-    const watchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        const now = Date.now();
-        if (now - lastReport < 20000) return;
-        lastReport = now;
-        reportLiveLocation(loginName, pos.coords.latitude, pos.coords.longitude);
-      },
-      () => { /* best-effort — Control Room just won't see a dot for this patrolman */ },
-      { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }
-    );
-    return () => {
-      navigator.geolocation.clearWatch(watchId);
-      stopSharingLiveLocation(loginName);
-    };
-  }, [isPatrolmanRosteredToday, session?.loginName]);
-
   const handleSignOut = useCallback(async () => {
-    // Fired before apiLogout() clears the auth token — the effect
-    // cleanup above would otherwise run after the token's already gone
-    // and silently fail to delete the location (it's still there as a
-    // fallback for other exits, e.g. just closing the tab). Same reason
-    // disableJobAlerts() runs here too: signing out should stop job
-    // alerts landing on this device immediately, not just once someone
-    // else eventually logs in on this same account elsewhere.
-    if (session?.role === "patrolman") stopSharingLiveLocation(session.loginName);
+    // Signing out should stop job alerts landing on this device
+    // immediately, not just once someone else eventually logs in on this
+    // same account elsewhere.
     disableJobAlerts();
     apiLogout();
     setSession(null);
-  }, [session]);
+  }, []);
 
   // Wire up forced sign-out if any authenticated request ever comes back
   // 401 — auth.js already clears the stored token. `reason` is "superseded"
@@ -1438,7 +1403,6 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
           { id: "cancelled", label: "Cancelled jobs", icon: Ban },
           { id: "closed", label: "Closed jobs", icon: CheckCircle2 },
           { id: "roster", label: "Roster", icon: CalendarDays },
-          { id: "live", label: "Live Location", icon: MapPin },
           { id: "logs", label: "Logs & analysis", icon: BarChart3 },
         ].map((t) => (
           <button key={t.id} onClick={() => { setTab(t.id); selectJob(null); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", marginBottom: 4, borderRadius: 7, border: "none", cursor: "pointer", textAlign: "left", fontSize: 12.5, fontWeight: 600, background: tab === t.id ? "var(--accent-dim)" : "transparent", color: tab === t.id ? "var(--accent)" : "var(--text-dim)" }}>
@@ -1456,19 +1420,6 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
         )}
         {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} roster={roster} session={session} persist={persist} monitoringCompanies={monitoringCompanies} bureaus={bureaus} onCreated={(id) => { setTab("board"); selectJob(id); }} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
-        {tab === "live" && (
-          <div>
-            <JobAlertsBanner
-              title="Get notified if a patrolman stays in one spot for 30+ minutes"
-              subtitle="A welfare check nudge — works even with this tab in the background."
-              buttonLabel="Turn on stationary alerts"
-              toastText="Stationary alerts turned on for this device."
-            />
-            <Suspense fallback={<div style={{ padding: 20, color: "var(--text-dim)", fontSize: 13 }}>Loading map…</div>}>
-              <LiveLocationMap roster={roster} accounts={accounts} jobs={jobs} sites={sites} persistSites={persistSites} />
-            </Suspense>
-          </div>
-        )}
         {tab === "logs" && <Logs jobs={jobs} now={now} role="operator" />}
       </div>
     </div>

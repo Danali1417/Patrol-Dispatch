@@ -66,21 +66,6 @@ export async function kvSetSearchable(key, value, search) {
   });
 }
 
-// Bulk-reads every row whose key starts with `prefix`, each with its own
-// updated_at — used for live patrolman locations, where every patrolman
-// upserts their own key (ops:liveloc:<loginName>) so concurrent writes
-// from different patrolmen never race each other the way a single
-// shared JSON blob would.
-//
-// Only safe for prefixes whose total row count stays small and bounded
-// by nature (one row per currently-on-shift patrolman, one row per
-// currently-unmigrated archive entry) — never for anything that grows
-// forever, like the full job archive. Use kvQueryPrefix for that.
-export async function kvGetPrefix(prefix) {
-  const res = await sbFetch(`kv_store?key=like.${encodeURIComponent(prefix)}*&select=key,value,updated_at`);
-  return res.json();
-}
-
 // Filters rows under `prefix` by their `search` jsonb column instead of
 // returning everything — a text term (matched against any of
 // `searchFields`, case-insensitive substring) and/or a `search.<dateField>`
