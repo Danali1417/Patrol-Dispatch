@@ -378,46 +378,65 @@ function formatLocation(loc) {
 // because a handful of photos is expensive on its own.
 const MAX_ATTENDANCE_PHOTOS = 20;
 
-function watermarkPhoto(file, label, location, locationName) {
-  return new Promise((resolve, reject) => {
+// Loads `file` pre-scaled to at most maxW wide wherever the browser
+// supports it, instead of always materializing the full-resolution photo
+// in memory first. Modern phone cameras produce 30-200MP photos; decoding
+// one of those in full before shrinking it is what was throwing "low
+// memory" errors on some devices, regardless of how much RAM/storage the
+// phone actually has — createImageBitmap's resize options let the decoder
+// skip that full-resolution step. Falls back to the old FileReader+Image
+// path (which does need the full decode) on browsers without it.
+async function loadScaledBitmap(file, maxW) {
+  if (typeof createImageBitmap === "function") {
+    try {
+      return await createImageBitmap(file, { resizeWidth: maxW, resizeQuality: "medium" });
+    } catch (err) {
+      // unsupported format/options on this browser — fall through below
+    }
+  }
+  const dataUrl = await new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const maxW = 480;
-        const scale = Math.min(1, maxW / img.width);
-        const w = Math.round(img.width * scale);
-        const h = Math.round(img.height * scale);
-        const canvas = document.createElement("canvas");
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, w, h);
-        const locationText = locationName || formatLocation(location);
-        const lines = [
-          `${label}  ·  ${new Date().toLocaleString("en-AU", { hour12: false })}`,
-          locationText ? `📍 ${locationText}` : "📍 Location unavailable",
-        ];
-        ctx.font = "12px ui-monospace, monospace";
-        const textW = Math.max(...lines.map((l) => ctx.measureText(l).width));
-        const boxH = lines.length * 16 + 8;
-        ctx.fillStyle = "rgba(0,0,0,0.62)";
-        ctx.fillRect(0, h - boxH, textW + 16, boxH);
-        ctx.fillStyle = "#F5A623";
-        lines.forEach((line, i) => ctx.fillText(line, 8, h - boxH + 16 * (i + 1)));
-        resolve({
-          dataUrl: canvas.toDataURL("image/jpeg", 0.72),
-          ts: new Date().toISOString(),
-          location: location ? { lat: location.lat, lon: location.lon } : null,
-          locationName: locationName || null,
-        });
-      };
-      img.onerror = reject;
-      img.src = reader.result;
-    };
+    reader.onload = () => resolve(reader.result);
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
+async function watermarkPhoto(file, label, location, locationName) {
+  const bitmap = await loadScaledBitmap(file, 480);
+  const scale = Math.min(1, 480 / bitmap.width);
+  const w = Math.round(bitmap.width * scale);
+  const h = Math.round(bitmap.height * scale);
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  if (typeof bitmap.close === "function") bitmap.close();
+  const locationText = locationName || formatLocation(location);
+  const lines = [
+    `${label}  ·  ${new Date().toLocaleString("en-AU", { hour12: false })}`,
+    locationText ? `📍 ${locationText}` : "📍 Location unavailable",
+  ];
+  ctx.font = "12px ui-monospace, monospace";
+  const textW = Math.max(...lines.map((l) => ctx.measureText(l).width));
+  const boxH = lines.length * 16 + 8;
+  ctx.fillStyle = "rgba(0,0,0,0.62)";
+  ctx.fillRect(0, h - boxH, textW + 16, boxH);
+  ctx.fillStyle = "#F5A623";
+  lines.forEach((line, i) => ctx.fillText(line, 8, h - boxH + 16 * (i + 1)));
+  return {
+    dataUrl: canvas.toDataURL("image/jpeg", 0.72),
+    ts: new Date().toISOString(),
+    location: location ? { lat: location.lat, lon: location.lon } : null,
+    locationName: locationName || null,
+  };
 }
 
 // A gallery pick is deliberately left plain — no burned-in timestamp/GPS
@@ -426,29 +445,18 @@ function watermarkPhoto(file, label, location, locationName) {
 // date and current GPS onto a photo that might be days old (or taken
 // somewhere else entirely) would misrepresent it, not document it. Same
 // resize/compression as watermarkPhoto, just without the canvas overlay.
-function resizePhotoPlain(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const maxW = 480;
-        const scale = Math.min(1, maxW / img.width);
-        const w = Math.round(img.width * scale);
-        const h = Math.round(img.height * scale);
-        const canvas = document.createElement("canvas");
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, w, h);
-        resolve({ dataUrl: canvas.toDataURL("image/jpeg", 0.72), ts: null, location: null, locationName: null });
-      };
-      img.onerror = reject;
-      img.src = reader.result;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+async function resizePhotoPlain(file) {
+  const bitmap = await loadScaledBitmap(file, 480);
+  const scale = Math.min(1, 480 / bitmap.width);
+  const w = Math.round(bitmap.width * scale);
+  const h = Math.round(bitmap.height * scale);
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  if (typeof bitmap.close === "function") bitmap.close();
+  return { dataUrl: canvas.toDataURL("image/jpeg", 0.72), ts: null, location: null, locationName: null };
 }
 
 function resizeLogo(file) {
