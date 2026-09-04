@@ -100,3 +100,32 @@ export function patrolmanRunSummary(filteredJobs) {
   });
   return Object.values(byKey).sort((a, b) => b.count - a.count || a.patrolman.localeCompare(b.patrolman));
 }
+
+// One row per Control Room operator who dispatched or finalized at least
+// one job in range. "Dispatched" comes straight from dispatchedByName
+// (set once, at dispatch time, on every job). "Finalized" only counts a
+// job once it's actually been sent to the client (status "emailed"),
+// credited to whoever's shown handling it — the same field the
+// "Finalized by" report column already uses, so this stays consistent
+// with what each job row says.
+export function operatorSummary(filteredJobs) {
+  const byOperator = {};
+  function ensure(name) {
+    if (!name) return null;
+    byOperator[name] = byOperator[name] || { operator: name, dispatched: 0, finalized: 0 };
+    return byOperator[name];
+  }
+  filteredJobs.forEach((j) => {
+    const dispatcher = ensure(j.dispatchedByName);
+    if (dispatcher) dispatcher.dispatched++;
+    if (j.status === "emailed") {
+      const finalizer = ensure(j.handlingName);
+      if (finalizer) finalizer.finalized++;
+    }
+  });
+  return Object.values(byOperator).sort((a, b) => b.dispatched - a.dispatched || a.operator.localeCompare(b.operator));
+}
+
+export function cancelledJobCount(filteredJobs) {
+  return filteredJobs.filter((j) => j.status === "cancelled").length;
+}
