@@ -101,18 +101,22 @@ export function patrolmanRunSummary(filteredJobs) {
   return Object.values(byKey).sort((a, b) => b.count - a.count || a.patrolman.localeCompare(b.patrolman));
 }
 
-// One row per Control Room operator who dispatched or finalized at least
-// one job in range. "Dispatched" comes straight from dispatchedByName
-// (set once, at dispatch time, on every job). "Finalized" only counts a
-// job once it's actually been sent to the client (status "emailed"),
-// credited to whoever's shown handling it — the same field the
-// "Finalized by" report column already uses, so this stays consistent
-// with what each job row says.
+// One row per Control Room operator who dispatched, finalized or
+// cancelled at least one job in range. "Dispatched" comes straight from
+// dispatchedByName (set once, at dispatch time, on every job).
+// "Finalized" only counts a job once it's actually been sent to the
+// client (status "emailed"), credited to whoever's shown handling it —
+// the same field the "Finalized by" report column already uses, so this
+// stays consistent with what each job row says. "Cancelled" is credited
+// to whoever actually cancelled it (cancelledByName) — a job someone
+// cancelled on another operator's behalf still counts theirs, not the
+// dispatcher's or current handler's; jobs cancelled before this field
+// existed won't have anyone credited.
 export function operatorSummary(filteredJobs) {
   const byOperator = {};
   function ensure(name) {
     if (!name) return null;
-    byOperator[name] = byOperator[name] || { operator: name, dispatched: 0, finalized: 0 };
+    byOperator[name] = byOperator[name] || { operator: name, dispatched: 0, finalized: 0, cancelled: 0 };
     return byOperator[name];
   }
   filteredJobs.forEach((j) => {
@@ -121,6 +125,10 @@ export function operatorSummary(filteredJobs) {
     if (j.status === "emailed") {
       const finalizer = ensure(j.handlingName);
       if (finalizer) finalizer.finalized++;
+    }
+    if (j.status === "cancelled") {
+      const canceller = ensure(j.cancelledByName);
+      if (canceller) canceller.cancelled++;
     }
   });
   return Object.values(byOperator).sort((a, b) => b.dispatched - a.dispatched || a.operator.localeCompare(b.operator));

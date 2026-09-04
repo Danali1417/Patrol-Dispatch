@@ -22,7 +22,7 @@ export async function sendReportEmail({ data, recipients, from, transporter, now
     ? summary.map((s) => `- ${s.patrolman} on ${s.run} — ${s.count} response${s.count !== 1 ? "s" : ""}`).join("\n")
     : "No jobs dispatched in this period.";
   const operatorLines = operators.length
-    ? operators.map((o) => `- ${o.operator} — ${o.dispatched} dispatched, ${o.finalized} finalized`).join("\n")
+    ? operators.map((o) => `- ${o.operator} — ${o.dispatched} dispatched, ${o.finalized} finalized, ${o.cancelled} cancelled`).join("\n")
     : "No operator activity in this period.";
 
   const subject = `${companyName} Alarm Response Dispatch — Daily Report — ${windowLabel}`;

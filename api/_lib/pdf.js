@@ -49,15 +49,16 @@ export function buildReportPdf({ reportType, companyName, columns, rows, summary
 
   const totalDispatched = (operators || []).reduce((sum, o) => sum + o.dispatched, 0);
   const totalFinalized = (operators || []).reduce((sum, o) => sum + o.finalized, 0);
+  const totalCancelled = (operators || []).reduce((sum, o) => sum + o.cancelled, 0);
   const operatorStartY = (doc.lastAutoTable?.finalY || summaryStartY) + 26;
   doc.setFontSize(11);
   doc.setTextColor(20);
   doc.text("Operator summary", 40, operatorStartY);
   autoTable(doc, {
     startY: operatorStartY + 8,
-    head: [["Operator", "Dispatched", "Finalized"]],
-    body: (operators || []).map((o) => [o.operator, String(o.dispatched), String(o.finalized)]),
-    foot: [["Total", String(totalDispatched), String(totalFinalized)]],
+    head: [["Operator", "Dispatched", "Finalized", "Cancelled"]],
+    body: (operators || []).map((o) => [o.operator, String(o.dispatched), String(o.finalized), String(o.cancelled)]),
+    foot: [["Total", String(totalDispatched), String(totalFinalized), String(totalCancelled)]],
     ...SUMMARY_TABLE_OPTS,
   });
 

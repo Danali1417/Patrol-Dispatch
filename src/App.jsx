@@ -2329,7 +2329,10 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
 
   async function confirmCancel() {
     setCancelBusy(true);
-    const patch = { status: "cancelled", cancelReason: cancelReason.trim(), cancelledAt: new Date().toISOString() };
+    const patch = {
+      status: "cancelled", cancelReason: cancelReason.trim(), cancelledAt: new Date().toISOString(),
+      cancelledByLoginName: session.loginName, cancelledByName: session.displayName,
+    };
     const backup = await sendPhotoBackupEmail({ ...jobWithPhotos, ...patch });
     if (backup.sent) patch.photosBackedUpAt = new Date().toISOString();
     await logAction("Cancelled", cancelReason.trim(), patch);
@@ -3359,15 +3362,16 @@ function Reports({ jobs, companyName, logoUrl }) {
 
     const totalDispatched = operators.reduce((sum, o) => sum + o.dispatched, 0);
     const totalFinalized = operators.reduce((sum, o) => sum + o.finalized, 0);
+    const totalCancelled = operators.reduce((sum, o) => sum + o.cancelled, 0);
     const operatorStartY = (doc.lastAutoTable?.finalY || summaryStartY) + 26;
     doc.setFontSize(11);
     doc.setTextColor(20);
     doc.text("Operator summary", 40, operatorStartY);
     autoTable(doc, {
       startY: operatorStartY + 8,
-      head: [["Operator", "Dispatched", "Finalized"]],
-      body: operators.map((o) => [o.operator, String(o.dispatched), String(o.finalized)]),
-      foot: [["Total", String(totalDispatched), String(totalFinalized)]],
+      head: [["Operator", "Dispatched", "Finalized", "Cancelled"]],
+      body: operators.map((o) => [o.operator, String(o.dispatched), String(o.finalized), String(o.cancelled)]),
+      foot: [["Total", String(totalDispatched), String(totalFinalized), String(totalCancelled)]],
       ...summaryTableOpts,
     });
 
@@ -3481,6 +3485,8 @@ function Reports({ jobs, companyName, logoUrl }) {
                 <span style={{ color: "var(--text-dim)", marginLeft: "auto" }}>{o.dispatched} dispatched</span>
                 <span style={{ color: "var(--text-dim)" }}>·</span>
                 <span style={{ color: "var(--text-dim)" }}>{o.finalized} finalized</span>
+                <span style={{ color: "var(--text-dim)" }}>·</span>
+                <span style={{ color: "var(--text-dim)" }}>{o.cancelled} cancelled</span>
               </div>
             ))}
           </div>
