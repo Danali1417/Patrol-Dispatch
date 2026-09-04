@@ -1671,7 +1671,12 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
     if (site) {
       setKeyInfo(site.keyInfo || "");
       setAlarmCode(site.alarmCode || "");
-      setAssigneeId(recommended[0]?.loginName || "");
+      // Only auto-fill when exactly one patrolman is on this run — e.g. a
+      // run covered by separate day/night logins (see "T77"/"T77 Day" in
+      // defaultAccounts.js) has more than one equally-plausible candidate,
+      // and silently picking recommended[0] there risks defaulting to the
+      // wrong shift. Leaving it blank forces an explicit pick instead.
+      setAssigneeId(recommended.length === 1 ? recommended[0].loginName : "");
     }
     // eslint-disable-next-line
   }, [siteId]);
