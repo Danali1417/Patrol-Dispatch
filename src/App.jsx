@@ -602,6 +602,22 @@ export default function SentrylinePrototype() {
     })();
   }, [session]);
 
+  // Re-fetch accounts every few minutes so a Control Room/Manager tab left
+  // open across a weekly roster re-import (PatrolmanRosterImport, which
+  // updates each patrolman's `run` in place) doesn't keep dispatching new
+  // jobs against last week's stale run — see NewJobForm's `assignee.run`.
+  // Accounts change rarely and the payload is small, so this doesn't need
+  // jobs' 8-second/conditional-fetch treatment.
+  useEffect(() => {
+    if (!session) return;
+    const t = setInterval(async () => {
+      try {
+        setAccounts(await listAccounts());
+      } catch (e) { /* ignore poll errors */ }
+    }, 3 * 60 * 1000);
+    return () => clearInterval(t);
+  }, [session]);
+
   // Load or seed zones & sites (runs are named by the manager; sites are
   // demo data on first run, editable afterwards from Manager > Sites & runs)
   useEffect(() => {
