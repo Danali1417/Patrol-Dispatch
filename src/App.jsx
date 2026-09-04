@@ -2372,6 +2372,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
         <DetailRow icon={Building2} label="Bureau" value={job.bureau} />
         <DetailRow icon={KeyRound} label="Key info" value={job.keyInfo} />
         <DetailRow icon={KeyRound} label="Alarm code" value={job.alarmCode} />
+        <DetailRow icon={FileText} label="Alarm description" value={job.description} />
       </div>
 
       {showEditJob && !isArchived && (
