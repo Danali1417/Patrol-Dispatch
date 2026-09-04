@@ -9,7 +9,7 @@ import {
 import {
   STATUS_META, fmtTime, fmtDateTime, isoDateOnly, isoTimeOnly,
   reportStatusLabel, REPORT_COLUMNS_BRIEF, REPORT_COLUMNS_DETAILED,
-  reportRow, patrolmanRunSummary,
+  reportRow, patrolmanRunSummary, operatorSummary, cancelledJobCount,
 } from "./reportUtils.js";
 import { restoreSession, login as apiLogin, logout as apiLogout, setOnUnauthorized } from "./auth.js";
 import {
@@ -3286,6 +3286,9 @@ function Reports({ jobs, companyName, logoUrl }) {
   const columns = reportType === "brief" ? REPORT_COLUMNS_BRIEF : REPORT_COLUMNS_DETAILED;
   const rows = filtered.map((j) => reportRow(j, reportType));
   const summary = patrolmanRunSummary(filtered);
+  const operators = operatorSummary(filtered);
+  const cancelledCount = cancelledJobCount(filtered);
+  const totalResponses = summary.reduce((sum, s) => sum + s.count, 0);
   const hasFilter = dateFrom || dateTo || timeFrom || timeTo;
 
   function clearFilters() { setDateFrom(""); setDateTo(""); setTimeFrom(""); setTimeTo(""); }
@@ -3293,6 +3296,13 @@ function Reports({ jobs, companyName, logoUrl }) {
   async function buildReportDoc() {
     const [{ jsPDF }, autoTableModule] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
     const autoTable = autoTableModule.default;
+    const summaryTableOpts = {
+      styles: { fontSize: 8, cellPadding: 4 },
+      headStyles: { fillColor: [255, 176, 32], textColor: [20, 20, 20] },
+      footStyles: { fillColor: [235, 235, 235], textColor: [20, 20, 20], fontStyle: "bold" },
+      tableWidth: 300,
+      margin: { bottom: 50 },
+    };
     const doc = new jsPDF({ orientation: reportType === "detailed" ? "landscape" : "portrait", unit: "pt" });
     await addPdfLogo(doc, logoUrl, 40, 50);
     const name = companyName || "Ausgroup";
@@ -3302,8 +3312,9 @@ function Reports({ jobs, companyName, logoUrl }) {
     doc.setTextColor(90);
     doc.text(`Date range: ${dateFrom || "any"} to ${dateTo || "any"}${timeFrom || timeTo ? `  ·  Time: ${timeFrom || "any"} to ${timeTo || "any"}` : ""}`, 40, 58);
     doc.text(`Generated ${fmtDateTime(new Date().toISOString())}`, 40, 72);
+    doc.text(`${rows.length} job(s) — ${cancelledCount} cancelled`, 40, 86);
     autoTable(doc, {
-      startY: 86,
+      startY: 100,
       head: [columns],
       body: rows,
       styles: { fontSize: 8, cellPadding: 4, overflow: "linebreak" },
@@ -3312,7 +3323,7 @@ function Reports({ jobs, companyName, logoUrl }) {
       margin: { bottom: 50 },
     });
 
-    const summaryStartY = (doc.lastAutoTable?.finalY || 86) + 26;
+    const summaryStartY = (doc.lastAutoTable?.finalY || 100) + 26;
     doc.setFontSize(11);
     doc.setTextColor(20);
     doc.text("Patrolman response summary", 40, summaryStartY);
@@ -3320,10 +3331,22 @@ function Reports({ jobs, companyName, logoUrl }) {
       startY: summaryStartY + 8,
       head: [["Patrolman", "Run", "Responses"]],
       body: summary.map((s) => [s.patrolman, s.run, String(s.count)]),
-      styles: { fontSize: 8, cellPadding: 4 },
-      headStyles: { fillColor: [255, 176, 32], textColor: [20, 20, 20] },
-      tableWidth: 300,
-      margin: { bottom: 50 },
+      foot: [["Total", "", String(totalResponses)]],
+      ...summaryTableOpts,
+    });
+
+    const totalDispatched = operators.reduce((sum, o) => sum + o.dispatched, 0);
+    const totalFinalized = operators.reduce((sum, o) => sum + o.finalized, 0);
+    const operatorStartY = (doc.lastAutoTable?.finalY || summaryStartY) + 26;
+    doc.setFontSize(11);
+    doc.setTextColor(20);
+    doc.text("Operator summary", 40, operatorStartY);
+    autoTable(doc, {
+      startY: operatorStartY + 8,
+      head: [["Operator", "Dispatched", "Finalized"]],
+      body: operators.map((o) => [o.operator, String(o.dispatched), String(o.finalized)]),
+      foot: [["Total", String(totalDispatched), String(totalFinalized)]],
+      ...summaryTableOpts,
     });
 
     stampPdfFooter(doc);
@@ -3417,11 +3440,32 @@ function Reports({ jobs, companyName, logoUrl }) {
                 <span style={{ color: "var(--text-dim)" }}>response{s.count !== 1 ? "s" : ""}</span>
               </div>
             ))}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 7, background: "var(--panel-alt)", border: "1px solid var(--border)", fontSize: 12.5, fontWeight: 700 }}>
+              <span>Total</span>
+              <span style={{ fontFamily: "var(--mono)", color: "var(--accent)", marginLeft: "auto" }}>{totalResponses}</span>
+              <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>response{totalResponses !== 1 ? "s" : ""}</span>
+            </div>
           </div>
         </div>
       )}
 
-      <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 8 }}>{rows.length} job{rows.length !== 1 ? "s" : ""} in this report</div>
+      {operators.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text-dim)", marginBottom: 8 }}>Operator summary</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {operators.map((o) => (
+              <div key={o.operator} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12.5 }}>
+                <span><b>{o.operator}</b></span>
+                <span style={{ color: "var(--text-dim)", marginLeft: "auto" }}>{o.dispatched} dispatched</span>
+                <span style={{ color: "var(--text-dim)" }}>·</span>
+                <span style={{ color: "var(--text-dim)" }}>{o.finalized} finalized</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 8 }}>{rows.length} job{rows.length !== 1 ? "s" : ""} in this report — {cancelledCount} cancelled</div>
 
       {rows.length === 0 ? (
         <Empty text="No jobs match this date/time range." />
