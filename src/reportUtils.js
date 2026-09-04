@@ -110,8 +110,10 @@ export function patrolmanRunSummary(filteredJobs) {
 // stays consistent with what each job row says. "Cancelled" is credited
 // to whoever actually cancelled it (cancelledByName) — a job someone
 // cancelled on another operator's behalf still counts theirs, not the
-// dispatcher's or current handler's; jobs cancelled before this field
-// existed won't have anyone credited.
+// dispatcher's or current handler's. A job cancelled before that field
+// existed falls back to handlingName instead — the same "Finalized by"
+// field the report row already shows for it — rather than going
+// uncredited forever.
 export function operatorSummary(filteredJobs) {
   const byOperator = {};
   function ensure(name) {
@@ -127,7 +129,7 @@ export function operatorSummary(filteredJobs) {
       if (finalizer) finalizer.finalized++;
     }
     if (j.status === "cancelled") {
-      const canceller = ensure(j.cancelledByName);
+      const canceller = ensure(j.cancelledByName || j.handlingName);
       if (canceller) canceller.cancelled++;
     }
   });
