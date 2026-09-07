@@ -2,7 +2,7 @@ import { kvGet } from "./supabase.js";
 import { getReportWindow } from "./time.js";
 import {
   REPORT_COLUMNS_BRIEF, REPORT_COLUMNS_DETAILED, reportRow, patrolmanRunSummary,
-  operatorSummary, cancelledJobCount,
+  operatorSummary, cancelledJobCount, jobTypeCounts,
 } from "../../src/reportUtils.js";
 
 const JOBS_KEY = "ops:jobs";
@@ -33,6 +33,7 @@ export async function gatherReportData({ timeZone, now }) {
   const summary = patrolmanRunSummary(filteredJobs);
   const operators = operatorSummary(filteredJobs);
   const cancelledCount = cancelledJobCount(filteredJobs);
+  const typeCounts = jobTypeCounts(filteredJobs);
 
   return {
     window,
@@ -43,6 +44,7 @@ export async function gatherReportData({ timeZone, now }) {
     summary,
     operators,
     cancelledCount,
+    typeCounts,
     columnsBrief: REPORT_COLUMNS_BRIEF,
     columnsDetailed: REPORT_COLUMNS_DETAILED,
   };
