@@ -13,7 +13,7 @@ const SUMMARY_TABLE_OPTS = {
   tableWidth: 300,
 };
 
-export function buildReportPdf({ reportType, companyName, columns, rows, summary, operators, cancelledCount, windowLabel, generatedLabel }) {
+export function buildReportPdf({ reportType, companyName, columns, rows, summary, operators, cancelledCount, typeCounts, windowLabel, generatedLabel }) {
   const doc = new jsPDF({ orientation: reportType === "detailed" ? "landscape" : "portrait", unit: "pt" });
   const name = companyName || "Ausgroup";
 
@@ -31,17 +31,30 @@ export function buildReportPdf({ reportType, companyName, columns, rows, summary
     body: rows,
     styles: { fontSize: 8, cellPadding: 4, overflow: "linebreak" },
     headStyles: { fillColor: [255, 176, 32], textColor: [20, 20, 20] },
-    columnStyles: reportType === "detailed" ? { 11: { cellWidth: 160 }, 12: { cellWidth: 160 } } : undefined,
+    columnStyles: reportType === "detailed" ? { 12: { cellWidth: 160 }, 13: { cellWidth: 160 } } : undefined,
+  });
+
+  const totalByType = (typeCounts || []).reduce((sum, t) => sum + t.count, 0);
+  const typeStartY = (doc.lastAutoTable?.finalY || 100) + 26;
+  doc.setFontSize(11);
+  doc.setTextColor(20);
+  doc.text("Job type breakdown", 40, typeStartY);
+  autoTable(doc, {
+    startY: typeStartY + 8,
+    head: [["Job type", "Count"]],
+    body: (typeCounts || []).map((t) => [t.label, String(t.count)]),
+    foot: [["Total", String(totalByType)]],
+    ...SUMMARY_TABLE_OPTS,
   });
 
   const totalResponses = summary.reduce((sum, s) => sum + s.count, 0);
-  const summaryStartY = (doc.lastAutoTable?.finalY || 100) + 26;
+  const summaryStartY = (doc.lastAutoTable?.finalY || typeStartY) + 26;
   doc.setFontSize(11);
   doc.setTextColor(20);
-  doc.text("Patrolman response summary", 40, summaryStartY);
+  doc.text("Patrolman job summary", 40, summaryStartY);
   autoTable(doc, {
     startY: summaryStartY + 8,
-    head: [["Patrolman", "Run", "Responses"]],
+    head: [["Patrolman", "Run", "Jobs"]],
     body: summary.map((s) => [s.patrolman, s.run, String(s.count)]),
     foot: [["Total", "", String(totalResponses)]],
     ...SUMMARY_TABLE_OPTS,

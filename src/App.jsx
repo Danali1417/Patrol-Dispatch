@@ -10,6 +10,7 @@ import {
   STATUS_META, fmtTime, fmtDateTime, isoDateOnly, isoTimeOnly,
   reportStatusLabel, REPORT_COLUMNS_BRIEF, REPORT_COLUMNS_DETAILED,
   reportRow, patrolmanRunSummary, operatorSummary, cancelledJobCount,
+  JOB_TYPES, jobTypeLabel, isResponseJob, jobTypeCounts,
 } from "./reportUtils.js";
 import { restoreSession, login as apiLogin, logout as apiLogout, setOnUnauthorized } from "./auth.js";
 import {
@@ -208,23 +209,6 @@ function slaWindowMinutes(date) {
   const isDayShift = date.getHours() >= 6 && date.getHours() < 18;
   if (isWeekendOrHoliday) return isDayShift ? 60 : 45;
   return isDayShift ? 45 : 90;
-}
-
-// A job dispatched before this feature existed (or one created as a plain
-// alarm response) has no jobType at all — treated as "response" everywhere,
-// so the SLA/breach behaviour every existing job already relies on never
-// changes for them.
-const JOB_TYPES = [
-  { id: "response", label: "Response" },
-  { id: "randomPatrol", label: "Random Patrol" },
-  { id: "keyPickup", label: "Key Pickup" },
-  { id: "keyDropoff", label: "Key Drop Off" },
-];
-function jobTypeLabel(jobType) {
-  return JOB_TYPES.find((t) => t.id === jobType)?.label || "Response";
-}
-function isResponseJob(job) {
-  return (job.jobType || "response") === "response";
 }
 
 // Key pickup/drop-off jobs carry a "do this by HH:MM" deadline instead of
@@ -3631,7 +3615,9 @@ function Reports({ jobs, companyName, logoUrl }) {
   const summary = patrolmanRunSummary(filtered);
   const operators = operatorSummary(filtered);
   const cancelledCount = cancelledJobCount(filtered);
+  const typeCounts = jobTypeCounts(filtered);
   const totalResponses = summary.reduce((sum, s) => sum + s.count, 0);
+  const totalByType = typeCounts.reduce((sum, t) => sum + t.count, 0);
   const hasFilter = dateFrom || dateTo || timeFrom || timeTo || tableSearch;
 
   // A quick on-screen search across every column (job #, date, time, site,
@@ -3670,17 +3656,29 @@ function Reports({ jobs, companyName, logoUrl }) {
       body: rows,
       styles: { fontSize: 8, cellPadding: 4, overflow: "linebreak" },
       headStyles: { fillColor: [255, 176, 32], textColor: [20, 20, 20] },
-      columnStyles: reportType === "detailed" ? { 11: { cellWidth: 160 }, 12: { cellWidth: 160 } } : undefined,
+      columnStyles: reportType === "detailed" ? { 12: { cellWidth: 160 }, 13: { cellWidth: 160 } } : undefined,
       margin: { bottom: 50 },
     });
 
-    const summaryStartY = (doc.lastAutoTable?.finalY || 100) + 26;
+    const typeStartY = (doc.lastAutoTable?.finalY || 100) + 26;
     doc.setFontSize(11);
     doc.setTextColor(20);
-    doc.text("Patrolman response summary", 40, summaryStartY);
+    doc.text("Job type breakdown", 40, typeStartY);
+    autoTable(doc, {
+      startY: typeStartY + 8,
+      head: [["Job type", "Count"]],
+      body: typeCounts.map((t) => [t.label, String(t.count)]),
+      foot: [["Total", String(totalByType)]],
+      ...summaryTableOpts,
+    });
+
+    const summaryStartY = (doc.lastAutoTable?.finalY || typeStartY) + 26;
+    doc.setFontSize(11);
+    doc.setTextColor(20);
+    doc.text("Patrolman job summary", 40, summaryStartY);
     autoTable(doc, {
       startY: summaryStartY + 8,
-      head: [["Patrolman", "Run", "Responses"]],
+      head: [["Patrolman", "Run", "Jobs"]],
       body: summary.map((s) => [s.patrolman, s.run, String(s.count)]),
       foot: [["Total", "", String(totalResponses)]],
       ...summaryTableOpts,
@@ -3780,22 +3778,40 @@ function Reports({ jobs, companyName, logoUrl }) {
         </div>
       )}
 
+      {typeCounts.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text-dim)", marginBottom: 8 }}>Job type breakdown</div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {typeCounts.map((t) => (
+              <div key={t.jobType} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12.5 }}>
+                <span>{t.label}</span>
+                <span style={{ fontFamily: "var(--mono)", fontWeight: 700, color: "var(--accent)" }}>{t.count}</span>
+              </div>
+            ))}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 7, background: "var(--panel-alt)", border: "1px solid var(--border)", fontSize: 12.5, fontWeight: 700 }}>
+              <span>Total</span>
+              <span style={{ fontFamily: "var(--mono)", color: "var(--accent)" }}>{totalByType}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {summary.length > 0 && (
         <div style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text-dim)", marginBottom: 8 }}>Patrolman response summary</div>
+          <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text-dim)", marginBottom: 8 }}>Patrolman job summary</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
             {summary.map((s) => (
               <div key={`${s.patrolman}||${s.run}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12.5 }}>
                 <span><b>{s.patrolman}</b> on <b>{s.run}</b></span>
                 <span style={{ color: "var(--text-dim)" }}>—</span>
                 <span style={{ fontFamily: "var(--mono)", fontWeight: 700, color: "var(--accent)" }}>{s.count}</span>
-                <span style={{ color: "var(--text-dim)" }}>response{s.count !== 1 ? "s" : ""}</span>
+                <span style={{ color: "var(--text-dim)" }}>job{s.count !== 1 ? "s" : ""}</span>
               </div>
             ))}
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 7, background: "var(--panel-alt)", border: "1px solid var(--border)", fontSize: 12.5, fontWeight: 700 }}>
               <span>Total</span>
               <span style={{ fontFamily: "var(--mono)", color: "var(--accent)", marginLeft: "auto" }}>{totalResponses}</span>
-              <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>response{totalResponses !== 1 ? "s" : ""}</span>
+              <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>job{totalResponses !== 1 ? "s" : ""}</span>
             </div>
           </div>
         </div>

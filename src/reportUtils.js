@@ -8,6 +8,23 @@
 // on Vercel's servers, which is why the serverless function always passes
 // one explicitly.
 
+// A job dispatched before job types existed (or a plain alarm response)
+// has no jobType at all — treated as "response" everywhere, matching
+// src/App.jsx's own definition (kept in sync manually since that file
+// can't import from here without a circular dependency the other way).
+export const JOB_TYPES = [
+  { id: "response", label: "Response" },
+  { id: "randomPatrol", label: "Random Patrol" },
+  { id: "keyPickup", label: "Key Pickup" },
+  { id: "keyDropoff", label: "Key Drop Off" },
+];
+export function jobTypeLabel(jobType) {
+  return JOB_TYPES.find((t) => t.id === jobType)?.label || "Response";
+}
+export function isResponseJob(job) {
+  return (job.jobType || "response") === "response";
+}
+
 export const STATUS_META = {
   dispatched: { label: "Dispatched", color: "var(--info)" },
   submitted: { label: "Awaiting review", color: "var(--warn)" },
@@ -64,12 +81,13 @@ export function reportStatusLabel(status) {
   return STATUS_META[status]?.label || status;
 }
 
-export const REPORT_COLUMNS_BRIEF = ["Job #", "Date", "Time", "Site", "Run", "Patrolman attended", "Operator (dispatched)", "Finalized by", "Status"];
+export const REPORT_COLUMNS_BRIEF = ["Job #", "Type", "Date", "Time", "Site", "Run", "Patrolman attended", "Operator (dispatched)", "Finalized by", "Status"];
 export const REPORT_COLUMNS_DETAILED = [...REPORT_COLUMNS_BRIEF, "Onsite time", "Offsite time", "Results", "Alarm description"];
 
 export function reportRow(job, reportType, timeZone) {
   const base = [
     job.jobNumber,
+    jobTypeLabel(job.jobType),
     isoDateOnly(job.dispatchTime, timeZone),
     isoTimeOnly(job.dispatchTime, timeZone),
     job.siteName,
@@ -138,4 +156,21 @@ export function operatorSummary(filteredJobs) {
 
 export function cancelledJobCount(filteredJobs) {
   return filteredJobs.filter((j) => j.status === "cancelled").length;
+}
+
+// One row per job type actually seen in range (omits types nobody
+// dispatched that period, same sparse style as operatorSummary), sorted
+// highest count first — the breakdown the daily report and Reports tab
+// use to show patrols/response/key pickup/key drop-off separately instead
+// of one lumped-together job count.
+export function jobTypeCounts(filteredJobs) {
+  const byType = {};
+  filteredJobs.forEach((j) => {
+    const id = j.jobType || "response";
+    byType[id] = (byType[id] || 0) + 1;
+  });
+  return JOB_TYPES
+    .filter((t) => byType[t.id] > 0)
+    .map((t) => ({ jobType: t.id, label: t.label, count: byType[t.id] }))
+    .sort((a, b) => b.count - a.count);
 }
