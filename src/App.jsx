@@ -4,7 +4,7 @@ import {
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
   ShieldAlert, ArrowLeft, Building2, Settings, Lock, Eye, EyeOff,
   Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone, CalendarDays, Ban,
-  FileText, Download, Archive, Pencil, MessageSquare, Navigation, RefreshCw, Image as ImageIcon
+  FileText, Download, Archive, Pencil, MessageSquare, Navigation, RefreshCw, Image as ImageIcon, CreditCard
 } from "lucide-react";
 import {
   STATUS_META, fmtTime, fmtDateTime, isoDateOnly, isoTimeOnly,
@@ -4078,7 +4078,10 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
 const PATROLMAN_IMPORT_FIELDS = [
   { key: "name", match: (h) => h.includes("name") },
   { key: "run", match: (h) => h === "run" || h === "zone" || h.includes("run") || h.includes("zone") },
-  { key: "contactNumber", match: (h) => h.includes("contact") || h.includes("phone") || h.includes("mobile") || h.includes("number") },
+  // "number" alone would also match "Security Licence Number" — excluded
+  // here so that column isn't mistaken for a contact number.
+  { key: "contactNumber", match: (h) => h.includes("contact") || h.includes("phone") || h.includes("mobile") || (h.includes("number") && !h.includes("licen")) },
+  { key: "securityLicenceNumber", match: (h) => h.includes("licen") },
 ];
 
 function PatrolmanRosterImport({ accounts, setAccounts, zones }) {
@@ -4124,6 +4127,7 @@ function PatrolmanRosterImport({ accounts, setAccounts, zones }) {
         const name = get("name");
         if (!name) { skippedMissing++; return; }
         const contactNumber = get("contactNumber");
+        const securityLicenceNumber = get("securityLicenceNumber");
         const rawRun = get("run");
         let run = "";
         if (rawRun) {
@@ -4139,6 +4143,7 @@ function PatrolmanRosterImport({ accounts, setAccounts, zones }) {
         if (existingIdx >= 0) {
           const patch = {};
           if (contactNumber) patch.contactNumber = contactNumber;
+          if (securityLicenceNumber) patch.securityLicenceNumber = securityLicenceNumber;
           if (run) patch.run = run;
           if (Object.keys(patch).length) {
             working[existingIdx] = { ...working[existingIdx], ...patch };
@@ -4158,6 +4163,7 @@ function PatrolmanRosterImport({ accounts, setAccounts, zones }) {
             run: run || "Unassigned",
             shift: "",
             contactNumber,
+            securityLicenceNumber,
             active: true,
           };
           working.push(newAccount);
@@ -4185,7 +4191,7 @@ function PatrolmanRosterImport({ accounts, setAccounts, zones }) {
         <div>
           <div style={{ fontSize: 12.5, fontWeight: 700 }}>Import patrolman roster from Excel</div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>
-            Columns: Patrolmen Name, Run/Zone, Patrolmen contact number. Matches existing patrolmen by name and updates their run + contact number; a name that isn't found gets a new login created automatically (default password "patrol123" — reset it from their row below). Run/Zone must match a run you've already added above, or it's left unchanged.
+            Columns: Patrolmen Name, Run/Zone, Patrolmen contact number, Security Licence Number (optional). Matches existing patrolmen by name and updates their run, contact number, and licence number; a name that isn't found gets a new login created automatically (default password "patrol123" — reset it from their row below). Run/Zone must match a run you've already added above, or it's left unchanged.
           </div>
         </div>
         <button onClick={() => fileRef.current?.click()} disabled={busy} style={secondaryBtn}>
@@ -4605,6 +4611,8 @@ function AccountRow({ account, setAccounts, zones, isSelf, lastKnownPassword, on
   const [pwBusy, setPwBusy] = useState(false);
   const [editingContact, setEditingContact] = useState(false);
   const [newContact, setNewContact] = useState(account.contactNumber || "");
+  const [editingLicence, setEditingLicence] = useState(false);
+  const [newLicence, setNewLicence] = useState(account.securityLicenceNumber || "");
   const [showSendLogin, setShowSendLogin] = useState(false);
   const [copied, setCopied] = useState(false);
   const showToast = useToast();
@@ -4663,7 +4671,7 @@ function AccountRow({ account, setAccounts, zones, isSelf, lastKnownPassword, on
             {account.loginName} {isSelf && <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>(you)</span>}
           </div>
           <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
-            {account.displayName}{account.run ? ` · ${account.run}` : ""}{account.shift ? ` · ${account.shift}` : ""}{account.contactNumber ? ` · ${account.contactNumber}` : ""}{inactive ? " · deactivated" : ""}
+            {account.displayName}{account.run ? ` · ${account.run}` : ""}{account.shift ? ` · ${account.shift}` : ""}{account.contactNumber ? ` · ${account.contactNumber}` : ""}{account.securityLicenceNumber ? ` · Lic ${account.securityLicenceNumber}` : ""}{inactive ? " · deactivated" : ""}
           </div>
         </div>
         {account.role === "patrolman" && (
@@ -4674,6 +4682,9 @@ function AccountRow({ account, setAccounts, zones, isSelf, lastKnownPassword, on
         )}
         <button onClick={() => { setCopied(false); setShowSendLogin((v) => !v); }} title="Send login details" style={iconBtn}><Send size={13} /></button>
         <button onClick={() => { setNewContact(account.contactNumber || ""); setEditingContact((v) => !v); }} title="Edit contact number" style={iconBtn}><Phone size={13} /></button>
+        {account.role === "patrolman" && (
+          <button onClick={() => { setNewLicence(account.securityLicenceNumber || ""); setEditingLicence((v) => !v); }} title="Edit security licence number" style={iconBtn}><CreditCard size={13} /></button>
+        )}
         <button onClick={() => { update({ active: inactive ? true : false }); showToast(inactive ? "Login reactivated." : "Login deactivated."); }} title={inactive ? "Reactivate login" : "Deactivate login"} style={iconBtn}>
           <Power size={13} color={inactive ? "var(--ok)" : "var(--text-dim)"} />
         </button>
@@ -4705,6 +4716,17 @@ function AccountRow({ account, setAccounts, zones, isSelf, lastKnownPassword, on
           <input value={newContact} onChange={(e) => setNewContact(e.target.value)} placeholder="Contact number" style={{ ...selectStyle, fontSize: 12 }} />
           <button
             onClick={() => { update({ contactNumber: newContact.trim() }); setEditingContact(false); showToast("Contact number saved."); }}
+            style={secondaryBtn}
+          >
+            Save
+          </button>
+        </div>
+      )}
+      {editingLicence && (
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <input value={newLicence} onChange={(e) => setNewLicence(e.target.value)} placeholder="Security licence number" style={{ ...selectStyle, fontSize: 12 }} />
+          <button
+            onClick={() => { update({ securityLicenceNumber: newLicence.trim() }); setEditingLicence(false); showToast("Security licence number saved."); }}
             style={secondaryBtn}
           >
             Save
@@ -5107,6 +5129,7 @@ const ROSTER_IMPORT_FIELDS = [
   { key: "name", match: (h) => h.includes("name") },
   { key: "shift", match: (h) => h.includes("shift") || h.includes("time") || h.includes("schedul") },
   { key: "contactNumber", match: (h) => h.includes("contact") || h.includes("phone") || h.includes("mobile") },
+  { key: "securityLicenceNumber", match: (h) => h.includes("licen") },
 ];
 
 function RosterImport({ zones, accounts, roster, persistRoster }) {
@@ -5153,6 +5176,7 @@ function RosterImport({ zones, accounts, roster, persistRoster }) {
         const rawRun = String(get("run") ?? "").trim();
         const shift = String(get("shift") ?? "").trim();
         const contactNumber = String(get("contactNumber") ?? "").trim();
+        const securityLicenceNumber = String(get("securityLicenceNumber") ?? "").trim();
 
         if (!name || !rawRun) { skippedMissing++; return; }
         if (!date) { badDate++; return; }
@@ -5175,6 +5199,7 @@ function RosterImport({ zones, accounts, roster, persistRoster }) {
           patrolmanName: name,
           shift: shift || (account?.shift || ""),
           contactNumber: contactNumber || (account?.contactNumber || ""),
+          securityLicenceNumber: securityLicenceNumber || (account?.securityLicenceNumber || ""),
         });
         created++;
       });
@@ -5193,7 +5218,7 @@ function RosterImport({ zones, accounts, roster, persistRoster }) {
         <div>
           <div style={{ fontSize: 12.5, fontWeight: 700 }}>Import roster from Excel</div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>
-            Columns: Date, Run/Zone (or "Site"), Full Name, Shift (or "Scheduled"), Contact/Mobile number (optional). One row per patrolman per date — a whole fortnight is just every date/run/name combination in one sheet. Names matching an existing login pick up that login's contact/shift as a fallback. Run must match a run you've already added, or it's kept as typed and flagged.
+            Columns: Date, Run/Zone (or "Site"), Full Name, Shift (or "Scheduled"), Contact/Mobile number (optional), Security Licence Number (optional). One row per patrolman per date — a whole fortnight is just every date/run/name combination in one sheet. Names matching an existing login pick up that login's contact/shift/licence number as a fallback. Run must match a run you've already added, or it's kept as typed and flagged.
           </div>
         </div>
         <button onClick={() => fileRef.current?.click()} disabled={busy} style={secondaryBtn}>
@@ -5217,7 +5242,7 @@ function RosterImport({ zones, accounts, roster, persistRoster }) {
 
 function RosterView({ zones, accounts, roster, persistRoster }) {
   const [selectedDate, setSelectedDate] = useState(todayISO());
-  const blank = { date: selectedDate, run: zones[0] || "Unassigned", patrolmanLoginName: "", patrolmanName: "", shift: "", contactNumber: "" };
+  const blank = { date: selectedDate, run: zones[0] || "Unassigned", patrolmanLoginName: "", patrolmanName: "", shift: "", contactNumber: "", securityLicenceNumber: "" };
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState("");
@@ -5238,6 +5263,7 @@ function RosterView({ zones, accounts, roster, persistRoster }) {
       patrolmanName: a?.displayName || "",
       shift: a?.shift || f.shift,
       contactNumber: a?.contactNumber || f.contactNumber,
+      securityLicenceNumber: a?.securityLicenceNumber || f.securityLicenceNumber,
     }));
   }
 
@@ -5270,12 +5296,13 @@ function RosterView({ zones, accounts, roster, persistRoster }) {
   const forDate = roster.filter((r) => r.date === selectedDate);
   const runsToShow = Array.from(new Set([...zones, ...forDate.map((r) => r.run)]));
 
-  // Search across patrolman, run, shift and contact number — narrows what's
-  // shown below without changing what's actually on the roster for this
-  // date (same idea as the Reports tab's on-screen search).
+  // Search across patrolman, run, shift, contact number and security
+  // licence number — narrows what's shown below without changing what's
+  // actually on the roster for this date (same idea as the Reports tab's
+  // on-screen search).
   const rq = rosterSearch.trim().toLowerCase();
   const searchedForDate = rq
-    ? forDate.filter((r) => [r.patrolmanName, r.run, r.shift, r.contactNumber].some((v) => (v || "").toLowerCase().includes(rq)))
+    ? forDate.filter((r) => [r.patrolmanName, r.run, r.shift, r.contactNumber, r.securityLicenceNumber].some((v) => (v || "").toLowerCase().includes(rq)))
     : forDate;
 
   return (
@@ -5319,6 +5346,9 @@ function RosterView({ zones, accounts, roster, persistRoster }) {
           </Field>
           <Field label="Contact number" style={{ flex: 1 }}>
             <input value={form.contactNumber} onChange={(e) => set("contactNumber", e.target.value)} style={selectStyle} />
+          </Field>
+          <Field label="Security licence number" style={{ flex: 1 }}>
+            <input value={form.securityLicenceNumber} onChange={(e) => set("securityLicenceNumber", e.target.value)} style={selectStyle} />
           </Field>
         </div>
         {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
@@ -5365,7 +5395,7 @@ function RosterView({ zones, accounts, roster, persistRoster }) {
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 600 }}>{r.patrolmanName}</div>
                         <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
-                          {r.shift || "No shift set"}{r.contactNumber ? ` · ${r.contactNumber}` : ""}
+                          {r.shift || "No shift set"}{r.contactNumber ? ` · ${r.contactNumber}` : ""}{r.securityLicenceNumber ? ` · Lic ${r.securityLicenceNumber}` : ""}
                         </div>
                       </div>
                       <button onClick={() => startEdit(r)} title="Edit" style={iconBtn}><RotateCcw size={13} /></button>

@@ -52,7 +52,7 @@ export default async function handler(req, res) {
   if (req.method === "POST") {
     const session = await requireRole(req, res, ["manager"]);
     if (!session) return;
-    const { loginName, password, role, displayName, shift, run, contactNumber } = req.body || {};
+    const { loginName, password, role, displayName, shift, run, contactNumber, securityLicenceNumber } = req.body || {};
     if (!loginName || !password || !role) {
       return res.status(400).json({ error: "Login name, password, and role are required." });
     }
@@ -72,6 +72,7 @@ export default async function handler(req, res) {
       if (role === "patrolman") {
         acct.shift = (shift || "").trim();
         acct.run = run || "Unassigned";
+        acct.securityLicenceNumber = (securityLicenceNumber || "").trim();
       }
       accounts.push(acct);
       await saveAccounts(accounts);
@@ -136,7 +137,7 @@ export default async function handler(req, res) {
       const session = await requireRole(req, res, ["manager", "operator"]);
       if (!session) return;
       const { creates = [], updates = [] } = req.body || {};
-      const allowed = ["run", "contactNumber", "active", "displayName", "shift"];
+      const allowed = ["run", "contactNumber", "active", "displayName", "shift", "securityLicenceNumber"];
       try {
         const accounts = await loadAccounts();
         for (const u of updates) {
@@ -156,7 +157,7 @@ export default async function handler(req, res) {
             displayName: c.displayName || c.loginName,
             active: true,
             contactNumber: c.contactNumber || "",
-            ...(c.role === "patrolman" ? { shift: c.shift || "", run: c.run || "Unassigned" } : {}),
+            ...(c.role === "patrolman" ? { shift: c.shift || "", run: c.run || "Unassigned", securityLicenceNumber: c.securityLicenceNumber || "" } : {}),
           });
         }
         await saveAccounts(accounts);
@@ -167,14 +168,14 @@ export default async function handler(req, res) {
       }
     }
 
-    // Default: profile field update (run, contactNumber, active, displayName, shift)
+    // Default: profile field update (run, contactNumber, active, displayName, shift, securityLicenceNumber)
     const session = await requireRole(req, res, ["manager"]);
     if (!session) return;
     const { loginName, role, patch } = req.body || {};
     if (!loginName || !role || !patch || typeof patch !== "object") {
       return res.status(400).json({ error: "loginName, role, and patch are required." });
     }
-    const allowed = ["run", "contactNumber", "active", "displayName", "shift"];
+    const allowed = ["run", "contactNumber", "active", "displayName", "shift", "securityLicenceNumber"];
     const safePatch = {};
     for (const k of allowed) if (k in patch) safePatch[k] = patch[k];
     try {
