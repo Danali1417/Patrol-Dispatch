@@ -1530,11 +1530,11 @@ function Board({ jobs, now, onSelect, lockedStatus }) {
         <Field label="Date from" style={{ marginBottom: 0 }}>
           <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
         </Field>
-        <Field label="Date to" style={{ marginBottom: 0 }}>
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
-        </Field>
         <Field label="From time" style={{ marginBottom: 0 }}>
           <input type="time" value={timeFrom} onChange={(e) => setTimeFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
+        </Field>
+        <Field label="Date to" style={{ marginBottom: 0 }}>
+          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
         </Field>
         <Field label="To time" style={{ marginBottom: 0 }}>
           <input type="time" value={timeTo} onChange={(e) => setTimeTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
@@ -3427,11 +3427,11 @@ function Reports({ jobs, companyName, logoUrl }) {
         <Field label="Date from" style={{ marginBottom: 0 }}>
           <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
         </Field>
-        <Field label="Date to" style={{ marginBottom: 0 }}>
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
-        </Field>
         <Field label="From time" style={{ marginBottom: 0 }}>
           <input type="time" value={timeFrom} onChange={(e) => setTimeFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
+        </Field>
+        <Field label="Date to" style={{ marginBottom: 0 }}>
+          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
         </Field>
         <Field label="To time" style={{ marginBottom: 0 }}>
           <input type="time" value={timeTo} onChange={(e) => setTimeTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
