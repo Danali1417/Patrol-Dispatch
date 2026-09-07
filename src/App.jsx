@@ -210,6 +210,46 @@ function slaWindowMinutes(date) {
   return isDayShift ? 45 : 90;
 }
 
+// A job dispatched before this feature existed (or one created as a plain
+// alarm response) has no jobType at all — treated as "response" everywhere,
+// so the SLA/breach behaviour every existing job already relies on never
+// changes for them.
+const JOB_TYPES = [
+  { id: "response", label: "Response" },
+  { id: "randomPatrol", label: "Random Patrol" },
+  { id: "keyPickup", label: "Key Pickup" },
+  { id: "keyDropoff", label: "Key Drop Off" },
+];
+function jobTypeLabel(jobType) {
+  return JOB_TYPES.find((t) => t.id === jobType)?.label || "Response";
+}
+function isResponseJob(job) {
+  return (job.jobType || "response") === "response";
+}
+
+// Key pickup/drop-off jobs carry a "do this by HH:MM" deadline instead of
+// an SLA — combined with the dispatch date here, rolling over to the next
+// day if the chosen time has already passed today (e.g. dispatched at
+// 19:00 with a "18:00" deadline means tomorrow's 18:00, not one already
+// five hours gone).
+function computeDueBy(timeStr, dispatchDate) {
+  if (!timeStr) return null;
+  const [h, m] = timeStr.split(":").map(Number);
+  const d = new Date(dispatchDate);
+  d.setHours(h, m, 0, 0);
+  if (d <= dispatchDate) d.setDate(d.getDate() + 1);
+  return d.toISOString();
+}
+
+function keyJobRemaining(job, now) {
+  if (!job.dueBy) return null;
+  return Math.round((new Date(job.dueBy) - now) / 60000);
+}
+
+function patrolProgress(job) {
+  return { completed: job.patrolLogs?.length || 0, required: job.patrolsRequired || 0 };
+}
+
 function minutesSince(iso, now) {
   return Math.floor((now - new Date(iso).getTime()) / 60000);
 }
@@ -928,6 +968,7 @@ export default function SentrylinePrototype() {
         }
         if (session.role === "operator") {
           const nowBreaching = fresh.filter((j) => {
+            if (!isResponseJob(j)) return false;
             const wasOk = prev.find((p) => p.id === j.id);
             const t1 = jobTiming(j, Date.now());
             const t0 = wasOk ? jobTiming(wasOk, Date.now()) : null;
@@ -1423,6 +1464,60 @@ function EtaChip({ job, now }) {
   );
 }
 
+// A small colored label distinguishing a non-Response job at a glance on
+// the board and in job detail views — omitted entirely for Response jobs
+// (still the large majority), so their cards look exactly as they always
+// have.
+function JobTypeBadge({ jobType }) {
+  if (!jobType || jobType === "response") return null;
+  return (
+    <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: "var(--accent)", border: "1px solid var(--accent)55", background: "var(--accent-dim)", padding: "3px 8px", borderRadius: 20, display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <KeyRound size={11} /> {jobTypeLabel(jobType)}
+    </span>
+  );
+}
+
+// Key pickup/drop-off has no SLA — this just shows the deadline the
+// operator picked at dispatch, in plain "informational" styling rather
+// than the urgent red/amber SlaChip uses, since there's no restricted
+// timeframe to enforce.
+function DueByChip({ job, now }) {
+  if (job.status === "cancelled" || !job.dueBy) return null;
+  const remaining = keyJobRemaining(job, now);
+  const label = remaining >= 0 ? `Due ${fmtTime(job.dueBy)} — ${remaining}m left` : `Due ${fmtTime(job.dueBy)} — ${Math.abs(remaining)}m over`;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, color: "var(--info)", border: "1px solid var(--info)66", padding: "3px 8px", borderRadius: 20 }}>
+      <Clock size={11} /> {label}
+    </span>
+  );
+}
+
+// Random patrol has no SLA either — just a running "N of M done" count,
+// visible to both the patrolman logging them and control room watching
+// the board.
+function PatrolProgressChip({ job }) {
+  const { completed, required } = patrolProgress(job);
+  if (!required) return null;
+  const done = completed >= required;
+  const color = done ? "var(--ok)" : "var(--info)";
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, color, border: `1px solid ${color}66`, padding: "3px 8px", borderRadius: 20 }}>
+      <RotateCcw size={11} /> {completed}/{required} patrols
+    </span>
+  );
+}
+
+// Picks the right urgency/progress indicator for a job's type — the one
+// piece every SlaChip call site used to render unconditionally now goes
+// through this instead, so Response jobs keep their SLA chip untouched
+// and the other three types get their own equivalent.
+function JobUrgencyChip({ job, now }) {
+  if (isResponseJob(job)) return <SlaChip job={job} now={now} />;
+  if (job.jobType === "keyPickup" || job.jobType === "keyDropoff") return <DueByChip job={job} now={now} />;
+  if (job.jobType === "randomPatrol") return <PatrolProgressChip job={job} />;
+  return null;
+}
+
 // Six-step lifecycle used by JobProgressBar. Returns null for cancelled
 // jobs (they don't have a meaningful "next milestone" to show progress
 // toward — the cancelled banner shown elsewhere covers that case).
@@ -1666,7 +1761,7 @@ function Board({ jobs, now, onSelect, lockedStatus }) {
 
 function JobCard({ job, now, onClick }) {
   const t = jobTiming(job, now);
-  const borderColor = job.status === "dispatched" ? (t.level === "breach" ? "var(--breach)" : t.level === "warn" ? "var(--warn)" : "var(--border)") : "var(--border)";
+  const borderColor = job.status === "dispatched" && isResponseJob(job) ? (t.level === "breach" ? "var(--breach)" : t.level === "warn" ? "var(--warn)" : "var(--border)") : "var(--border)";
   return (
     <div onClick={onClick} style={{ padding: "12px 14px", borderRadius: 8, background: "var(--panel)", border: `1px solid ${borderColor}`, cursor: "pointer" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -1677,6 +1772,7 @@ function JobCard({ job, now, onClick }) {
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.siteName}</div>
         </div>
+        <JobTypeBadge jobType={job.jobType} />
         <StatusBadge status={job.status} />
         <ChevronRight size={15} color="var(--text-dim)" style={{ flexShrink: 0 }} />
       </div>
@@ -1688,7 +1784,7 @@ function JobCard({ job, now, onClick }) {
             ? <span title={`Acknowledged by ${job.assigneeName} at ${fmtTime(job.acknowledgedAt)}`}><CheckCircle2 size={14} color="var(--ok)" /></span>
             : <span title="Not yet acknowledged by the patrolman"><Bell size={14} color="var(--warn)" /></span>
         )}
-        <SlaChip job={job} now={now} />
+        <JobUrgencyChip job={job} now={now} />
       </div>
       <div style={{ marginTop: 8 }}>
         <JobProgressBar job={job} compact />
@@ -1705,6 +1801,10 @@ function Empty({ text }) {
 
 function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, session, persist, monitoringCompanies, bureaus, onCreated }) {
   const showToast = useToast();
+  // Response is the default the moment this screen opens, and dispatching
+  // never resets it back — an operator sending several Key pickups (or
+  // patrols) in a row stays on that tab between dispatches.
+  const [jobType, setJobType] = useState("response");
   const [siteId, setSiteId] = useState("");
   const [siteQuery, setSiteQuery] = useState("");
   const [jobNumber, setJobNumber] = useState(() => `JB-${String(jobs.length + 1).padStart(4, "0")}`);
@@ -1713,6 +1813,9 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
   const [assigneeId, setAssigneeId] = useState("");
   const [keyInfo, setKeyInfo] = useState("");
   const [alarmCode, setAlarmCode] = useState("");
+  const [dueByTime, setDueByTime] = useState("");
+  const [patrolsRequired, setPatrolsRequired] = useState(1);
+  const [patrolDurationHours, setPatrolDurationHours] = useState(1);
   const [addingSite, setAddingSite] = useState(false);
   const [dispatching, setDispatching] = useState(false);
 
@@ -1794,7 +1897,11 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
     setAddingSite(false);
   }
 
-  const canDispatch = site && description.trim() && assigneeId && jobNumber.trim();
+  const typeReady =
+    jobType === "randomPatrol" ? patrolsRequired > 0 && patrolDurationHours > 0
+    : jobType === "keyPickup" || jobType === "keyDropoff" ? !!dueByTime
+    : true;
+  const canDispatch = site && description.trim() && assigneeId && jobNumber.trim() && typeReady;
 
   // Guards against a double-click (or a slow network making someone tap
   // "Dispatch" again, thinking the first tap didn't register) creating
@@ -1814,6 +1921,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
 
   async function doDispatch() {
     const assignee = assigneeCandidates.find((r) => r.loginName === assigneeId);
+    const dispatchTimeIso = new Date().toISOString();
     const job = {
       id: `job_${Date.now()}`,
       jobNumber: jobNumber.trim(),
@@ -1829,13 +1937,25 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       description: description.trim(),
       keyInfo,
       alarmCode,
+      jobType,
+      ...(jobType === "keyPickup" || jobType === "keyDropoff"
+        ? { dueBy: computeDueBy(dueByTime, new Date(dispatchTimeIso)) }
+        : {}),
+      ...(jobType === "randomPatrol"
+        ? {
+            patrolsRequired,
+            patrolDurationHours,
+            patrolWindowEnd: new Date(new Date(dispatchTimeIso).getTime() + patrolDurationHours * 3600000).toISOString(),
+            patrolLogs: [],
+          }
+        : {}),
       assigneeId: assignee.loginName,
       assigneeName: assignee.displayName,
       dispatchedByLoginName: session.loginName,
       dispatchedByName: session.displayName,
       handlingLoginName: session.loginName,
       handlingName: session.displayName,
-      dispatchTime: new Date().toISOString(),
+      dispatchTime: dispatchTimeIso,
       status: "dispatched",
       outcomeNotes: "",
       docketNo: "",
@@ -1851,7 +1971,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       onsiteLocationName: null,
       offsiteLocation: null,
       offsiteLocationName: null,
-      activityLog: [logEntry(session, "Dispatched", `Assigned to ${assignee.displayName}`)],
+      activityLog: [logEntry(session, "Dispatched", jobType === "response" ? `Assigned to ${assignee.displayName}` : `${jobTypeLabel(jobType)} — assigned to ${assignee.displayName}`)],
       standDowns: [],
     };
     await persist([...jobs, job]);
@@ -1869,13 +1989,38 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       }
     });
     setSiteId(""); setSiteQuery(""); setDescription(""); setAssigneeId(""); setKeyInfo(""); setAlarmCode(""); setOrderNo("");
+    setDueByTime(""); setPatrolsRequired(1); setPatrolDurationHours(1);
     setJobNumber(`JB-${String(jobs.length + 2).padStart(4, "0")}`);
     onCreated(job.id);
   }
 
+  const sectionTitle =
+    jobType === "randomPatrol" ? "Dispatch a random patrol"
+    : jobType === "keyPickup" ? "Dispatch a key pickup"
+    : jobType === "keyDropoff" ? "Dispatch a key drop off"
+    : "Dispatch a new alarm response";
+  const descriptionLabel = jobType === "response" ? "Alarm description / area(s) in alarm" : "Instructions / description";
+  const descriptionPlaceholder =
+    jobType === "randomPatrol" ? "e.g. Patrol perimeter and car park — check for signs of forced entry"
+    : jobType === "keyPickup" ? "e.g. Collect master key from site manager's office"
+    : jobType === "keyDropoff" ? "e.g. Drop key back in the lockbox at the front gate"
+    : "e.g. Zone 4 motion sensor — loading dock";
+
   return (
     <div style={{ maxWidth: 560 }}>
-      <SectionTitle icon={Send} title="Dispatch a new alarm response" />
+      <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap" }}>
+        {JOB_TYPES.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setJobType(t.id)}
+            style={{ padding: "7px 14px", borderRadius: 20, border: `1px solid ${jobType === t.id ? "var(--accent)" : "var(--border)"}`, background: jobType === t.id ? "var(--accent-dim)" : "var(--panel)", color: jobType === t.id ? "var(--accent)" : "var(--text-dim)", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <SectionTitle icon={Send} title={sectionTitle} />
       <Field label="Site">
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -1932,14 +2077,31 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
         </Field>
       </div>
 
-      <Field label="Alarm description / area(s) in alarm">
-        <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value.toUpperCase())} placeholder="e.g. Zone 4 motion sensor — loading dock" style={{ ...selectStyle, resize: "vertical", fontFamily: "var(--sans)" }} />
+      <Field label={descriptionLabel}>
+        <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value.toUpperCase())} placeholder={descriptionPlaceholder} style={{ ...selectStyle, resize: "vertical", fontFamily: "var(--sans)" }} />
       </Field>
 
       <div style={{ display: "flex", gap: 12 }}>
         <Field label="Key number / code" style={{ flex: 1 }}><input value={keyInfo} onChange={(e) => setKeyInfo(e.target.value.toUpperCase())} style={selectStyle} /></Field>
         <Field label="Alarm code" style={{ width: 130 }}><input value={alarmCode} onChange={(e) => setAlarmCode(e.target.value.toUpperCase())} style={selectStyle} /></Field>
       </div>
+
+      {(jobType === "keyPickup" || jobType === "keyDropoff") && (
+        <Field label={`Due by (${jobType === "keyPickup" ? "pickup" : "drop off"} deadline)`} style={{ maxWidth: 180 }}>
+          <input type="time" value={dueByTime} onChange={(e) => setDueByTime(e.target.value)} style={selectStyle} />
+        </Field>
+      )}
+
+      {jobType === "randomPatrol" && (
+        <div style={{ display: "flex", gap: 12 }}>
+          <Field label="Number of patrols required" style={{ width: 200 }}>
+            <input type="number" min={1} value={patrolsRequired} onChange={(e) => setPatrolsRequired(Math.max(1, parseInt(e.target.value, 10) || 1))} style={selectStyle} />
+          </Field>
+          <Field label="Complete within (hours)" style={{ width: 200 }}>
+            <input type="number" min={0.5} step={0.5} value={patrolDurationHours} onChange={(e) => setPatrolDurationHours(Math.max(0.5, parseFloat(e.target.value) || 0.5))} style={selectStyle} />
+          </Field>
+        </div>
+      )}
 
       <Field label="Dispatch to">
         <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} style={selectStyle}>
@@ -1952,7 +2114,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       </Field>
 
       <button disabled={!canDispatch || dispatching} onClick={dispatch} style={{ ...primaryBtn, width: "100%", marginTop: 6, opacity: canDispatch && !dispatching ? 1 : 0.4, cursor: canDispatch && !dispatching ? "pointer" : "not-allowed" }}>
-        <Send size={14} /> {dispatching ? "Dispatching…" : "Dispatch job"}
+        <Send size={14} /> {dispatching ? "Dispatching…" : jobType === "response" ? "Dispatch job" : `Dispatch ${jobTypeLabel(jobType).toLowerCase()}`}
       </button>
     </div>
   );
@@ -1970,6 +2132,10 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
 function ComboSelect({ label, value, options, onChange, onNewClient, placeholder, style }) {
   const [query, setQuery] = useState(value || "");
   const [open, setOpen] = useState(false);
+  // Index into the combined list of rows below the input — the filtered
+  // matches, then the "+ New Client" row when it's showing — so arrow
+  // keys and Enter can drive the list the same way a mouse does.
+  const [highlight, setHighlight] = useState(0);
   const blurTimer = useRef(null);
 
   useEffect(() => { setQuery(value || ""); }, [value]);
@@ -1985,6 +2151,13 @@ function ComboSelect({ label, value, options, onChange, onNewClient, placeholder
     })
     .slice(0, 30);
   const exactMatch = options.some((o) => o.toLowerCase() === q);
+  const showNewClientRow = q && !exactMatch;
+  const rowCount = matches.length + (showNewClientRow ? 1 : 0);
+
+  // Re-anchors the highlight to the top row whenever what's being typed
+  // (or the open/closed state) changes, so it never points at a row that
+  // scrolled away or no longer exists after a keystroke re-filters the list.
+  useEffect(() => { setHighlight(0); }, [query, open]);
 
   function select(name) {
     setQuery(name);
@@ -2001,6 +2174,27 @@ function ComboSelect({ label, value, options, onChange, onNewClient, placeholder
     setOpen(false);
   }
 
+  function handleKeyDown(e) {
+    if (!open) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (rowCount > 0) setHighlight((h) => (h + 1) % rowCount);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (rowCount > 0) setHighlight((h) => (h - 1 + rowCount) % rowCount);
+    } else if (e.key === "Enter") {
+      if (highlight < matches.length) {
+        e.preventDefault();
+        select(matches[highlight]);
+      } else if (showNewClientRow && highlight === matches.length) {
+        e.preventDefault();
+        addAsNewClient();
+      }
+    } else if (e.key === "Escape") {
+      setOpen(false);
+    }
+  }
+
   return (
     <div style={{ position: "relative", ...style }}>
       <Field label={label}>
@@ -2009,18 +2203,30 @@ function ComboSelect({ label, value, options, onChange, onNewClient, placeholder
           onChange={(e) => { setQuery(e.target.value.toUpperCase()); onChange(""); setOpen(true); }}
           onFocus={() => setOpen(true)}
           onBlur={() => { blurTimer.current = setTimeout(() => setOpen(false), 150); }}
+          onKeyDown={handleKeyDown}
           placeholder={placeholder}
           style={selectStyle}
         />
       </Field>
       {open && (
         <div style={{ position: "absolute", zIndex: 20, top: "100%", left: 0, right: 0, marginTop: -8, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 7, maxHeight: 220, overflowY: "auto", boxShadow: "0 4px 16px rgba(0,0,0,0.3)" }}>
-          {matches.map((o) => (
-            <div key={o} onMouseDown={() => select(o)} style={{ padding: "8px 10px", cursor: "pointer", fontSize: 12.5 }}>{o}</div>
+          {matches.map((o, i) => (
+            <div
+              key={o}
+              onMouseDown={() => select(o)}
+              onMouseEnter={() => setHighlight(i)}
+              style={{ padding: "8px 10px", cursor: "pointer", fontSize: 12.5, background: highlight === i ? "var(--accent-dim)" : "transparent" }}
+            >
+              {o}
+            </div>
           ))}
           {matches.length === 0 && !q && <div style={{ padding: "8px 10px", fontSize: 12, color: "var(--text-dim)" }}>Nothing in the list yet.</div>}
-          {q && !exactMatch && (
-            <div onMouseDown={addAsNewClient} style={{ padding: "8px 10px", cursor: "pointer", fontSize: 12.5, color: "var(--accent)", fontWeight: 700, borderTop: matches.length ? "1px solid var(--border)" : "none" }}>
+          {showNewClientRow && (
+            <div
+              onMouseDown={addAsNewClient}
+              onMouseEnter={() => setHighlight(matches.length)}
+              style={{ padding: "8px 10px", cursor: "pointer", fontSize: 12.5, color: "var(--accent)", fontWeight: 700, borderTop: matches.length ? "1px solid var(--border)" : "none", background: highlight === matches.length ? "var(--accent-dim)" : "transparent" }}
+            >
               + New Client: "{query.trim()}"
             </div>
           )}
@@ -2297,7 +2503,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   // terminal jobs move to the archive — see jobArchive.js), so no extra
   // isArchived check is needed here.
   const etaMinutes = parseEtaMinutes(job.eta);
-  const etaExceedsSla = job.status === "dispatched" && !!job.acknowledgedAt && etaMinutes !== null && etaMinutes > t.slaMin;
+  const etaExceedsSla = isResponseJob(job) && job.status === "dispatched" && !!job.acknowledgedAt && etaMinutes !== null && etaMinutes > t.slaMin;
 
   // Prompts once per fresh view of a job whose stated ETA already exceeds
   // the SLA — proactive, ahead of the SLA actually lapsing, since by then
@@ -2457,6 +2663,12 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
         <DetailRow icon={KeyRound} label="Key info" value={job.keyInfo} />
         <DetailRow icon={KeyRound} label="Alarm code" value={job.alarmCode} />
         <DetailRow icon={FileText} label="Alarm description" value={job.description} />
+        {(job.jobType === "keyPickup" || job.jobType === "keyDropoff") && job.dueBy && (
+          <DetailRow icon={Clock} label="Due by" value={fmtDateTime(job.dueBy)} />
+        )}
+        {job.jobType === "randomPatrol" && job.patrolsRequired > 0 && (
+          <DetailRow icon={RotateCcw} label="Patrols" value={`${patrolProgress(job).completed} of ${job.patrolsRequired} completed${job.patrolWindowEnd ? ` — due by ${fmtDateTime(job.patrolWindowEnd)}` : ""}`} />
+        )}
       </div>
 
       {showEditJob && !isArchived && (
@@ -2587,7 +2799,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
         </div>
       )}
 
-      {job.status === "dispatched" && t.level === "breach" && !job.delayReason && (
+      {isResponseJob(job) && job.status === "dispatched" && t.level === "breach" && !job.delayReason && (
         <div style={{ marginTop: 16, padding: 14, borderRadius: 8, border: "1px solid var(--breach)", background: "#FEF2F2" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#B91C1C", fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>
             <AlertTriangle size={14} /> Response time exceeded — log a reason and advise the client
@@ -2605,8 +2817,13 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
         </div>
       )}
 
-      {job.status === "dispatched" && !job.onsiteTime && <div style={{ marginTop: 18, color: "var(--text-dim)", fontSize: 13 }}>Waiting on patrolman to arrive onsite.</div>}
-      {job.status === "dispatched" && job.onsiteTime && <div style={{ marginTop: 18, color: "var(--text-dim)", fontSize: 13 }}>Patrolman marked onsite at {fmtTime(job.onsiteTime)} — awaiting outcome submission.</div>}
+      {job.status === "dispatched" && job.jobType === "randomPatrol" && (
+        <div style={{ marginTop: 18, color: "var(--text-dim)", fontSize: 13 }}>
+          {patrolProgress(job).completed} of {job.patrolsRequired} patrols completed{job.patrolWindowEnd ? ` — due by ${fmtDateTime(job.patrolWindowEnd)}` : ""}.
+        </div>
+      )}
+      {job.status === "dispatched" && job.jobType !== "randomPatrol" && !job.onsiteTime && <div style={{ marginTop: 18, color: "var(--text-dim)", fontSize: 13 }}>Waiting on patrolman to arrive onsite.</div>}
+      {job.status === "dispatched" && job.jobType !== "randomPatrol" && job.onsiteTime && <div style={{ marginTop: 18, color: "var(--text-dim)", fontSize: 13 }}>Patrolman marked onsite at {fmtTime(job.onsiteTime)} — awaiting outcome submission.</div>}
 
       {(job.onsiteLocation || job.offsiteLocation) && (
         <div style={{ marginTop: 18 }}>
@@ -2662,7 +2879,11 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
               </>
             )}
             <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
-              response time {jobTiming(job, now).elapsed}m (SLA {jobTiming(job, now).slaMin}m)
+              {isResponseJob(job)
+                ? `response time ${jobTiming(job, now).elapsed}m (SLA ${jobTiming(job, now).slaMin}m)`
+                : job.jobType === "randomPatrol"
+                ? `${patrolProgress(job).completed}/${job.patrolsRequired || 0} patrols completed`
+                : job.dueBy ? `due by ${fmtDateTime(job.dueBy)}` : null}
             </div>
           </div>
           <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 10 }}>
@@ -2887,7 +3108,10 @@ function JobHeader({ job }) {
           {job.address} ↗
         </a>
       </div>
-      <StatusBadge status={job.status} />
+      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+        <JobTypeBadge jobType={job.jobType} />
+        <StatusBadge status={job.status} />
+      </div>
     </div>
   );
 }
@@ -3087,7 +3311,8 @@ async function downloadJobAttendancePdf(job, companyName, now, logoUrl) {
     ["Acknowledged", job.acknowledgedAt ? fmtDateTime(job.acknowledgedAt) : "—"],
     ["Onsite", job.onsiteTime ? fmtDateTime(job.onsiteTime) : "—"],
     ["Offsite", job.offsiteTime ? fmtDateTime(job.offsiteTime) : "—"],
-    ["Response time", job.onsiteTime ? `${t.elapsed}m (SLA ${t.slaMin}m)` : "—"],
+    ["Job type", jobTypeLabel(job.jobType)],
+    ["Response time", job.onsiteTime && isResponseJob(job) ? `${t.elapsed}m (SLA ${t.slaMin}m)` : "—"],
     ["Outcome / notes", job.reviewNotes || job.outcomeNotes || job.cancelReason || "—"],
   ];
 
@@ -3297,9 +3522,14 @@ function LogsOverview({ jobs, now }) {
   }, [now]);
   const jobsInWindow = useMemo(() => [...jobs, ...archived], [jobs, archived]);
   const attended = jobsInWindow.filter((j) => j.onsiteTime);
-  const avgResp = attended.length ? Math.round(attended.reduce((s, j) => s + jobTiming(j, now).elapsed, 0) / attended.length) : 0;
+  // Response time / SLA breaches only mean anything for Response jobs —
+  // Key pickup/drop-off and Random Patrol have no SLA, so they're left out
+  // of these two stats entirely rather than skewing them with meaningless
+  // numbers.
+  const respAttended = attended.filter(isResponseJob);
+  const avgResp = respAttended.length ? Math.round(respAttended.reduce((s, j) => s + jobTiming(j, now).elapsed, 0) / respAttended.length) : 0;
   const cancelled = jobsInWindow.filter((j) => j.status === "cancelled");
-  const breaches = jobsInWindow.filter((j) => j.status !== "cancelled" && (j.onsiteTime ? jobTiming(j, now).elapsed > jobTiming(j, now).slaMin : jobTiming(j, now).level === "breach")).length;
+  const breaches = jobsInWindow.filter((j) => isResponseJob(j) && j.status !== "cancelled" && (j.onsiteTime ? jobTiming(j, now).elapsed > jobTiming(j, now).slaMin : jobTiming(j, now).level === "breach")).length;
 
   const byCompany = {};
   jobsInWindow.forEach((j) => {
@@ -3307,7 +3537,7 @@ function LogsOverview({ jobs, now }) {
     byCompany[key] = byCompany[key] || { count: 0, respSum: 0, respN: 0, cancelled: 0 };
     byCompany[key].count++;
     if (j.status === "cancelled") byCompany[key].cancelled++;
-    if (j.onsiteTime) { byCompany[key].respSum += jobTiming(j, now).elapsed; byCompany[key].respN++; }
+    if (j.onsiteTime && isResponseJob(j)) { byCompany[key].respSum += jobTiming(j, now).elapsed; byCompany[key].respN++; }
   });
 
   return (
@@ -3824,6 +4054,14 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
   const galleryFileRef = useRef(null);
   const showToast = useToast();
   const isOnsite = !!job.onsiteTime;
+  const isRandomPatrol = job.jobType === "randomPatrol";
+  const { completed: patrolsCompleted, required: patrolsRequired } = patrolProgress(job);
+  // A Random Patrol job has no single arrival/departure — it's "ready to
+  // submit" once every required patrol pass has been logged, not once the
+  // patrolman is merely onsite (the first patrol log sets onsiteTime, but
+  // that's only patrol 1 of N).
+  const patrolsDone = isRandomPatrol && patrolsRequired > 0 && patrolsCompleted >= patrolsRequired;
+  const readyForOutcome = isRandomPatrol ? patrolsDone : isOnsite;
 
   // Already-submitted jobs have their photos in their own key, not on
   // `job` — see jobPhotos.js. A job still being worked has none to fetch yet
@@ -3924,6 +4162,27 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
     setActionBusy(false);
   }
 
+  // Each press logs one completed patrol pass — the first also marks the
+  // job onsite (so JobProgressBar's "Onsite" milestone reflects the first
+  // arrival), but unlike markOnsite this can be pressed repeatedly, once
+  // per pass, until patrolsRequired is reached and the outcome form below
+  // unlocks.
+  async function logPatrol() {
+    setActionBusy(true);
+    const location = await getCurrentLocation();
+    const locationName = location ? await reverseGeocode(location.lat, location.lon) : null;
+    const entry = { time: new Date().toISOString(), location: location ? { lat: location.lat, lon: location.lon } : null, locationName };
+    const updated = jobs.map((j) => (j.id === job.id ? {
+      ...j,
+      acknowledgedAt: j.acknowledgedAt || entry.time,
+      onsiteTime: j.onsiteTime || entry.time,
+      patrolLogs: [...(j.patrolLogs || []), entry],
+    } : j));
+    await persist(updated);
+    setActionBusy(false);
+    showToast(`Patrol ${patrolsCompleted + 1} of ${patrolsRequired} logged.`);
+  }
+
   async function submit() {
     setActionBusy(true);
     try {
@@ -3967,7 +4226,7 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
     <div>
       <button onClick={onBack} style={backBtn}><ArrowLeft size={13} /> Back to my jobs</button>
       <JobHeader job={job} />
-      {job.status === "dispatched" && <div style={{ margin: "10px 0 4px" }}><SlaChip job={job} now={now} /></div>}
+      {job.status === "dispatched" && <div style={{ margin: "10px 0 4px" }}><JobUrgencyChip job={job} now={now} /></div>}
 
       <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10, fontSize: 13 }}>
         <AddressRow address={job.address} />
@@ -4004,7 +4263,7 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
         </div>
       )}
 
-      {!submitted && !isOnsite && !isCancelled && (
+      {!submitted && !isOnsite && !isCancelled && !isRandomPatrol && (
         <div style={{ marginTop: 20 }}>
           <SectionTitle icon={MapPin} title="Arrived at site?" small />
           <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 12 }}>
@@ -4016,9 +4275,23 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
         </div>
       )}
 
-      {!submitted && isOnsite && !isCancelled && (
+      {!submitted && !isCancelled && isRandomPatrol && !patrolsDone && (
         <div style={{ marginTop: 20 }}>
-          <div style={{ fontSize: 11.5, color: "var(--ok)", marginBottom: 10 }}>Onsite at {fmtTime(job.onsiteTime)}</div>
+          <SectionTitle icon={RotateCcw} title="Random patrols" small />
+          <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 12 }}>
+            {patrolsCompleted} of {patrolsRequired} patrols completed{job.patrolWindowEnd ? ` — complete by ${fmtDateTime(job.patrolWindowEnd)}` : ""}. Log each patrol as soon as you finish it — control room sees your progress update immediately.
+          </div>
+          <button onClick={logPatrol} disabled={actionBusy} style={{ ...primaryBtn, width: "100%", justifyContent: "center", opacity: actionBusy ? 0.6 : 1 }}>
+            <RotateCcw size={14} /> {actionBusy ? "Getting your location…" : `Log patrol ${patrolsCompleted + 1} of ${patrolsRequired}`}
+          </button>
+        </div>
+      )}
+
+      {!submitted && !isCancelled && readyForOutcome && (
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 11.5, color: "var(--ok)", marginBottom: 10 }}>
+            {isRandomPatrol ? `${patrolsCompleted} of ${patrolsRequired} patrols completed` : `Onsite at ${fmtTime(job.onsiteTime)}`}
+          </div>
           <SectionTitle icon={CheckCircle2} title="Submit outcome" small />
           {outcomePhrases?.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
