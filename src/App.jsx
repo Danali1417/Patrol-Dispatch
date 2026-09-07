@@ -54,6 +54,43 @@ const DEFAULT_COMPANY_NAME = "Ausgroup";
 const OUTCOME_PHRASES_KEY = "ops:outcomePhrases";
 const MONITORING_COMPANIES_KEY = "ops:monitoringCompanies";
 const BUREAUS_KEY = "ops:bureaus";
+const PUBLIC_HOLIDAYS_KEY = "ops:publicHolidays";
+// NSW public holidays, used by the weekend/holiday SLA bucket below —
+// a starting list only (2026-2027). There's no reliable government feed
+// left to auto-fetch this from: the old federal data.gov.au dataset was
+// discontinued and only ever covered up to 2025. Add, remove, or correct
+// dates from Manager > Roster as NSW's calendar is gazetted each year —
+// excludes the NSW "Bank Holiday" (banks only, not a general public
+// holiday everyone else observes).
+const DEFAULT_PUBLIC_HOLIDAYS = [
+  { date: "2026-01-01", name: "New Year's Day" },
+  { date: "2026-01-26", name: "Australia Day" },
+  { date: "2026-04-03", name: "Good Friday" },
+  { date: "2026-04-04", name: "Easter Saturday" },
+  { date: "2026-04-05", name: "Easter Sunday" },
+  { date: "2026-04-06", name: "Easter Monday" },
+  { date: "2026-04-25", name: "Anzac Day" },
+  { date: "2026-04-27", name: "Anzac Day (additional day)" },
+  { date: "2026-06-08", name: "King's Birthday" },
+  { date: "2026-10-05", name: "Labour Day" },
+  { date: "2026-12-25", name: "Christmas Day" },
+  { date: "2026-12-26", name: "Boxing Day" },
+  { date: "2026-12-28", name: "Christmas (additional day)" },
+  { date: "2027-01-01", name: "New Year's Day" },
+  { date: "2027-01-26", name: "Australia Day" },
+  { date: "2027-03-26", name: "Good Friday" },
+  { date: "2027-03-27", name: "Easter Saturday" },
+  { date: "2027-03-28", name: "Easter Sunday" },
+  { date: "2027-03-29", name: "Easter Monday" },
+  { date: "2027-04-25", name: "Anzac Day" },
+  { date: "2027-04-26", name: "Anzac Day (additional day)" },
+  { date: "2027-06-14", name: "King's Birthday" },
+  { date: "2027-10-04", name: "Labour Day" },
+  { date: "2027-12-25", name: "Christmas Day" },
+  { date: "2027-12-26", name: "Boxing Day" },
+  { date: "2027-12-27", name: "Christmas (additional day)" },
+  { date: "2027-12-28", name: "Christmas (additional day)" },
+];
 // Each phrase has a short `name` (what patrolmen see on the tappable
 // chip — easy to scan/judge at a glance) and the full `text` that's
 // actually inserted into the outcome field. Seed list is editable
@@ -151,9 +188,26 @@ function rosterDateISO() {
    HELPERS
 ---------------------------------------------------------------- */
 
+// Public holidays affect which bucket below applies — kept as a plain
+// module-level set rather than threaded through every jobTiming() call
+// site (a dozen-plus, scattered across small stateless helpers and
+// components) as a prop, since it only changes when a manager edits the
+// list on the Roster screen; every call site already re-renders within
+// seconds anyway (the 15s clock tick, or any job update).
+let holidayDateSet = new Set();
+function setHolidayDates(dates) {
+  holidayDateSet = new Set(dates);
+}
+
+// SLA minutes depend on both the day of week and time of day:
+//   Mon-Fri 06:00-18:00 -> 45          Mon-Fri 18:00-06:00 -> 90
+//   Weekend/holiday 06:00-18:00 -> 60  Weekend/holiday 18:00-06:00 -> 45
 function slaWindowMinutes(date) {
-  const h = date.getHours();
-  return h >= 6 && h < 18 ? 90 : 60;
+  const day = date.getDay(); // 0 = Sunday ... 6 = Saturday
+  const isWeekendOrHoliday = day === 0 || day === 6 || holidayDateSet.has(isoDateOnly(date));
+  const isDayShift = date.getHours() >= 6 && date.getHours() < 18;
+  if (isWeekendOrHoliday) return isDayShift ? 60 : 45;
+  return isDayShift ? 45 : 90;
 }
 
 function minutesSince(iso, now) {
@@ -426,6 +480,7 @@ export default function SentrylinePrototype() {
   const [outcomePhrases, setOutcomePhrases] = useState([]);
   const [monitoringCompanies, setMonitoringCompanies] = useState([]);
   const [bureaus, setBureaus] = useState([]);
+  const [publicHolidays, setPublicHolidays] = useState([]);
   const [logoUrl, setLogoUrl] = useState("");
   const [companyName, setCompanyName] = useState(DEFAULT_COMPANY_NAME);
   const [now, setNow] = useState(Date.now());
@@ -648,6 +703,26 @@ export default function SentrylinePrototype() {
     })();
   }, [session]);
 
+  // Load or seed public holidays (used by slaWindowMinutes' weekend/
+  // holiday SLA bucket — see its comment). Editable afterwards from
+  // Manager > Roster.
+  useEffect(() => {
+    if (!session) return;
+    (async () => {
+      let h = [];
+      try {
+        const res = await window.storage.get(PUBLIC_HOLIDAYS_KEY, true);
+        if (res && res.value) h = JSON.parse(res.value);
+      } catch (e) { /* nothing stored yet */ }
+      if (h.length === 0) {
+        h = DEFAULT_PUBLIC_HOLIDAYS;
+        try { await window.storage.set(PUBLIC_HOLIDAYS_KEY, JSON.stringify(h), true); } catch (e) { /* ignore */ }
+      }
+      setPublicHolidays(h);
+      setHolidayDates(h.map((x) => x.date));
+    })();
+  }, [session]);
+
   // Load roster (dated run assignments — separate from a login's "current" run)
   useEffect(() => {
     if (!session) return;
@@ -803,6 +878,13 @@ export default function SentrylinePrototype() {
     try { await window.storage.set(BUREAUS_KEY, JSON.stringify(clean), true); } catch (e) { console.error(e); }
   }, []);
 
+  const persistPublicHolidays = useCallback(async (updated) => {
+    const clean = updated.slice().sort((a, b) => a.date.localeCompare(b.date));
+    setPublicHolidays(clean);
+    setHolidayDates(clean.map((x) => x.date));
+    try { await window.storage.set(PUBLIC_HOLIDAYS_KEY, JSON.stringify(clean), true); } catch (e) { console.error(e); }
+  }, []);
+
   const persistLogo = useCallback(async (dataUrl) => {
     setLogoUrl(dataUrl);
     try { await window.storage.set(LOGO_KEY, dataUrl, true); } catch (e) { console.error(e); }
@@ -918,7 +1000,7 @@ export default function SentrylinePrototype() {
           {!accountsLoaded || !sitesLoaded ? (
             <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
           ) : session.role === "manager" ? (
-            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
+            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
           ) : session.role === "operator" ? (
             <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} logoUrl={logoUrl} monitoringCompanies={monitoringCompanies} bureaus={bureaus} />
           ) : (
@@ -4020,7 +4102,7 @@ function DetailRow({ icon: Icon, label, value }) {
    MANAGER VIEW — create & manage logins
 ---------------------------------------------------------------- */
 
-function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
+function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
   const [tab, setTab] = useState("accounts");
   const showConfirm = useConfirm();
   const showToast = useToast();
@@ -4066,7 +4148,7 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
         {tab === "phrases" && <OutcomePhrasesEditor outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} />}
         {tab === "clients" && <ClientListsManager monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} />}
         {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} />}
-        {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
+        {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} />}
         {tab === "logs" && <Logs jobs={jobs} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} />}
       </div>
     </div>
@@ -5259,7 +5341,7 @@ function RosterImport({ zones, accounts, roster, persistRoster }) {
   );
 }
 
-function RosterView({ zones, accounts, roster, persistRoster }) {
+function RosterView({ zones, accounts, roster, persistRoster, publicHolidays, persistPublicHolidays }) {
   const [selectedDate, setSelectedDate] = useState(todayISO());
   const blank = { date: selectedDate, run: zones[0] || "Unassigned", patrolmanLoginName: "", patrolmanName: "", shift: "", contactNumber: "", securityLicenceNumber: "" };
   const [form, setForm] = useState(blank);
@@ -5427,6 +5509,66 @@ function RosterView({ zones, accounts, roster, persistRoster }) {
           })}
         </div>
       )}
+
+      {persistPublicHolidays && (
+        <PublicHolidaysEditor publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} />
+      )}
+    </div>
+  );
+}
+
+// Weekend + public holiday SLA times (see slaWindowMinutes) apply on any
+// date listed here — Manager-only, since it directly changes the SLA
+// clock every job is measured against. Not shown on Control Room's own
+// copy of this screen (RosterView is shared between the two).
+function PublicHolidaysEditor({ publicHolidays, persistPublicHolidays }) {
+  const [date, setDate] = useState("");
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+  const showToast = useToast();
+  const showConfirm = useConfirm();
+
+  function add() {
+    setError("");
+    if (!date) { setError("Pick a date."); return; }
+    if (publicHolidays.some((h) => h.date === date)) { setError("That date is already in the list."); return; }
+    persistPublicHolidays([...publicHolidays, { date, name: name.trim() || "Public holiday" }]);
+    setDate("");
+    setName("");
+    showToast("Public holiday added.");
+  }
+
+  function remove(d, n) {
+    showConfirm(`Remove "${n}" (${d}) from public holidays?`, () => {
+      persistPublicHolidays(publicHolidays.filter((h) => h.date !== d));
+      showToast("Removed.");
+    });
+  }
+
+  const sorted = publicHolidays.slice().sort((a, b) => a.date.localeCompare(b.date));
+
+  return (
+    <div style={{ maxWidth: 460, marginTop: 28, paddingTop: 20, borderTop: "1px solid var(--border)" }}>
+      <SectionTitle icon={CalendarDays} title="Public holidays" small />
+      <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 12 }}>
+        The weekend/holiday SLA times apply on any date listed here. Pre-filled with NSW's gazetted 2026–2027 dates as a starting point — double-check against the current NSW public holidays calendar and add/remove as needed for other years.
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12, maxHeight: 240, overflowY: "auto" }}>
+        {sorted.length === 0 && <Empty text="None added yet." />}
+        {sorted.map((h) => (
+          <div key={h.date} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12.5 }}>
+            <span style={{ fontFamily: "var(--mono)", color: "var(--text-dim)" }}>{h.date}</span>
+            <span style={{ flex: 1 }}>{h.name}</span>
+            <button onClick={() => remove(h.date, h.name)} title="Remove" style={iconBtn}><Trash2 size={12} color="var(--breach)" /></button>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ ...selectStyle, width: 160 }} />
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Labour Day" style={{ ...selectStyle, flex: 1 }} />
+        <button onClick={add} style={secondaryBtn}><CalendarDays size={13} /> Add</button>
+      </div>
+      {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 8 }}>{error}</div>}
     </div>
   );
 }

@@ -15,9 +15,9 @@ const PUBLIC_READ_KEYS = new Set(["ops:logo", "ops:companyName"]);
 // Monitoring & Bureau) — Control Room only reads them (for the New Site
 // dropdown) and never writes, so these sit alongside ops:outcomePhrases,
 // not ops:sites.
-const MANAGER_ONLY_WRITE_KEYS = new Set(["ops:logo", "ops:companyName", "ops:outcomePhrases", "ops:monitoringCompanies", "ops:bureaus"]);
+const MANAGER_ONLY_WRITE_KEYS = new Set(["ops:logo", "ops:companyName", "ops:outcomePhrases", "ops:monitoringCompanies", "ops:bureaus", "ops:publicHolidays"]);
 const OPERATOR_UP_WRITE_KEYS = new Set(["ops:sites", "ops:zones", "ops:roster"]);
-const KNOWN_KEYS = new Set(["ops:jobs", "ops:sites", "ops:zones", "ops:roster", "ops:logo", "ops:companyName", "ops:outcomePhrases", "ops:monitoringCompanies", "ops:bureaus"]);
+const KNOWN_KEYS = new Set(["ops:jobs", "ops:sites", "ops:zones", "ops:roster", "ops:logo", "ops:companyName", "ops:outcomePhrases", "ops:monitoringCompanies", "ops:bureaus", "ops:publicHolidays"]);
 
 const JOBS_KEY = "ops:jobs";
 
