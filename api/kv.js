@@ -31,7 +31,7 @@ const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
 function latestTouch(job) {
   let latest = 0;
   for (const [k, v] of Object.entries(job)) {
-    if (k === "activityLog" || k === "standDowns") continue;
+    if (k === "activityLog" || k === "standDowns" || k === "patrolLogs") continue;
     if (typeof v === "string" && ISO_DATE_RE.test(v)) {
       const t = Date.parse(v);
       if (t > latest) latest = t;
@@ -43,6 +43,14 @@ function latestTouch(job) {
   }
   for (const sd of job.standDowns || []) {
     const t = Math.max(Date.parse(sd?.notifiedAt || 0) || 0, Date.parse(sd?.acknowledgedAt || 0) || 0);
+    if (t > latest) latest = t;
+  }
+  // Random Patrol jobs (see App.jsx) can update only this array — logging
+  // patrol 2+ leaves every top-level ISO field unchanged from patrol 1 —
+  // so without this, a concurrent stale write could win the merge above
+  // and silently drop an already-logged patrol.
+  for (const p of job.patrolLogs || []) {
+    const t = p?.time ? Date.parse(p.time) : NaN;
     if (t > latest) latest = t;
   }
   return latest;
