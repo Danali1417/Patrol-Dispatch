@@ -7,8 +7,11 @@
 //
 // vercel.json also raises this function's maxDuration to 60s (Hobby's
 // ceiling) — archiveOldJobs() below can send one photo-backup email per
-// job it archives, one at a time, and the platform default (10s) could
-// get cut off mid-run on a day with an unusually large backlog.
+// job it archives (run with bounded concurrency, see jobArchive.js), and
+// the platform default (10s) could get cut off mid-run on a day with an
+// unusually large backlog. The report itself is built and sent before
+// archiving runs, specifically so a slow or maxed-out archive sweep can
+// never delay or block today's report email.
 //
 // Required env vars (set in Vercel → Project Settings → Environment Variables):
 //   GMAIL_USER            the Gmail address to send from
@@ -93,17 +96,6 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: process.env.CRON_SECRET ? "Unauthorized" : "CRON_SECRET is not configured on the server" });
   }
 
-  // Runs unconditionally on every cron fire, independent of the email
-  // report below — a deployment that hasn't set up GMAIL_USER etc. still
-  // needs its board kept small, and a failure here shouldn't block today's
-  // email from going out (or vice versa).
-  let archiveResult = null;
-  try {
-    archiveResult = await archiveOldJobs();
-  } catch (err) {
-    console.error("job archiving failed:", err);
-  }
-
   const timeZone = process.env.REPORT_TIMEZONE || "Australia/Sydney";
   const sendHour = Number(process.env.REPORT_SEND_HOUR || 7);
   const toleranceMinutes = Number(process.env.REPORT_SEND_TOLERANCE_MINUTES || 90);
@@ -113,53 +105,65 @@ export default async function handler(req, res) {
   const minutesFromTarget = Math.abs(zonedNow.hour * 60 + zonedNow.minute - sendHour * 60);
   const inSendWindow = minutesFromTarget <= toleranceMinutes;
 
+  // Builds and sends the report first — archiving (below) is a variable
+  // amount of work (one Gmail send per job needing a photo backup) that
+  // used to run before this and get awaited, so a backlog of jobs to
+  // archive could eat the whole 60s ceiling (vercel.json) before this
+  // function ever got here, and no report went out at all. Report result
+  // is captured instead of returned early so archiving still always runs.
+  let reportOutcome;
   if (!testMode && !inSendWindow) {
     await sendFailureAlert(
       req,
       "cron fired outside the expected send window",
       `Ran at ${String(zonedNow.hour).padStart(2, "0")}:${String(zonedNow.minute).padStart(2, "0")} ${timeZone}, target is ${sendHour}:00 ± ${toleranceMinutes}m.`
     );
-    return res.status(200).json({ skipped: true, reason: "outside send window", zonedNow, archived: archiveResult });
-  }
-
-  try {
-    const data = await gatherReportData({ timeZone, now });
-
-    if (!testMode) {
-      const alreadySent = await kvGet(SENT_DATE_KEY);
+    reportOutcome = { status: 200, body: { skipped: true, reason: "outside send window", zonedNow } };
+  } else {
+    try {
+      const data = await gatherReportData({ timeZone, now });
+      const alreadySent = !testMode && (await kvGet(SENT_DATE_KEY));
       if (alreadySent === data.window.dateKey) {
-        return res.status(200).json({ skipped: true, reason: "already sent today", dateKey: data.window.dateKey, archived: archiveResult });
+        reportOutcome = { status: 200, body: { skipped: true, reason: "already sent today", dateKey: data.window.dateKey } };
+      } else {
+        const recipients = (process.env.REPORT_RECIPIENTS || "").split(",").map((s) => s.trim()).filter(Boolean);
+        if (!recipients.length) {
+          reportOutcome = { status: 500, body: { error: "REPORT_RECIPIENTS is not configured" } };
+        } else if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
+          reportOutcome = { status: 500, body: { error: "GMAIL_USER / GMAIL_APP_PASSWORD are not configured" } };
+        } else {
+          const transporter = nodemailer.createTransport({
+            service: "gmail",
+            auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
+          });
+          const { subject } = await sendReportEmail({
+            data, recipients, from: process.env.GMAIL_USER, transporter, now,
+          });
+          if (!testMode) await kvSet(SENT_DATE_KEY, data.window.dateKey);
+          reportOutcome = {
+            status: 200,
+            body: { sent: true, testMode, recipients, subject, jobCount: data.filteredJobs.length, window: data.window },
+          };
+        }
       }
+    } catch (err) {
+      console.error("daily-report failed:", err);
+      await sendFailureAlert(req, "unexpected error while building or sending the report", String(err?.message || err));
+      reportOutcome = { status: 500, body: { error: String(err?.message || err) } };
     }
-
-    const recipients = (process.env.REPORT_RECIPIENTS || "").split(",").map((s) => s.trim()).filter(Boolean);
-    if (!recipients.length) {
-      return res.status(500).json({ error: "REPORT_RECIPIENTS is not configured", archived: archiveResult });
-    }
-    if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-      return res.status(500).json({ error: "GMAIL_USER / GMAIL_APP_PASSWORD are not configured", archived: archiveResult });
-    }
-
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
-    });
-
-    const { subject } = await sendReportEmail({
-      data, recipients, from: process.env.GMAIL_USER, transporter, now,
-    });
-
-    if (!testMode) {
-      await kvSet(SENT_DATE_KEY, data.window.dateKey);
-    }
-
-    return res.status(200).json({
-      sent: true, testMode, recipients, subject,
-      jobCount: data.filteredJobs.length, window: data.window, archived: archiveResult,
-    });
-  } catch (err) {
-    console.error("daily-report failed:", err);
-    await sendFailureAlert(req, "unexpected error while building or sending the report", String(err?.message || err));
-    return res.status(500).json({ error: String(err?.message || err) });
   }
+
+  // Runs after the report, regardless of its outcome — a deployment that
+  // hasn't set up GMAIL_USER etc. still needs its board kept small, and a
+  // slow or failing archive sweep here must never delay or block today's
+  // report (a bad connection just leaves that job's backup for tomorrow's
+  // run — see backupAndDeletePhotos).
+  let archiveResult = null;
+  try {
+    archiveResult = await archiveOldJobs();
+  } catch (err) {
+    console.error("job archiving failed:", err);
+  }
+
+  return res.status(reportOutcome.status).json({ ...reportOutcome.body, archived: archiveResult });
 }
