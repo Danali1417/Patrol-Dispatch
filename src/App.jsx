@@ -3278,6 +3278,7 @@ function Reports({ jobs, companyName, logoUrl }) {
   const [dateTo, setDateTo] = useState("");
   const [timeFrom, setTimeFrom] = useState("");
   const [timeTo, setTimeTo] = useState("");
+  const [tableSearch, setTableSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [archived, setArchived] = useState([]);
   const showToast = useToast();
@@ -3319,9 +3320,17 @@ function Reports({ jobs, companyName, logoUrl }) {
   const operators = operatorSummary(filtered);
   const cancelledCount = cancelledJobCount(filtered);
   const totalResponses = summary.reduce((sum, s) => sum + s.count, 0);
-  const hasFilter = dateFrom || dateTo || timeFrom || timeTo;
+  const hasFilter = dateFrom || dateTo || timeFrom || timeTo || tableSearch;
 
-  function clearFilters() { setDateFrom(""); setDateTo(""); setTimeFrom(""); setTimeTo(""); }
+  // A quick on-screen search across every column (job #, date, time, site,
+  // run, patrolman, operator, status, ...) — separate from the date/time
+  // range above, which decides what's *in* the report at all (and what
+  // the PDF/email include). This only narrows what's shown on screen
+  // right now, useful once a report runs into the hundreds of rows.
+  const q = tableSearch.trim().toLowerCase();
+  const displayRows = q ? rows.filter((r) => r.some((cell) => String(cell ?? "").toLowerCase().includes(q))) : rows;
+
+  function clearFilters() { setDateFrom(""); setDateTo(""); setTimeFrom(""); setTimeTo(""); setTableSearch(""); }
 
   async function buildReportDoc() {
     const [{ jsPDF }, autoTableModule] = await Promise.all([import("jspdf"), import("jspdf-autotable")]);
@@ -3498,20 +3507,35 @@ function Reports({ jobs, companyName, logoUrl }) {
         </div>
       )}
 
-      <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 8 }}>{rows.length} job{rows.length !== 1 ? "s" : ""} in this report — {cancelledCount} cancelled</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+        <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
+          {rows.length} job{rows.length !== 1 ? "s" : ""} in this report — {cancelledCount} cancelled
+          {q && ` — ${displayRows.length} shown`}
+        </div>
+        {rows.length > 0 && (
+          <input
+            value={tableSearch}
+            onChange={(e) => setTableSearch(e.target.value)}
+            placeholder="Search job #, site, patrolman, operator…"
+            style={{ ...selectStyle, marginLeft: "auto", width: 260, padding: "6px 10px", fontSize: 12 }}
+          />
+        )}
+      </div>
 
       {rows.length === 0 ? (
         <Empty text="No jobs match this date/time range." />
+      ) : displayRows.length === 0 ? (
+        <Empty text="No jobs match this search." />
       ) : (
-        <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 8 }}>
+        <div style={{ overflow: "auto", maxHeight: "65vh", border: "1px solid var(--border)", borderRadius: 8 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
             <thead>
               <tr style={{ background: "var(--panel-alt)" }}>
-                {columns.map((c) => <th key={c} style={{ textAlign: "left", padding: "8px 10px", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>{c}</th>)}
+                {columns.map((c) => <th key={c} style={{ textAlign: "left", padding: "8px 10px", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", position: "sticky", top: 0, background: "var(--panel-alt)", zIndex: 1 }}>{c}</th>)}
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
+              {displayRows.map((r, i) => (
                 <tr key={i} style={{ background: "var(--panel)" }}>
                   {r.map((cell, ci) => <td key={ci} style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>{cell}</td>)}
                 </tr>
