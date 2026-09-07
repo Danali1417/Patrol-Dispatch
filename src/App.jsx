@@ -5161,11 +5161,19 @@ function RosterImport({ zones, accounts, roster, persistRoster }) {
       });
 
       const working = roster.slice();
-      const existingKeys = new Set(working.map((r) => `${r.date}|${r.run.toLowerCase()}|${r.patrolmanName.toLowerCase()}`));
+      // Maps date|run|name -> index in `working`, so a row matching an
+      // existing entry updates it in place instead of just being counted
+      // as a duplicate and dropped — that used to mean a sheet re-uploaded
+      // to backfill a field the first import didn't carry (e.g. a licence
+      // number added to the sheet after the roster was already entered)
+      // silently changed nothing.
+      const existingIndexByKey = new Map(
+        working.map((r, idx) => [`${r.date}|${r.run.toLowerCase()}|${r.patrolmanName.toLowerCase()}`, idx])
+      );
 
       let created = 0;
+      let updated = 0;
       let skippedMissing = 0;
-      let skippedDupe = 0;
       let runNotRecognized = 0;
       let badDate = 0;
 
@@ -5185,11 +5193,21 @@ function RosterImport({ zones, accounts, roster, persistRoster }) {
         if (!zoneMatch) runNotRecognized++;
         const run = zoneMatch || rawRun;
 
-        const dedupeKey = `${date}|${run.toLowerCase()}|${name.toLowerCase()}`;
-        if (existingKeys.has(dedupeKey)) { skippedDupe++; return; }
-        existingKeys.add(dedupeKey);
-
         const account = accounts.find((a) => a.role === "patrolman" && (a.displayName.toLowerCase() === name.toLowerCase() || a.loginName.toLowerCase() === name.toLowerCase()));
+
+        const dedupeKey = `${date}|${run.toLowerCase()}|${name.toLowerCase()}`;
+        const existingIdx = existingIndexByKey.get(dedupeKey);
+        if (existingIdx !== undefined) {
+          const patch = {};
+          if (shift) patch.shift = shift;
+          if (contactNumber) patch.contactNumber = contactNumber;
+          if (securityLicenceNumber) patch.securityLicenceNumber = securityLicenceNumber;
+          if (Object.keys(patch).length) {
+            working[existingIdx] = { ...working[existingIdx], ...patch };
+            updated++;
+          }
+          return;
+        }
 
         working.push({
           id: `roster_${Date.now()}_${i}`,
@@ -5201,11 +5219,12 @@ function RosterImport({ zones, accounts, roster, persistRoster }) {
           contactNumber: contactNumber || (account?.contactNumber || ""),
           securityLicenceNumber: securityLicenceNumber || (account?.securityLicenceNumber || ""),
         });
+        existingIndexByKey.set(dedupeKey, working.length - 1);
         created++;
       });
 
-      if (created) persistRoster(working);
-      setResult({ created, skippedMissing, skippedDupe, runNotRecognized, badDate, total: rows.length });
+      if (created || updated) persistRoster(working);
+      setResult({ created, updated, skippedMissing, runNotRecognized, badDate, total: rows.length });
     } catch (err) {
       setError("Couldn't read that file — make sure it's a valid .xlsx, .xls, or .csv export.");
     }
@@ -5218,7 +5237,7 @@ function RosterImport({ zones, accounts, roster, persistRoster }) {
         <div>
           <div style={{ fontSize: 12.5, fontWeight: 700 }}>Import roster from Excel</div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>
-            Columns: Date, Run/Zone (or "Site"), Full Name, Shift (or "Scheduled"), Contact/Mobile number (optional), Security Licence Number (optional). One row per patrolman per date — a whole fortnight is just every date/run/name combination in one sheet. Names matching an existing login pick up that login's contact/shift/licence number as a fallback. Run must match a run you've already added, or it's kept as typed and flagged.
+            Columns: Date, Run/Zone (or "Site"), Full Name, Shift (or "Scheduled"), Contact/Mobile number (optional), Security Licence Number (optional). One row per patrolman per date — a whole fortnight is just every date/run/name combination in one sheet. A row matching an existing date/run/name updates that entry's shift/contact/licence number instead of being skipped, so re-uploading a sheet is safe. Names matching an existing login pick up that login's contact/shift/licence number as a fallback. Run must match a run you've already added, or it's kept as typed and flagged.
           </div>
         </div>
         <button onClick={() => fileRef.current?.click()} disabled={busy} style={secondaryBtn}>
@@ -5230,7 +5249,7 @@ function RosterImport({ zones, accounts, roster, persistRoster }) {
       {result && (
         <div style={{ color: "var(--ok)", fontSize: 12, marginTop: 10 }}>
           {result.created} entr{result.created !== 1 ? "ies" : "y"} added.
-          {result.skippedDupe > 0 && ` ${result.skippedDupe} skipped as duplicates.`}
+          {result.updated > 0 && ` ${result.updated} existing entr${result.updated !== 1 ? "ies" : "y"} updated (matching date/run/name).`}
           {result.runNotRecognized > 0 && ` ${result.runNotRecognized} row(s) had a run/zone that doesn't match any existing run — kept as typed.`}
           {result.badDate > 0 && ` ${result.badDate} row(s) skipped (date couldn't be read).`}
           {result.skippedMissing > 0 && ` ${result.skippedMissing} row(s) skipped (missing name or run).`}
