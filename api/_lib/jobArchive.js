@@ -52,6 +52,27 @@ const ARCHIVE_AFTER_MS = 48 * 60 * 60 * 1000;
 // Same default as api/daily-report.js.
 const REPORT_TIMEZONE = process.env.REPORT_TIMEZONE || "Australia/Sydney";
 
+// Runs `fn` over `items` with at most `limit` in flight at once — used
+// below so a backlog of jobs to archive (each needing its own Gmail SMTP
+// round trip for the photo backup, plus a couple of Supabase calls) runs
+// concurrently instead of one at a time. Sequential was the actual cause
+// of this whole cron timing out on a day with more than a handful of
+// jobs queued up: at up to 10s per SMTP call (see defaultTransporter's
+// timeouts), even a modest backlog blew straight through the 60s ceiling
+// (vercel.json) before the function ever reached building or sending the
+// report itself. Each item here touches its own job's keys, never a
+// shared one, so running them in parallel doesn't introduce a race.
+async function mapWithConcurrency(items, limit, fn) {
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      await fn(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
 function defaultTransporter() {
   // Short timeouts (nodemailer defaults to up to 2 minutes) so one bad
   // connection can't eat the whole 60s cron budget (vercel.json) and
@@ -183,13 +204,13 @@ export async function archiveOldJobs(now = new Date(), { transporter } = {}) {
 
   const photoBackupCounts = { sent: 0, none: 0, failed: 0, "not-configured": 0, "already-sent": 0 };
   if (toArchive.length > 0) {
-    for (const j of toArchive) {
+    await mapWithConcurrency(toArchive, 5, async (j) => {
       const outcome = await backupAndDeletePhotos(j, { transporter });
       photoBackupCounts[outcome] = (photoBackupCounts[outcome] || 0) + 1;
       const chat = await archiveChat(j);
       const archivedJob = chat ? { ...j, chat } : j;
       await kvSetSearchable(`${JOB_ARCHIVE_PREFIX}${j.id}`, JSON.stringify(archivedJob), searchFieldsFor(j));
-    }
+    });
     await kvSet(JOBS_KEY, JSON.stringify(remaining));
   }
 
@@ -209,10 +230,10 @@ async function backfillSearchFields() {
   } catch (e) {
     return 0;
   }
-  for (const r of rows) {
+  await mapWithConcurrency(rows, 10, async (r) => {
     let job;
-    try { job = JSON.parse(r.value); } catch (e) { continue; }
+    try { job = JSON.parse(r.value); } catch (e) { return; }
     await kvSetSearchable(r.key, r.value, searchFieldsFor(job));
-  }
+  });
   return rows.length;
 }
