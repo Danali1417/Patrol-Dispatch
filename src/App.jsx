@@ -5221,6 +5221,7 @@ function RosterView({ zones, accounts, roster, persistRoster }) {
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState("");
+  const [rosterSearch, setRosterSearch] = useState("");
   const showToast = useToast();
   const showConfirm = useConfirm();
 
@@ -5268,6 +5269,14 @@ function RosterView({ zones, accounts, roster, persistRoster }) {
 
   const forDate = roster.filter((r) => r.date === selectedDate);
   const runsToShow = Array.from(new Set([...zones, ...forDate.map((r) => r.run)]));
+
+  // Search across patrolman, run, shift and contact number — narrows what's
+  // shown below without changing what's actually on the roster for this
+  // date (same idea as the Reports tab's on-screen search).
+  const rq = rosterSearch.trim().toLowerCase();
+  const searchedForDate = rq
+    ? forDate.filter((r) => [r.patrolmanName, r.run, r.shift, r.contactNumber].some((v) => (v || "").toLowerCase().includes(rq)))
+    : forDate;
 
   return (
     <div>
@@ -5321,33 +5330,53 @@ function RosterView({ zones, accounts, roster, persistRoster }) {
 
       <RosterImport zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />
 
-      <SectionTitle icon={CalendarDays} title={fmtRosterDate(selectedDate)} small />
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+        <SectionTitle icon={CalendarDays} title={fmtRosterDate(selectedDate)} small />
+        {forDate.length > 0 && (
+          <input
+            value={rosterSearch}
+            onChange={(e) => setRosterSearch(e.target.value)}
+            placeholder="Search patrolman, run, shift, contact…"
+            style={{ ...selectStyle, marginLeft: "auto", width: 260, padding: "6px 10px", fontSize: 12 }}
+          />
+        )}
+      </div>
+      {rq && (
+        <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 10 }}>
+          {searchedForDate.length} of {forDate.length} shown
+        </div>
+      )}
+
       {forDate.length === 0 ? (
         <Empty text="No one rostered for this date yet — add an entry above, or import a sheet." />
+      ) : searchedForDate.length === 0 ? (
+        <Empty text="No roster entries match this search." />
       ) : (
-        runsToShow.map((run) => {
-          const entries = forDate.filter((r) => r.run === run);
-          if (!entries.length) return null;
-          return (
-            <div key={run} style={{ marginBottom: 18 }}>
-              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text-dim)", marginBottom: 8 }}>{run} ({entries.length})</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {entries.map((r) => (
-                  <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: "var(--panel)", border: "1px solid var(--border)" }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{r.patrolmanName}</div>
-                      <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
-                        {r.shift || "No shift set"}{r.contactNumber ? ` · ${r.contactNumber}` : ""}
+        <div style={{ overflow: "auto", maxHeight: "65vh" }}>
+          {runsToShow.map((run) => {
+            const entries = searchedForDate.filter((r) => r.run === run);
+            if (!entries.length) return null;
+            return (
+              <div key={run} style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text-dim)", marginBottom: 8 }}>{run} ({entries.length})</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {entries.map((r) => (
+                    <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: "var(--panel)", border: "1px solid var(--border)" }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{r.patrolmanName}</div>
+                        <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
+                          {r.shift || "No shift set"}{r.contactNumber ? ` · ${r.contactNumber}` : ""}
+                        </div>
                       </div>
+                      <button onClick={() => startEdit(r)} title="Edit" style={iconBtn}><RotateCcw size={13} /></button>
+                      <button onClick={() => remove(r.id)} title="Delete" style={iconBtn}><Trash2 size={13} color="var(--breach)" /></button>
                     </div>
-                    <button onClick={() => startEdit(r)} title="Edit" style={iconBtn}><RotateCcw size={13} /></button>
-                    <button onClick={() => remove(r.id)} title="Delete" style={iconBtn}><Trash2 size={13} color="var(--breach)" /></button>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          );
-        })
+            );
+          })}
+        </div>
       )}
     </div>
   );
