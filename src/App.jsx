@@ -1479,18 +1479,17 @@ function Board({ jobs, now, onSelect, lockedStatus }) {
 
   const q = search.trim().toLowerCase();
   const hasFilter = q || dateFrom || dateTo || timeFrom || timeTo || (!lockedStatus && statusFilter !== "active");
+  // Same continuous-window combination as the Reports tab's date/time
+  // filter — (dateFrom at timeFrom) through (dateTo at timeTo) as one
+  // span, not a time-of-day band re-checked independently on every day
+  // in the range.
+  const startBound = dateFrom ? new Date(`${dateFrom}T${timeFrom || "00:00"}:00`) : null;
+  const endBound = dateTo ? new Date(`${dateTo}T${timeTo || "23:59"}:59.999`) : null;
   const filtered = jobs.filter((j) => {
     if (q && !j.jobNumber.toLowerCase().includes(q) && !j.siteName.toLowerCase().includes(q)) return false;
-    if (dateFrom || dateTo) {
-      const d = isoDateOnly(j.dispatchTime);
-      if (dateFrom && d < dateFrom) return false;
-      if (dateTo && d > dateTo) return false;
-    }
-    if (timeFrom || timeTo) {
-      const t = isoTimeOnly(j.dispatchTime);
-      if (timeFrom && t < timeFrom) return false;
-      if (timeTo && t > timeTo) return false;
-    }
+    const dt = new Date(j.dispatchTime);
+    if (startBound && dt < startBound) return false;
+    if (endBound && dt > endBound) return false;
     return true;
   });
   const visible = filtered.filter((j) => groupKeys.has(j.status));
@@ -3294,16 +3293,22 @@ function Reports({ jobs, companyName, logoUrl }) {
   }, [dateFrom, dateTo]);
   const allJobs = useMemo(() => [...jobs, ...archived], [jobs, archived]);
 
+  // "From"/"To" date+time combine into one continuous window — (dateFrom
+  // at timeFrom) through (dateTo at timeTo) — rather than treating the
+  // time fields as a time-of-day band re-applied independently on every
+  // day in the range (which read as "the filter is broken" once a date
+  // range spanned more than a day: a 06:00–06:59 time filter would only
+  // ever match that one hour on each individual day, not the week the
+  // date range implied). Parsed as local wall-clock time, same zone the
+  // times/dates are displayed in elsewhere in this report.
+  const startBound = dateFrom ? new Date(`${dateFrom}T${timeFrom || "00:00"}:00`) : null;
+  const endBound = dateTo ? new Date(`${dateTo}T${timeTo || "23:59"}:59.999`) : null;
+
   const filtered = allJobs
     .filter((j) => {
-      const d = isoDateOnly(j.dispatchTime);
-      if (dateFrom && d < dateFrom) return false;
-      if (dateTo && d > dateTo) return false;
-      if (timeFrom || timeTo) {
-        const t = isoTimeOnly(j.dispatchTime);
-        if (timeFrom && t < timeFrom) return false;
-        if (timeTo && t > timeTo) return false;
-      }
+      const dt = new Date(j.dispatchTime);
+      if (startBound && dt < startBound) return false;
+      if (endBound && dt > endBound) return false;
       return true;
     })
     .sort((a, b) => new Date(a.dispatchTime) - new Date(b.dispatchTime));
