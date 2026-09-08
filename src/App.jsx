@@ -10,7 +10,7 @@ import {
   STATUS_META, fmtTime, fmtDateTime, isoDateOnly, isoTimeOnly,
   reportStatusLabel, REPORT_COLUMNS_BRIEF, REPORT_COLUMNS_DETAILED,
   reportRow, patrolmanRunSummary, operatorSummary, cancelledJobCount,
-  JOB_TYPES, jobTypeLabel, isResponseJob, jobTypeCounts, rosterDateFor,
+  JOB_TYPES, jobTypeLabel, isResponseJob, jobTypeCounts, rosterDateFor, resolveJobRoster,
 } from "./reportUtils.js";
 import { restoreSession, login as apiLogin, logout as apiLogout, setOnUnauthorized } from "./auth.js";
 import {
@@ -1577,9 +1577,9 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
       </div>
 
       <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
-        {tab === "board" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} />}
-        {tab === "cancelled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="cancelled" />}
-        {tab === "closed" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="emailed" />}
+        {tab === "board" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} roster={roster} />}
+        {tab === "cancelled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="cancelled" roster={roster} />}
+        {tab === "closed" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="emailed" roster={roster} />}
         {(tab === "board" || tab === "cancelled" || tab === "closed") && selected && (
           <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} roster={roster} persist={persist} now={now} session={session} companyName={companyName} logoUrl={logoUrl} onBack={() => selectJob(null)} />
         )}
@@ -1610,7 +1610,7 @@ const BOARD_STATUS_OPTIONS = [
 // dedicated "Cancelled jobs" / "Closed jobs" tabs. Left unset on the main
 // Dispatch board, which defaults to active jobs only and lets Control
 // Room widen the view (or search for anything by number/site/date).
-function Board({ jobs, now, onSelect, lockedStatus }) {
+function Board({ jobs, now, onSelect, lockedStatus, roster }) {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -1710,7 +1710,7 @@ function Board({ jobs, now, onSelect, lockedStatus }) {
               {g.title} ({list.length})
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {list.map((j) => <JobCard key={j.id} job={j} now={now} onClick={() => onSelect(j.id)} />)}
+              {list.map((j) => <JobCard key={j.id} job={j} now={now} onClick={() => onSelect(j.id)} roster={roster} />)}
             </div>
           </div>
         );
@@ -1723,7 +1723,7 @@ function Board({ jobs, now, onSelect, lockedStatus }) {
             Archived — closed 48h+ ago ({archiveMatches.length})
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, opacity: 0.75 }}>
-            {archiveMatches.sort((a, b) => new Date(b.dispatchTime) - new Date(a.dispatchTime)).map((j) => <JobCard key={j.id} job={j} now={now} onClick={() => onSelect(j.id, j)} />)}
+            {archiveMatches.sort((a, b) => new Date(b.dispatchTime) - new Date(a.dispatchTime)).map((j) => <JobCard key={j.id} job={j} now={now} onClick={() => onSelect(j.id, j)} roster={roster} />)}
           </div>
         </div>
       )}
@@ -1731,9 +1731,14 @@ function Board({ jobs, now, onSelect, lockedStatus }) {
   );
 }
 
-function JobCard({ job, now, onClick }) {
+function JobCard({ job, now, onClick, roster }) {
   const t = jobTiming(job, now);
   const borderColor = job.status === "dispatched" && isResponseJob(job) ? (t.level === "breach" ? "var(--breach)" : t.level === "warn" ? "var(--warn)" : "var(--border)") : "var(--border)";
+  // Resolved against the roster (by this job's own dispatch date and
+  // assignee) rather than trusting job.run/assigneeName as snapshotted at
+  // dispatch time — see resolveJobRoster's own comment in reportUtils.js
+  // for why that snapshot can go stale.
+  const { run, patrolmanName } = resolveJobRoster(job, roster);
   return (
     <div onClick={onClick} style={{ padding: "12px 14px", borderRadius: 8, background: "var(--panel)", border: `1px solid ${borderColor}`, cursor: "pointer" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
@@ -1749,11 +1754,11 @@ function JobCard({ job, now, onClick }) {
         <ChevronRight size={15} color="var(--text-dim)" style={{ flexShrink: 0 }} />
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
-        <span style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{job.run} · {job.monitoringCo} · assigned {job.assigneeName}{job.handlingName ? ` · handled by ${job.handlingName}` : ""}</span>
+        <span style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{run} · {job.monitoringCo} · assigned {patrolmanName}{job.handlingName ? ` · handled by ${job.handlingName}` : ""}</span>
         {job.delayReason && <span title={job.delayReason}><AlertTriangle size={14} color="var(--warn)" /></span>}
         {job.status === "dispatched" && !job.onsiteTime && (
           job.acknowledgedAt
-            ? <span title={`Acknowledged by ${job.assigneeName} at ${fmtTime(job.acknowledgedAt)}`}><CheckCircle2 size={14} color="var(--ok)" /></span>
+            ? <span title={`Acknowledged by ${patrolmanName} at ${fmtTime(job.acknowledgedAt)}`}><CheckCircle2 size={14} color="var(--ok)" /></span>
             : <span title="Not yet acknowledged by the patrolman"><Bell size={14} color="var(--warn)" /></span>
         )}
         <JobUrgencyChip job={job} now={now} />
@@ -2450,7 +2455,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   async function downloadPdf() {
     setPdfBusy(true);
     try {
-      await downloadJobAttendancePdf(jobWithPhotos, companyName, now, logoUrl);
+      await downloadJobAttendancePdf(jobWithPhotos, companyName, now, logoUrl, roster);
     } catch (e) {
       showToast("Couldn't generate the PDF — try again.", "error");
     }
@@ -2458,6 +2463,10 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   }
 
   const t = jobTiming(job, now);
+  // Resolved against the roster (by this job's own dispatch date and
+  // assignee) rather than trusting job.run/assigneeName as snapshotted at
+  // dispatch time — see resolveJobRoster's own comment in reportUtils.js.
+  const { run: resolvedRun, patrolmanName: resolvedPatrolman } = resolveJobRoster(job, roster);
 
   function update(patch) {
     const updated = jobs.map((j) => (j.id === job.id ? { ...j, ...patch } : j));
@@ -2708,13 +2717,13 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
         <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
           {job.acknowledgedAt ? (
             <span style={{ color: "var(--ok)", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              <CheckCircle2 size={13} /> Acknowledged by {job.assigneeName} at {fmtTime(job.acknowledgedAt)}
+              <CheckCircle2 size={13} /> Acknowledged by {resolvedPatrolman} at {fmtTime(job.acknowledgedAt)}
               {job.eta && <> — ETA <b>{job.eta.label === "Other" ? job.eta.detail : job.eta.label}</b></>}
               <EtaChip job={job} now={now} />
             </span>
           ) : (
             <span style={{ color: "var(--warn)", display: "flex", alignItems: "center", gap: 6 }}>
-              <Bell size={13} /> Not yet acknowledged by {job.assigneeName}
+              <Bell size={13} /> Not yet acknowledged by {resolvedPatrolman}
             </span>
           )}
         </div>
@@ -2723,7 +2732,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <span style={{ fontSize: 11, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.4 }}>Attending patrolman</span>
         {isArchived ? (
-          <span style={{ fontSize: 12.5 }}>{job.assigneeName}</span>
+          <span style={{ fontSize: 12.5 }}>{resolvedPatrolman}</span>
         ) : (
           <select value={job.assigneeId} onChange={(e) => reassign(e.target.value)} style={{ ...selectStyle, width: "auto", padding: "6px 10px", fontSize: 12.5 }}>
             {patrolmen.map((p) => <option key={p.loginName} value={p.loginName}>{p.displayName} · {p.loginName}</option>)}
@@ -3247,7 +3256,7 @@ function stampPdfFooter(doc) {
   }
 }
 
-async function downloadJobAttendancePdf(job, companyName, now, logoUrl) {
+async function downloadJobAttendancePdf(job, companyName, now, logoUrl, roster) {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "pt" });
   const pageW = doc.internal.pageSize.getWidth();
@@ -3268,6 +3277,7 @@ async function downloadJobAttendancePdf(job, companyName, now, logoUrl) {
   y += 22;
 
   const t = jobTiming(job, now || new Date());
+  const { run: resolvedRun, patrolmanName: resolvedPatrolman } = resolveJobRoster(job, roster);
   const fields = [
     ["Job Ref", job.jobNumber],
     ["Site", job.siteName],
@@ -3278,7 +3288,7 @@ async function downloadJobAttendancePdf(job, companyName, now, logoUrl) {
     ["Docket No", job.docketNo || "—"],
     ["Alarm / area", job.description || "—"],
     ["Status", STATUS_META[job.status]?.label || job.status],
-    ["Attending patrolman", [job.assigneeName, job.run].filter(Boolean).join(" — ") || "—"],
+    ["Attending patrolman", [resolvedPatrolman, resolvedRun].filter(Boolean).join(" — ") || "—"],
     ["Dispatched", fmtDateTime(job.dispatchTime)],
     ["Acknowledged", job.acknowledgedAt ? fmtDateTime(job.acknowledgedAt) : "—"],
     ["Onsite", job.onsiteTime ? fmtDateTime(job.onsiteTime) : "—"],
@@ -3989,7 +3999,7 @@ function PatrolmanView({ session, roster, jobs, persist, outcomePhrases, now }) 
         <Empty text="No jobs dispatched to you yet. New jobs will alert this device the moment control room sends one." />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 520 }}>
-          {mine.map((j) => <JobCard key={j.id} job={j} now={now} onClick={() => setSelectedId(j.id)} />)}
+          {mine.map((j) => <JobCard key={j.id} job={j} now={now} onClick={() => setSelectedId(j.id)} roster={roster} />)}
         </div>
       )}
     </div>

@@ -104,14 +104,28 @@ export function rosterDateFor(iso, timeZone) {
 // to treat as ground truth afterwards: the roster is what actually says
 // who's on which run for a given shift, and it can be corrected or
 // changed after a job's already gone out without that job's snapshot
-// ever catching up. Reports resolve the roster entry for the job's own
-// dispatch date (rollover-aware) and assignee, falling back to the job's
-// stored run/name only when nobody was actually rostered that day (an ad
-// hoc dispatch, or a job older than the roster feature itself).
+// ever catching up. Everywhere a job's run/patrolman is displayed —
+// reports and the live dispatch board alike — resolves the roster entry
+// for the job's own dispatch date (rollover-aware) and assignee instead,
+// falling back to the job's stored run/name only when nobody was
+// actually rostered that day (an ad hoc dispatch, or a job older than
+// the roster feature itself).
 function resolveRosterEntry(job, roster, timeZone) {
   if (!roster || !job.assigneeId) return null;
   const rosterDate = rosterDateFor(job.dispatchTime, timeZone);
   return roster.find((r) => r.date === rosterDate && r.patrolmanLoginName === job.assigneeId) || null;
+}
+
+// Public entry point for the above — used by reportRow/patrolmanRunSummary
+// below, and directly by the live board/job detail views in src/App.jsx
+// so a job's displayed run and patrolman name self-correct the moment the
+// roster is filled in or fixed, without needing the job re-touched.
+export function resolveJobRoster(job, roster, timeZone) {
+  const entry = resolveRosterEntry(job, roster, timeZone);
+  return {
+    run: entry?.run || job.run || "Unassigned",
+    patrolmanName: entry?.patrolmanName || job.assigneeName || "Unassigned",
+  };
 }
 
 export const REPORT_COLUMNS_BRIEF = ["Job #", "Type", "Date", "Time", "Site", "Run", "Patrolman attended", "Operator (dispatched)", "Finalized by", "Status"];
@@ -144,9 +158,7 @@ export function reportRow(job, reportType, timeZone, roster) {
 export function patrolmanRunSummary(filteredJobs, roster, timeZone) {
   const byKey = {};
   filteredJobs.forEach((j) => {
-    const rosterEntry = resolveRosterEntry(j, roster, timeZone);
-    const patrolman = rosterEntry?.patrolmanName || j.assigneeName || "Unassigned";
-    const run = rosterEntry?.run || j.run || "Unassigned";
+    const { run, patrolmanName: patrolman } = resolveJobRoster(j, roster, timeZone);
     const key = `${patrolman}||${run}`;
     byKey[key] = byKey[key] || { patrolman, run, count: 0 };
     byKey[key].count++;
