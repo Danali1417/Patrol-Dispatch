@@ -10,7 +10,7 @@ import {
   STATUS_META, fmtTime, fmtDateTime, isoDateOnly, isoTimeOnly,
   reportStatusLabel, REPORT_COLUMNS_BRIEF, REPORT_COLUMNS_DETAILED,
   reportRow, patrolmanRunSummary, operatorSummary, cancelledJobCount,
-  JOB_TYPES, jobTypeLabel, isResponseJob, jobTypeCounts,
+  JOB_TYPES, jobTypeLabel, isResponseJob, jobTypeCounts, rosterDateFor,
 } from "./reportUtils.js";
 import { restoreSession, login as apiLogin, logout as apiLogout, setOnUnauthorized } from "./auth.js";
 import {
@@ -166,23 +166,11 @@ function todayISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-// Night Patrol runs 1800-0600, spanning midnight — a roster entry for an
-// overnight shift is stored under the date it starts (the evening it's
-// rostered from), so looking it up by the literal calendar date would
-// stop finding that patrolman the moment the clock ticks past midnight,
-// even though their shift still has hours left to run — leaving a job
-// dispatched to them after midnight with no run recorded. Rolling the
-// "roster day" over at 6am instead of midnight, matching the night
-// shift's own end time, keeps every roster lookup resolving to the
-// right entry for as long as a shift that started the previous evening
-// is still active. Day Patrol is unaffected either way, since it only
-// runs during hours already past this rollover.
-const ROSTER_DAY_ROLLOVER_HOUR = 6;
-
+// Today's roster date (see rosterDateFor in reportUtils.js for the
+// 6am-rollover reasoning — this is just that same logic applied to "now"
+// instead of an arbitrary job's dispatch time).
 function rosterDateISO() {
-  const d = new Date();
-  if (d.getHours() < ROSTER_DAY_ROLLOVER_HOUR) d.setDate(d.getDate() - 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return rosterDateFor(new Date().toISOString());
 }
 
 /* ---------------------------------------------------------------
@@ -3456,7 +3444,7 @@ function EmailModal({ job, companyName, onClose, onSent }) {
 
 /* ---------------------- Logs ---------------------- */
 
-function Logs({ jobs, now, role, companyName, logoUrl }) {
+function Logs({ jobs, now, role, companyName, logoUrl, roster }) {
   const [subTab, setSubTab] = useState("overview");
   const showReports = role === "manager";
 
@@ -3486,7 +3474,7 @@ function Logs({ jobs, now, role, companyName, logoUrl }) {
         ))}
       </div>
       {subTab === "overview" && <LogsOverview jobs={jobs} now={now} />}
-      {subTab === "reports" && <Reports jobs={jobs} companyName={companyName} logoUrl={logoUrl} />}
+      {subTab === "reports" && <Reports jobs={jobs} companyName={companyName} logoUrl={logoUrl} roster={roster} />}
     </div>
   );
 }
@@ -3568,7 +3556,7 @@ function LogsOverview({ jobs, now }) {
   );
 }
 
-function Reports({ jobs, companyName, logoUrl }) {
+function Reports({ jobs, companyName, logoUrl, roster }) {
   const [reportType, setReportType] = useState("brief");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -3611,8 +3599,8 @@ function Reports({ jobs, companyName, logoUrl }) {
     .sort((a, b) => new Date(a.dispatchTime) - new Date(b.dispatchTime));
 
   const columns = reportType === "brief" ? REPORT_COLUMNS_BRIEF : REPORT_COLUMNS_DETAILED;
-  const rows = filtered.map((j) => reportRow(j, reportType));
-  const summary = patrolmanRunSummary(filtered);
+  const rows = filtered.map((j) => reportRow(j, reportType, undefined, roster));
+  const summary = patrolmanRunSummary(filtered, roster);
   const operators = operatorSummary(filtered);
   const cancelledCount = cancelledJobCount(filtered);
   const typeCounts = jobTypeCounts(filtered);
@@ -4438,7 +4426,7 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
         {tab === "clients" && <ClientListsManager monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} />}
         {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} />}
-        {tab === "logs" && <Logs jobs={jobs} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} />}
+        {tab === "logs" && <Logs jobs={jobs} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} roster={roster} />}
       </div>
     </div>
   );

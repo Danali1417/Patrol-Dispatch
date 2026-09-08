@@ -7,6 +7,7 @@ import {
 
 const JOBS_KEY = "ops:jobs";
 const COMPANY_NAME_KEY = "ops:companyName";
+const ROSTER_KEY = "ops:roster";
 const DEFAULT_COMPANY_NAME = "Ausgroup";
 
 // Pulls jobs + company name from Supabase and builds everything the PDFs
@@ -16,21 +17,27 @@ const DEFAULT_COMPANY_NAME = "Ausgroup";
 export async function gatherReportData({ timeZone, now }) {
   const window = getReportWindow(timeZone, now);
 
-  const [jobsRaw, companyNameRaw] = await Promise.all([
+  const [jobsRaw, companyNameRaw, rosterRaw] = await Promise.all([
     kvGet(JOBS_KEY),
     kvGet(COMPANY_NAME_KEY),
+    kvGet(ROSTER_KEY),
   ]);
   const allJobs = jobsRaw ? JSON.parse(jobsRaw) : [];
   const companyName = companyNameRaw || DEFAULT_COMPANY_NAME;
+  const roster = rosterRaw ? JSON.parse(rosterRaw) : [];
 
   const filteredJobs = allJobs.filter((j) => {
     if (!j.dispatchTime) return false;
     return j.dispatchTime >= window.startISO && j.dispatchTime < window.endISO;
   });
 
-  const briefRows = filteredJobs.map((j) => reportRow(j, "brief", timeZone));
-  const detailedRows = filteredJobs.map((j) => reportRow(j, "detailed", timeZone));
-  const summary = patrolmanRunSummary(filteredJobs);
+  // Resolves each job's patrolman/run against the roster (by dispatch date
+  // and assignee login) rather than trusting job.run/assigneeName as
+  // recorded at dispatch time — see resolveRosterEntry in reportUtils.js
+  // for why that snapshot can go stale.
+  const briefRows = filteredJobs.map((j) => reportRow(j, "brief", timeZone, roster));
+  const detailedRows = filteredJobs.map((j) => reportRow(j, "detailed", timeZone, roster));
+  const summary = patrolmanRunSummary(filteredJobs, roster, timeZone);
   const operators = operatorSummary(filteredJobs);
   const cancelledCount = cancelledJobCount(filteredJobs);
   const typeCounts = jobTypeCounts(filteredJobs);
