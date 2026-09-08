@@ -81,18 +81,52 @@ export function reportStatusLabel(status) {
   return STATUS_META[status]?.label || status;
 }
 
+// Night Patrol runs 1800-0600, spanning midnight — a roster entry for an
+// overnight shift is stored under the date it starts (the evening it's
+// rostered from). Matches src/App.jsx's own rosterDateISO()/
+// ROSTER_DAY_ROLLOVER_HOUR (that function is now a thin wrapper around
+// this one, for "today"); kept here too since resolveRosterEntry below
+// needs it for an arbitrary job's dispatch time, not just "now".
+export const ROSTER_DAY_ROLLOVER_HOUR = 6;
+export function rosterDateFor(iso, timeZone) {
+  const dateOnly = isoDateOnly(iso, timeZone);
+  const hour = Number(isoTimeOnly(iso, timeZone).split(":")[0]);
+  if (hour >= ROSTER_DAY_ROLLOVER_HOUR) return dateOnly;
+  const [y, m, d] = dateOnly.split("-").map(Number);
+  const rolled = new Date(Date.UTC(y, m - 1, d - 1));
+  return `${rolled.getUTCFullYear()}-${String(rolled.getUTCMonth() + 1).padStart(2, "0")}-${String(rolled.getUTCDate()).padStart(2, "0")}`;
+}
+
+// A site's own "default run/zone" (set once, when the site was created)
+// gets snapshotted onto a job as `job.run` at dispatch time as a
+// fallback when the assigned patrolman isn't rostered anywhere that day
+// — useful for picking a sensible default while dispatching, but wrong
+// to treat as ground truth afterwards: the roster is what actually says
+// who's on which run for a given shift, and it can be corrected or
+// changed after a job's already gone out without that job's snapshot
+// ever catching up. Reports resolve the roster entry for the job's own
+// dispatch date (rollover-aware) and assignee, falling back to the job's
+// stored run/name only when nobody was actually rostered that day (an ad
+// hoc dispatch, or a job older than the roster feature itself).
+function resolveRosterEntry(job, roster, timeZone) {
+  if (!roster || !job.assigneeId) return null;
+  const rosterDate = rosterDateFor(job.dispatchTime, timeZone);
+  return roster.find((r) => r.date === rosterDate && r.patrolmanLoginName === job.assigneeId) || null;
+}
+
 export const REPORT_COLUMNS_BRIEF = ["Job #", "Type", "Date", "Time", "Site", "Run", "Patrolman attended", "Operator (dispatched)", "Finalized by", "Status"];
 export const REPORT_COLUMNS_DETAILED = [...REPORT_COLUMNS_BRIEF, "Onsite time", "Offsite time", "Results", "Alarm description"];
 
-export function reportRow(job, reportType, timeZone) {
+export function reportRow(job, reportType, timeZone, roster) {
+  const rosterEntry = resolveRosterEntry(job, roster, timeZone);
   const base = [
     job.jobNumber,
     jobTypeLabel(job.jobType),
     isoDateOnly(job.dispatchTime, timeZone),
     isoTimeOnly(job.dispatchTime, timeZone),
     job.siteName,
-    job.run || "—",
-    job.assigneeName || "—",
+    rosterEntry?.run || job.run || "—",
+    rosterEntry?.patrolmanName || job.assigneeName || "—",
     job.dispatchedByName || "—",
     job.handlingName || "—",
     reportStatusLabel(job.status),
@@ -107,11 +141,12 @@ export function reportRow(job, reportType, timeZone) {
   ];
 }
 
-export function patrolmanRunSummary(filteredJobs) {
+export function patrolmanRunSummary(filteredJobs, roster, timeZone) {
   const byKey = {};
   filteredJobs.forEach((j) => {
-    const patrolman = j.assigneeName || "Unassigned";
-    const run = j.run || "Unassigned";
+    const rosterEntry = resolveRosterEntry(j, roster, timeZone);
+    const patrolman = rosterEntry?.patrolmanName || j.assigneeName || "Unassigned";
+    const run = rosterEntry?.run || j.run || "Unassigned";
     const key = `${patrolman}||${run}`;
     byKey[key] = byKey[key] || { patrolman, run, count: 0 };
     byKey[key].count++;
