@@ -125,6 +125,7 @@ export function resolveJobRoster(job, roster, timeZone) {
   return {
     run: entry?.run || job.run || "Unassigned",
     patrolmanName: entry?.patrolmanName || job.assigneeName || "Unassigned",
+    securityLicenceNumber: entry?.securityLicenceNumber || "",
   };
 }
 

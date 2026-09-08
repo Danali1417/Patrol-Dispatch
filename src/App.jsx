@@ -2455,7 +2455,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   async function downloadPdf() {
     setPdfBusy(true);
     try {
-      await downloadJobAttendancePdf(jobWithPhotos, companyName, now, logoUrl, roster);
+      await downloadJobAttendancePdf(jobWithPhotos, companyName, now, logoUrl, roster, patrolmen);
     } catch (e) {
       showToast("Couldn't generate the PDF — try again.", "error");
     }
@@ -3256,7 +3256,7 @@ function stampPdfFooter(doc) {
   }
 }
 
-async function downloadJobAttendancePdf(job, companyName, now, logoUrl, roster) {
+async function downloadJobAttendancePdf(job, companyName, now, logoUrl, roster, patrolmen) {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "pt" });
   const pageW = doc.internal.pageSize.getWidth();
@@ -3277,7 +3277,12 @@ async function downloadJobAttendancePdf(job, companyName, now, logoUrl, roster) 
   y += 22;
 
   const t = jobTiming(job, now || new Date());
-  const { run: resolvedRun, patrolmanName: resolvedPatrolman } = resolveJobRoster(job, roster);
+  const { run: resolvedRun, patrolmanName: resolvedPatrolman, securityLicenceNumber: rosterLicence } = resolveJobRoster(job, roster);
+  // The roster entry for this shift carries the licence number when one's
+  // been recorded there; otherwise fall back to whatever's on the
+  // assignee's own account (e.g. an ad hoc dispatch with no roster entry
+  // that day).
+  const licenceNumber = rosterLicence || patrolmen?.find((p) => p.loginName === job.assigneeId)?.securityLicenceNumber || "";
   const fields = [
     ["Job Ref", job.jobNumber],
     ["Site", job.siteName],
@@ -3289,6 +3294,7 @@ async function downloadJobAttendancePdf(job, companyName, now, logoUrl, roster) 
     ["Alarm / area", job.description || "—"],
     ["Status", STATUS_META[job.status]?.label || job.status],
     ["Attending patrolman", [resolvedPatrolman, resolvedRun].filter(Boolean).join(" — ") || "—"],
+    ["Security licence no.", licenceNumber || "—"],
     ["Dispatched", fmtDateTime(job.dispatchTime)],
     ["Acknowledged", job.acknowledgedAt ? fmtDateTime(job.acknowledgedAt) : "—"],
     ["Onsite", job.onsiteTime ? fmtDateTime(job.onsiteTime) : "—"],
