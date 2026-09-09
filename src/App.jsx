@@ -189,14 +189,14 @@ function setHolidayDates(dates) {
 }
 
 // SLA minutes depend on both the day of week and time of day:
-//   Mon-Fri 06:00-18:00 -> 45          Mon-Fri 18:00-06:00 -> 90
+//   Mon-Fri 06:00-18:00 -> 90          Mon-Fri 18:00-06:00 -> 45
 //   Weekend/holiday 06:00-18:00 -> 60  Weekend/holiday 18:00-06:00 -> 45
 function slaWindowMinutes(date) {
   const day = date.getDay(); // 0 = Sunday ... 6 = Saturday
   const isWeekendOrHoliday = day === 0 || day === 6 || holidayDateSet.has(isoDateOnly(date));
   const isDayShift = date.getHours() >= 6 && date.getHours() < 18;
   if (isWeekendOrHoliday) return isDayShift ? 60 : 45;
-  return isDayShift ? 45 : 90;
+  return isDayShift ? 90 : 45;
 }
 
 // Key pickup/drop-off jobs carry a "do this by HH:MM" deadline instead of
