@@ -9,6 +9,7 @@ import { requireRole, requireSession } from "./_lib/auth.js";
 import { kvGet, kvGetWithMeta, kvGetUpdatedAt, kvSet, kvQueryPrefix, kvDelete, kvDeletePrefix } from "./_lib/supabase.js";
 import { sendPushToRole, sendPushToPatrolman } from "./_lib/push.js";
 import { JOB_ARCHIVE_PREFIX, JOB_PHOTOS_PREFIX, JOB_CHAT_PREFIX } from "./_lib/jobArchive.js";
+import { createUploadUrl, createReadUrl } from "./_lib/storage.js";
 
 const PUBLIC_READ_KEYS = new Set(["ops:logo", "ops:companyName"]);
 // Only a manager edits the Monitoring/Bureau master lists (Manager >
@@ -200,6 +201,43 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true });
     } catch (err) {
       console.error("kv reset (bulk delete) failed:", err);
+      return res.status(500).json({ error: String(err?.message || err) });
+    }
+  }
+
+  // A full-resolution attendance photo original is too large for this
+  // app's own functions to handle in one request (see MAX_ATTENDANCE_PHOTOS's
+  // comment in App.jsx), so the browser uploads it straight to Supabase
+  // Storage — this just hands back a short-lived, self-authorizing URL to
+  // PUT it to. Same role trust as saving the compressed copy alongside it.
+  if (req.method === "POST" && req.query?.photoUploadUrl === "1") {
+    const session = await requireRole(req, res, ["manager", "operator", "patrolman"]);
+    if (!session) return;
+    const { jobId, ext } = req.body || {};
+    if (!jobId) return res.status(400).json({ error: "jobId is required" });
+    try {
+      const safeExt = String(ext || "jpg").replace(/[^a-z0-9]/gi, "").slice(0, 8) || "jpg";
+      const path = `${jobId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${safeExt}`;
+      const { uploadUrl, path: storedPath } = await createUploadUrl(path);
+      return res.status(200).json({ path: storedPath, uploadUrl });
+    } catch (err) {
+      console.error("photo upload URL failed:", err);
+      return res.status(500).json({ error: String(err?.message || err) });
+    }
+  }
+
+  // Mints a fresh signed link to view/download one original — see
+  // createReadUrl's own comment for why this is never cached or stored.
+  if (req.method === "GET" && req.query?.photoOriginal === "1") {
+    const session = await requireSession(req, res);
+    if (!session) return;
+    const path = req.query?.path;
+    if (!path) return res.status(400).json({ error: "path is required" });
+    try {
+      const url = await createReadUrl(path);
+      return res.status(200).json({ url });
+    } catch (err) {
+      console.error("photo original URL failed:", err);
       return res.status(500).json({ error: String(err?.message || err) });
     }
   }

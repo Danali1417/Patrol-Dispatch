@@ -21,6 +21,7 @@
 
 import { isMailConfigured, getMailFrom, createMailTransporter } from "./mail.js";
 import { kvGet, kvSet, kvSetSearchable, kvGetPrefixMissingSearch, kvQueryPrefix, kvDelete } from "./supabase.js";
+import { deleteAllUnderPrefix } from "./storage.js";
 import { fmtDateTime } from "../../src/reportUtils.js";
 
 const JOBS_KEY = "ops:jobs";
@@ -95,6 +96,20 @@ function photoAttachmentsFor(job, photos) {
 // etc). Left in place (and simply retried on the next day's cron) if
 // sending fails or isn't configured, so a bad send or a missing env var
 // never loses the only copy of a photo.
+// Best-effort cleanup for a job's full-resolution originals in Supabase
+// Storage (see storage.js) — called everywhere below that the compressed
+// copies in kv_store are also considered done with, so both live/die on
+// the same schedule. Never allowed to fail the caller: losing track of an
+// original just means no "view original" link survives, never a failed
+// archive sweep.
+async function cleanupOriginals(jobId) {
+  try {
+    await deleteAllUnderPrefix(jobId);
+  } catch (err) {
+    console.error(`original photo cleanup failed for job ${jobId}:`, err);
+  }
+}
+
 async function backupAndDeletePhotos(job, { transporter } = {}) {
   const photosKey = `${JOB_PHOTOS_PREFIX}${job.id}`;
   const raw = await kvGet(photosKey);
@@ -104,11 +119,13 @@ async function backupAndDeletePhotos(job, { transporter } = {}) {
   try { photos = JSON.parse(raw); } catch (e) { return "none"; }
   if (!Array.isArray(photos) || photos.length === 0) {
     await kvDelete(photosKey);
+    await cleanupOriginals(job.id);
     return "none";
   }
 
   if (job.photosBackedUpAt) {
     await kvDelete(photosKey);
+    await cleanupOriginals(job.id);
     return "already-sent";
   }
 
@@ -118,6 +135,7 @@ async function backupAndDeletePhotos(job, { transporter } = {}) {
   const attachments = photoAttachmentsFor(job, photos);
   if (!attachments.length) {
     await kvDelete(photosKey);
+    await cleanupOriginals(job.id);
     return "none";
   }
 
@@ -143,6 +161,7 @@ async function backupAndDeletePhotos(job, { transporter } = {}) {
     return "failed";
   }
   await kvDelete(photosKey);
+  await cleanupOriginals(job.id);
   return "sent";
 }
 
