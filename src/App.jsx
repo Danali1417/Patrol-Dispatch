@@ -166,6 +166,13 @@ function todayISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// dd-mm-yy, for downloaded filenames — todayISO() above stays yyyy-mm-dd
+// since <input type="date"> requires that format.
+function todayDDMMYY() {
+  const d = new Date();
+  return `${String(d.getDate()).padStart(2, "0")}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getFullYear()).slice(-2)}`;
+}
+
 // Today's roster date (see rosterDateFor in reportUtils.js for the
 // 6am-rollover reasoning — this is just that same logic applied to "now"
 // instead of an arbitrary job's dispatch time).
@@ -3722,7 +3729,8 @@ function Reports({ jobs, companyName, logoUrl, roster }) {
     setBusy(true);
     try {
       const doc = await buildReportDoc();
-      doc.save(`${reportType}-report-${todayISO()}.pdf`);
+      const label = reportType.charAt(0).toUpperCase() + reportType.slice(1);
+      doc.save(`${label}-Report-${todayDDMMYY()}.pdf`);
       showToast("Report downloaded.");
     } catch (e) {
       showToast("Couldn't generate the PDF — try again.", "error");
