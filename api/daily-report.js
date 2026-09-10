@@ -41,7 +41,7 @@ import { getZonedNow } from "./_lib/time.js";
 import { kvGet, kvSet } from "./_lib/supabase.js";
 import { gatherReportData } from "./_lib/buildReport.js";
 import { sendReportEmail } from "./_lib/mailer.js";
-import { archiveOldJobs } from "./_lib/jobArchive.js";
+import { archiveOldJobs, backfillOrphanedPhotoBackups } from "./_lib/jobArchive.js";
 import { isMailConfigured, getMailFrom, createMailTransporter } from "./_lib/mail.js";
 
 const SENT_DATE_KEY = "ops:dailyReportSentDate";
@@ -98,6 +98,20 @@ function isAuthorized(req) {
 export default async function handler(req, res) {
   if (!isAuthorized(req)) {
     return res.status(401).json({ error: process.env.CRON_SECRET ? "Unauthorized" : "CRON_SECRET is not configured on the server" });
+  }
+
+  // Manual, one-off trigger for recovering photo backups stranded by a
+  // past mail outage (see backfillOrphanedPhotoBackups in jobArchive.js) —
+  // separate from the daily report/archive flow below, and safe to re-run.
+  // Visit /api/daily-report?backfillPhotos=1&secret=YOUR_CRON_SECRET once.
+  if (req.query?.backfillPhotos === "1") {
+    try {
+      const result = await backfillOrphanedPhotoBackups();
+      return res.status(200).json({ backfill: result });
+    } catch (err) {
+      console.error("photo backup backfill failed:", err);
+      return res.status(500).json({ error: String(err?.message || err) });
+    }
   }
 
   const timeZone = process.env.REPORT_TIMEZONE || "Australia/Sydney";

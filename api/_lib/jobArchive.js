@@ -20,7 +20,7 @@
 // minutes.
 
 import { isMailConfigured, getMailFrom, createMailTransporter } from "./mail.js";
-import { kvGet, kvSet, kvSetSearchable, kvGetPrefixMissingSearch, kvDelete } from "./supabase.js";
+import { kvGet, kvSet, kvSetSearchable, kvGetPrefixMissingSearch, kvQueryPrefix, kvDelete } from "./supabase.js";
 import { fmtDateTime } from "../../src/reportUtils.js";
 
 const JOBS_KEY = "ops:jobs";
@@ -144,6 +144,45 @@ async function backupAndDeletePhotos(job, { transporter } = {}) {
   }
   await kvDelete(photosKey);
   return "sent";
+}
+
+// One-time (safe to re-run) catch-up for jobs whose photo backup email
+// never went out — notably every job that got archived while outbound
+// mail was blocked (see README). archiveOldJobs() above only retries a
+// failed send for as long as a job is still on the live ops:jobs list;
+// once a job's 48h sweep runs, it moves to the archive and drops out of
+// that list for good, so a failure during that exact sweep stranded its
+// photos in Supabase with no further retry ever scheduled. This instead
+// walks every JOB_PHOTOS_PREFIX row not tied to a still-live job — i.e.
+// exactly the ones archiveOldJobs will never look at again — and reuses
+// backupAndDeletePhotos to resend and clean each one up now that mail is
+// working. Capped at 500 rows per call (kvQueryPrefix's ordering is most
+// recently touched first) — call again if the result reports exactly 500
+// checked, since more may remain.
+export async function backfillOrphanedPhotoBackups({ transporter } = {}) {
+  const [liveRaw, photoRows] = await Promise.all([
+    kvGet(JOBS_KEY),
+    kvQueryPrefix(JOB_PHOTOS_PREFIX, { limit: 500 }),
+  ]);
+
+  let liveJobs;
+  try { liveJobs = JSON.parse(liveRaw || "[]"); } catch (e) { liveJobs = []; }
+  const liveIds = new Set((Array.isArray(liveJobs) ? liveJobs : []).map((j) => j.id));
+
+  const orphaned = photoRows.filter((row) => !liveIds.has(row.key.slice(JOB_PHOTOS_PREFIX.length)));
+
+  const counts = { sent: 0, none: 0, failed: 0, "not-configured": 0, "already-sent": 0 };
+  await mapWithConcurrency(orphaned, 5, async (row) => {
+    const id = row.key.slice(JOB_PHOTOS_PREFIX.length);
+    const archivedRaw = await kvGet(`${JOB_ARCHIVE_PREFIX}${id}`);
+    let job = null;
+    try { job = archivedRaw ? JSON.parse(archivedRaw) : null; } catch (e) { job = null; }
+    if (!job) job = { id }; // archive record missing/malformed — still recover the photos with whatever we've got
+    const outcome = await backupAndDeletePhotos(job, { transporter });
+    counts[outcome] = (counts[outcome] || 0) + 1;
+  });
+
+  return { checked: photoRows.length, orphaned: orphaned.length, ...counts };
 }
 
 // Job chat lives in its own key while a job is live (see api/kv.js) so
