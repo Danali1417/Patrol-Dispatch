@@ -20,7 +20,7 @@ import {
 } from "./accountsApi.js";
 import { getPushStatus, enableJobAlerts, disableJobAlerts, resyncJobAlertsIfEnabled, notifyJobDispatch, notifyStandDown } from "./push.js";
 import { reverseGeocode, fetchStaticMap } from "./geocode.js";
-import { fetchJobPhotos, persistJobPhotos } from "./jobPhotos.js";
+import { fetchJobPhotos, persistJobPhotos, uploadOriginalPhoto, fetchOriginalPhotoUrl } from "./jobPhotos.js";
 import { loadJobDraft, saveJobDraft, clearJobDraft } from "./jobDraft.js";
 import { fetchJobChat, sendJobChatMessage } from "./jobChat.js";
 import { searchArchivedJobs, fetchArchivedJobsInRange, resetArchiveAndPhotos } from "./jobArchive.js";
@@ -254,6 +254,23 @@ function openDataUrlImage(dataUrl) {
     `<title>Attendance photo</title><body style="margin:0;background:#000;display:flex;align-items:center;justify-content:center;min-height:100vh;"><img src="${dataUrl}" style="max-width:100%;max-height:100vh;object-fit:contain;"></body>`
   );
   win.document.close();
+}
+
+// The full-resolution original is never embedded in the page (unlike the
+// compressed dataUrl copy above) — only reachable through a signed link
+// minted on demand (see fetchOriginalPhotoUrl), since a saved link would
+// eventually expire. The blank tab is opened synchronously, before the
+// signed-URL fetch, so this still counts as a direct response to the
+// click and popup blockers don't step in.
+async function openOriginalPhoto(path, showToast) {
+  const win = window.open();
+  const url = await fetchOriginalPhotoUrl(path);
+  if (!url) {
+    if (win) win.close();
+    showToast?.("Couldn't load the original photo — try again.", "error");
+    return;
+  }
+  if (win) win.location.href = url;
 }
 
 // Free, key-less embedded map snapshot (OpenStreetMap's own official
@@ -2910,6 +2927,15 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
                       </>
                     )}
                   </div>
+                  {p.originalPath && (
+                    <div
+                      onClick={() => openOriginalPhoto(p.originalPath, showToast)}
+                      title="Open the full-resolution original from the patrolman's phone — useful if this preview looks compressed or trimmed"
+                      style={{ fontSize: 9.5, color: "var(--accent)", cursor: "pointer", marginTop: 2 }}
+                    >
+                      View original
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -4137,7 +4163,18 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
     const locationName = location ? await reverseGeocode(location.lat, location.lon) : null;
     const results = [];
     for (const f of files.slice(0, MAX_ATTENDANCE_PHOTOS - photos.length)) {
-      try { results.push(await watermarkPhoto(f, job.jobNumber, location, locationName)); } catch (err) { /* skip bad file */ }
+      try {
+        // The untouched camera file is uploaded to Storage in parallel with
+        // building the compressed preview — best-effort (see
+        // uploadOriginalPhoto's own comment): a failed original upload just
+        // means no "view original" link on this one photo, never a failed
+        // capture.
+        const [photo, originalPath] = await Promise.all([
+          watermarkPhoto(f, job.jobNumber, location, locationName),
+          uploadOriginalPhoto(job.id, f),
+        ]);
+        results.push(originalPath ? { ...photo, originalPath } : photo);
+      } catch (err) { /* skip bad file */ }
     }
     setPhotos((p) => [...p, ...results]);
     setBusy(false);
@@ -4153,7 +4190,10 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
     setBusy(true);
     const results = [];
     for (const f of files.slice(0, MAX_ATTENDANCE_PHOTOS - photos.length)) {
-      try { results.push(await resizePhotoPlain(f)); } catch (err) { /* skip bad file */ }
+      try {
+        const [photo, originalPath] = await Promise.all([resizePhotoPlain(f), uploadOriginalPhoto(job.id, f)]);
+        results.push(originalPath ? { ...photo, originalPath } : photo);
+      } catch (err) { /* skip bad file */ }
     }
     setPhotos((p) => [...p, ...results]);
     setBusy(false);

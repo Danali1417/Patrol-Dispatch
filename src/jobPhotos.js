@@ -41,3 +41,36 @@ export async function persistJobPhotos(jobId, photos) {
     body: JSON.stringify({ key: `${JOB_PHOTOS_PREFIX}${jobId}`, value: JSON.stringify(photos) }),
   });
 }
+
+// Uploads the untouched camera file straight to Supabase Storage (see
+// api/_lib/storage.js) — best-effort and never throws: the compressed
+// preview built alongside it (watermarkPhoto/resizePhotoPlain in App.jsx)
+// is already saved everywhere else in the app, so a flaky original upload
+// should never block or fail a patrolman's photo capture, just leave that
+// one photo without a "view original" link.
+export async function uploadOriginalPhoto(jobId, file) {
+  try {
+    const ext = (file.name || "").split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+    const signRes = await apiFetch("/api/kv?photoUploadUrl=1", { method: "POST", body: JSON.stringify({ jobId, ext }) });
+    if (!signRes.ok) return null;
+    const { path, uploadUrl } = await signRes.json();
+    const putRes = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": file.type || "image/jpeg" }, body: file });
+    return putRes.ok ? path : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// A fresh signed link to view/download one original — minted on demand,
+// never cached, since a saved link would eventually expire (see
+// createReadUrl's own comment in api/_lib/storage.js).
+export async function fetchOriginalPhotoUrl(path) {
+  try {
+    const res = await apiFetch(`/api/kv?photoOriginal=1&path=${encodeURIComponent(path)}`);
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => ({}));
+    return data.url || null;
+  } catch (e) {
+    return null;
+  }
+}
