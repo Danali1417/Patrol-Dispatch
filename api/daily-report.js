@@ -16,10 +16,17 @@
 // Required env vars (set in Vercel → Project Settings → Environment Variables):
 //   RESEND_API_KEY        from https://resend.com/api-keys — see api/_lib/mail.js
 //   MAIL_FROM             a sender address on a domain verified in Resend
-//   REPORT_RECIPIENTS     comma-separated recipient email address(es) —
-//                         also where archived jobs' attendance photos get
-//                         emailed before being deleted from Supabase
-//                         (see jobArchive.js / README section 12)
+//   REPORT_RECIPIENTS     comma-separated recipient email address(es) for
+//                         the daily report itself (and this function's own
+//                         failure alert). Separate from JOB_BACKUP_RECIPIENTS
+//                         below, which archiveOldJobs() uses instead —
+//                         they can be the same addresses or different ones.
+//   JOB_BACKUP_RECIPIENTS comma-separated recipient email address(es) —
+//                         where closed/cancelled jobs' attendance photos
+//                         get emailed before being deleted from Supabase,
+//                         both the immediate send on close/cancel and the
+//                         48h archive-sweep fallback (see jobArchive.js /
+//                         README section 12)
 //   CRON_SECRET           any random string — protects this endpoint from
 //                         being triggered by anyone who finds the URL.
 //                         Vercel automatically sends it as a Bearer token

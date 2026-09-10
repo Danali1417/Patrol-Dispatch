@@ -157,7 +157,8 @@ account used this way.
    |---|---|
    | `RESEND_API_KEY` | the API key from step 3 |
    | `MAIL_FROM` | a sender address on your verified domain, e.g. `Ausgroup Dispatch <dispatch@yourdomain.com>` |
-   | `REPORT_RECIPIENTS` | recipient email address(es), comma-separated |
+   | `REPORT_RECIPIENTS` | who gets the daily report, comma-separated |
+   | `JOB_BACKUP_RECIPIENTS` | who gets closed/cancelled jobs' photo backups (section 11), comma-separated — can be the same address(es) as `REPORT_RECIPIENTS` or different ones |
    | `CRON_SECRET` | any random string — protects the endpoint from being triggered by anyone who finds the URL |
 
 5. Redeploy (Vercel → Deployments → ⋯ → Redeploy) so the new variables take effect.
@@ -372,11 +373,10 @@ Photos are by far the largest thing this app stores — a job's text
 fast, and it's what actually risks the database's storage/transfer
 limits over months and years, not the text.
 
-So every job's attendance photos get emailed as attachments to the
-same `REPORT_RECIPIENTS` the daily report already goes to (section 4)
-— one email per job, along with its result and outcome notes as the
-message body — before being deleted from Supabase. That happens at
-one of two points:
+So every job's attendance photos get emailed as attachments to
+`JOB_BACKUP_RECIPIENTS` (section 4) — one email per job, along with
+its result and outcome notes as the message body — before being
+deleted from Supabase. That happens at one of two points:
 
 1. **Immediately**, the moment a job is closed or cancelled (from
    Control Room's "Send email now", "Mark as sent/closed", or
@@ -397,7 +397,7 @@ shows a small note that they were emailed as a backup and removed,
 instead of just silently looking like there never were any.
 
 If sending that email fails for any reason (bad credentials, a Resend
-hiccup, `RESEND_API_KEY`/`MAIL_FROM`/`REPORT_RECIPIENTS` not
+hiccup, `RESEND_API_KEY`/`MAIL_FROM`/`JOB_BACKUP_RECIPIENTS` not
 configured yet), the photos are simply left in place — the archive
 sweep keeps retrying once a day for as long as it takes, and only
 ever deletes right after a send actually succeeds. A failed send can
