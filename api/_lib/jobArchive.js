@@ -19,7 +19,7 @@
 // once a day is plenty for a size problem that grows over weeks, not
 // minutes.
 
-import nodemailer from "nodemailer";
+import { isMailConfigured, getMailFrom, createMailTransporter } from "./mail.js";
 import { kvGet, kvSet, kvSetSearchable, kvGetPrefixMissingSearch, kvDelete } from "./supabase.js";
 import { fmtDateTime } from "../../src/reportUtils.js";
 
@@ -53,11 +53,11 @@ const ARCHIVE_AFTER_MS = 48 * 60 * 60 * 1000;
 const REPORT_TIMEZONE = process.env.REPORT_TIMEZONE || "Australia/Sydney";
 
 // Runs `fn` over `items` with at most `limit` in flight at once — used
-// below so a backlog of jobs to archive (each needing its own Gmail SMTP
-// round trip for the photo backup, plus a couple of Supabase calls) runs
+// below so a backlog of jobs to archive (each needing its own SMTP round
+// trip for the photo backup, plus a couple of Supabase calls) runs
 // concurrently instead of one at a time. Sequential was the actual cause
 // of this whole cron timing out on a day with more than a handful of
-// jobs queued up: at up to 10s per SMTP call (see defaultTransporter's
+// jobs queued up: at up to 10s per SMTP call (see createMailTransporter's
 // timeouts), even a modest backlog blew straight through the 60s ceiling
 // (vercel.json) before the function ever reached building or sending the
 // report itself. Each item here touches its own job's keys, never a
@@ -71,19 +71,6 @@ async function mapWithConcurrency(items, limit, fn) {
     }
   }
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-}
-
-function defaultTransporter() {
-  // Short timeouts (nodemailer defaults to up to 2 minutes) so one bad
-  // connection can't eat the whole 60s cron budget (vercel.json) and
-  // starve every other job still waiting for its own backup this run.
-  return nodemailer.createTransport({
-    service: "gmail",
-    auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 10000,
-  });
 }
 
 function photoAttachmentsFor(job, photos) {
@@ -126,7 +113,7 @@ async function backupAndDeletePhotos(job, { transporter } = {}) {
   }
 
   const to = process.env.REPORT_RECIPIENTS;
-  if (!to || !process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) return "not-configured";
+  if (!to || !isMailConfigured()) return "not-configured";
 
   const attachments = photoAttachmentsFor(job, photos);
   if (!attachments.length) {
@@ -149,8 +136,8 @@ async function backupAndDeletePhotos(job, { transporter } = {}) {
   ].join("\n");
 
   try {
-    const send = transporter || defaultTransporter();
-    await send.sendMail({ from: process.env.GMAIL_USER, to, subject, text, attachments });
+    const send = transporter || createMailTransporter();
+    await send.sendMail({ from: getMailFrom(), to, subject, text, attachments });
   } catch (err) {
     console.error(`photo backup email failed for job ${job.id}:`, err);
     return "failed";
