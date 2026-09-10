@@ -123,7 +123,7 @@ a plain-text password and leaves already-hashed ones untouched.
 
 Every morning, a scheduled job can email a Brief and Detailed report PDF
 (covering the previous 06:00–06:00 shift day) to whoever you choose,
-sent from a Gmail account.
+sent via [Resend](https://resend.com).
 
 This same daily job also does something unrelated to email: it sweeps
 jobs closed 48+ hours ago off the live board (see section 8). That
@@ -131,22 +131,36 @@ sweep runs every time this endpoint fires, whether or not you set up
 email at all — but it still needs `CRON_SECRET` below configured, since
 that's what lets Vercel's daily trigger call this endpoint in the first
 place. **If you skip this section entirely, set `CRON_SECRET` anyway**
-so the board keeps itself tidy — the email variables (`GMAIL_USER`
+so the board keeps itself tidy — the email variables (`RESEND_API_KEY`
 etc.) can stay unset.
 
-1. In the Gmail account you want to send from: turn on **2-Step
-   Verification**, then create an **App Password** at
-   [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords).
-2. In Vercel → your project → **Settings → Environment Variables**, add:
+Email is sent through Resend rather than a personal Gmail account
+because that's what Resend (and other transactional-email providers)
+are actually built for: an app authenticating with an API key to send
+on a business's behalf. A personal Gmail account logged into repeatedly
+and automatically from a server, with no browser or device behind it,
+looks exactly like the pattern Google's abuse detection flags as a
+compromised/bot account — which is what eventually happens to a Gmail
+account used this way.
+
+1. Sign up at [resend.com](https://resend.com) (there's a free tier).
+2. **Verify a sending domain**: Resend → **Domains** → add your domain,
+   then add the DNS records it gives you (SPF/DKIM) at your domain
+   registrar. This can take a few minutes to a few hours to verify.
+   Resend's own `onboarding@resend.dev` sandbox address only delivers to
+   your own Resend account email — you need a verified domain to send
+   real report/client emails.
+3. Create an API key: Resend → **API Keys** → **Create API Key**.
+4. In Vercel → your project → **Settings → Environment Variables**, add:
 
    | Name | Value |
    |---|---|
-   | `GMAIL_USER` | the Gmail address to send from |
-   | `GMAIL_APP_PASSWORD` | the 16-character App Password from step 1 |
+   | `RESEND_API_KEY` | the API key from step 3 |
+   | `MAIL_FROM` | a sender address on your verified domain, e.g. `Ausgroup Dispatch <dispatch@yourdomain.com>` |
    | `REPORT_RECIPIENTS` | recipient email address(es), comma-separated |
    | `CRON_SECRET` | any random string — protects the endpoint from being triggered by anyone who finds the URL |
 
-3. Redeploy (Vercel → Deployments → ⋯ → Redeploy) so the new variables take effect.
+5. Redeploy (Vercel → Deployments → ⋯ → Redeploy) so the new variables take effect.
 
 That's it — Vercel Cron calls the report job once a day, timed to land
 close to 07:00 Australia/Sydney (Vercel's free plan only allows daily
@@ -165,15 +179,15 @@ you use to log into the app day-to-day) — not literal text.
 
 This sends a real email right away without affecting the next scheduled
 send. It responds with JSON showing what happened (jobs found, recipients,
-or any error) — useful for confirming Gmail delivery actually works before
-relying on the schedule.
+or any error) — useful for confirming Resend delivery actually works
+before relying on the schedule.
 
-**If a day's report fails to send** (a Gmail error, or the single daily
+**If a day's report fails to send** (a Resend error, or the single daily
 cron fire landing outside the accepted window), the same recipients get a
 short alert email saying so, with a link to the `test=1` URL above to send
 it immediately — so a bad day shows up in an inbox instead of only in
-Vercel's function logs. This alert reuses the same Gmail credentials as the
-report itself, so it can't help if those credentials are what's broken.
+Vercel's function logs. This alert reuses the same Resend credentials as
+the report itself, so it can't help if those credentials are what's broken.
 
 Optional environment variables:
 
@@ -186,13 +200,13 @@ Optional environment variables:
 ## 5. Emailing a client outcome report directly (optional)
 
 Once a job is reviewed, Control Room's "Prepare client email" screen can
-either send the outcome straight to the client's inbox (from the same
-Gmail account as the daily report) or just be marked as sent/closed if
+either send the outcome straight to the client's inbox (via the same
+Resend account as the daily report) or just be marked as sent/closed if
 it was handled another way (phone call, a personal email, etc.) — both
 options are on the same screen.
 
-This reuses `GMAIL_USER` / `GMAIL_APP_PASSWORD` from step 4 above. One
-more variable is needed:
+This reuses `RESEND_API_KEY` / `MAIL_FROM` from step 4 above. One more
+variable is needed:
 
 | Name | Value |
 |---|---|
@@ -382,8 +396,8 @@ the photo bytes are gone; opening an old archived job that had photos
 shows a small note that they were emailed as a backup and removed,
 instead of just silently looking like there never were any.
 
-If sending that email fails for any reason (bad credentials, Gmail
-hiccup, `GMAIL_USER`/`GMAIL_APP_PASSWORD`/`REPORT_RECIPIENTS` not
+If sending that email fails for any reason (bad credentials, a Resend
+hiccup, `RESEND_API_KEY`/`MAIL_FROM`/`REPORT_RECIPIENTS` not
 configured yet), the photos are simply left in place — the archive
 sweep keeps retrying once a day for as long as it takes, and only
 ever deletes right after a send actually succeeds. A failed send can

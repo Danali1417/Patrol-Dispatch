@@ -14,8 +14,8 @@
 // never delay or block today's report email.
 //
 // Required env vars (set in Vercel → Project Settings → Environment Variables):
-//   GMAIL_USER            the Gmail address to send from
-//   GMAIL_APP_PASSWORD    the 16-character App Password for that account
+//   RESEND_API_KEY        from https://resend.com/api-keys — see api/_lib/mail.js
+//   MAIL_FROM             a sender address on a domain verified in Resend
 //   REPORT_RECIPIENTS     comma-separated recipient email address(es) —
 //                         also where archived jobs' attendance photos get
 //                         emailed before being deleted from Supabase
@@ -30,12 +30,12 @@
 //   REPORT_SEND_TOLERANCE_MINUTES how far from that hour a single daily
 //                                 cron fire is still accepted, default 90
 
-import nodemailer from "nodemailer";
 import { getZonedNow } from "./_lib/time.js";
 import { kvGet, kvSet } from "./_lib/supabase.js";
 import { gatherReportData } from "./_lib/buildReport.js";
 import { sendReportEmail } from "./_lib/mailer.js";
 import { archiveOldJobs } from "./_lib/jobArchive.js";
+import { isMailConfigured, getMailFrom, createMailTransporter } from "./_lib/mail.js";
 
 const SENT_DATE_KEY = "ops:dailyReportSentDate";
 
@@ -44,12 +44,12 @@ const SENT_DATE_KEY = "ops:dailyReportSentDate";
 // sends a short heads-up to the same recipients instead, for the two ways
 // a day can go by with no report and no error anyone sees: the send itself
 // throwing, or the single daily cron fire landing outside the accepted
-// window. Best-effort and uses the same Gmail credentials as the report
+// window. Best-effort and uses the same Resend credentials as the report
 // itself, so it can't help when those credentials are what's broken —
 // there's no second channel configured to fall back to.
 async function sendFailureAlert(req, reason, detail) {
   const to = process.env.REPORT_RECIPIENTS;
-  if (!to || !process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) return;
+  if (!to || !isMailConfigured()) return;
   try {
     // Built from the request that's hitting this endpoint right now, rather
     // than a hardcoded placeholder — a copy-pasted "your-app.vercel.app"
@@ -59,12 +59,9 @@ async function sendFailureAlert(req, reason, detail) {
     const proto = req.headers["x-forwarded-proto"] || "https";
     const retryUrl = host ? `${proto}://${host}/api/daily-report?test=1&secret=YOUR_CRON_SECRET` : null;
 
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
-    });
+    const transporter = createMailTransporter();
     await transporter.sendMail({
-      from: process.env.GMAIL_USER,
+      from: getMailFrom(),
       to,
       subject: `Daily alarm report did not send — ${reason}`,
       text: [
@@ -106,7 +103,7 @@ export default async function handler(req, res) {
   const inSendWindow = minutesFromTarget <= toleranceMinutes;
 
   // Builds and sends the report first — archiving (below) is a variable
-  // amount of work (one Gmail send per job needing a photo backup) that
+  // amount of work (one email send per job needing a photo backup) that
   // used to run before this and get awaited, so a backlog of jobs to
   // archive could eat the whole 60s ceiling (vercel.json) before this
   // function ever got here, and no report went out at all. Report result
@@ -129,15 +126,12 @@ export default async function handler(req, res) {
         const recipients = (process.env.REPORT_RECIPIENTS || "").split(",").map((s) => s.trim()).filter(Boolean);
         if (!recipients.length) {
           reportOutcome = { status: 500, body: { error: "REPORT_RECIPIENTS is not configured" } };
-        } else if (!process.env.GMAIL_USER || !process.env.GMAIL_APP_PASSWORD) {
-          reportOutcome = { status: 500, body: { error: "GMAIL_USER / GMAIL_APP_PASSWORD are not configured" } };
+        } else if (!isMailConfigured()) {
+          reportOutcome = { status: 500, body: { error: "RESEND_API_KEY / MAIL_FROM are not configured" } };
         } else {
-          const transporter = nodemailer.createTransport({
-            service: "gmail",
-            auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
-          });
+          const transporter = createMailTransporter();
           const { subject } = await sendReportEmail({
-            data, recipients, from: process.env.GMAIL_USER, transporter, now,
+            data, recipients, from: getMailFrom(), transporter, now,
           });
           if (!testMode) await kvSet(SENT_DATE_KEY, data.window.dateKey);
           reportOutcome = {
@@ -154,7 +148,7 @@ export default async function handler(req, res) {
   }
 
   // Runs after the report, regardless of its outcome — a deployment that
-  // hasn't set up GMAIL_USER etc. still needs its board kept small, and a
+  // hasn't set up RESEND_API_KEY etc. still needs its board kept small, and a
   // slow or failing archive sweep here must never delay or block today's
   // report (a bad connection just leaves that job's backup for tomorrow's
   // run — see backupAndDeletePhotos).
