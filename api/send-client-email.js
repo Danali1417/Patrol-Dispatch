@@ -4,18 +4,21 @@
 //     client-facing "alarm response outcome" advice — `to` is whatever
 //     client address the operator entered.
 //   - Every close/cancel action also fires an internal photo backup
-//     (internalBackup: true) the moment the job closes, so REPORT_RECIPIENTS
-//     doesn't wait for the 48h archive sweep — see jobArchive.js, which
-//     skips re-sending a job whose backup already went out this way. `to`
-//     is never accepted from the client for this one; REPORT_RECIPIENTS is
-//     a server-only env var precisely so the browser never needs to know it.
-//   - Picking "New Client" while adding a site (internalAlert: true) also
-//     routes to REPORT_RECIPIENTS the same way — see notifyNewClient in
-//     src/App.jsx.
+//     (internalBackup: true) the moment the job closes, so
+//     JOB_BACKUP_RECIPIENTS doesn't wait for the 48h archive sweep — see
+//     jobArchive.js, which skips re-sending a job whose backup already
+//     went out this way. `to` is never accepted from the client for this
+//     one; JOB_BACKUP_RECIPIENTS is a server-only env var precisely so
+//     the browser never needs to know it.
+//   - Picking "New Client" while adding a site (internalAlert: true)
+//     routes to REPORT_RECIPIENTS instead — the same recipients as the
+//     daily report, since it's a management-facing notice rather than a
+//     per-job artifact — see notifyNewClient in src/App.jsx.
 //
 // Required env vars (already set for the daily report — reused here):
-//   RESEND_API_KEY, MAIL_FROM, REPORT_RECIPIENTS (internalBackup only)
-//   — see api/_lib/mail.js
+//   RESEND_API_KEY, MAIL_FROM — see api/_lib/mail.js
+//   JOB_BACKUP_RECIPIENTS (internalBackup only)
+//   REPORT_RECIPIENTS (internalAlert only)
 // Also required:
 //   VITE_APP_MAIL_SECRET   any random string. Set it once in Vercel and the
 //                          client bundle picks it up automatically (the
@@ -41,7 +44,12 @@ export default async function handler(req, res) {
   const { to: requestedTo, subject, text, html, attachments, internalBackup, internalAlert } = req.body || {};
 
   let to;
-  if (internalBackup === true || internalAlert === true) {
+  if (internalBackup === true) {
+    to = process.env.JOB_BACKUP_RECIPIENTS;
+    if (!to) {
+      return res.status(500).json({ error: "JOB_BACKUP_RECIPIENTS is not configured" });
+    }
+  } else if (internalAlert === true) {
     to = process.env.REPORT_RECIPIENTS;
     if (!to) {
       return res.status(500).json({ error: "REPORT_RECIPIENTS is not configured" });

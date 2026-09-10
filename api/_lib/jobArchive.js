@@ -112,7 +112,7 @@ async function backupAndDeletePhotos(job, { transporter } = {}) {
     return "already-sent";
   }
 
-  const to = process.env.REPORT_RECIPIENTS;
+  const to = process.env.JOB_BACKUP_RECIPIENTS;
   if (!to || !isMailConfigured()) return "not-configured";
 
   const attachments = photoAttachmentsFor(job, photos);
