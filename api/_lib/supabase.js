@@ -43,6 +43,19 @@ export async function kvGetWithMeta(key) {
   return rows.length ? rows[0] : null;
 }
 
+// updated_at only, no value — lets a `since`-bearing poll (see kv.js) find
+// out nothing changed without ever pulling the value column out of
+// Supabase at all. ops:jobs is polled every ~8s by every signed-in device
+// all day, and most ticks see no change, so this is what actually keeps
+// those ticks cheap — kvGetWithMeta's `select=value,...` still transmits
+// the full value from Supabase itself regardless of whether the caller
+// goes on to use it, which a `since` check alone doesn't prevent.
+export async function kvGetUpdatedAt(key) {
+  const res = await sbFetch(`kv_store?key=eq.${encodeURIComponent(key)}&select=updated_at`);
+  const rows = await res.json();
+  return rows.length ? rows[0].updated_at : null;
+}
+
 export async function kvSet(key, value) {
   await sbFetch("kv_store", {
     method: "POST",
