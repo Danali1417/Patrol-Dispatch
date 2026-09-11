@@ -387,12 +387,23 @@ function formatLocation(loc) {
   return `${loc.lat.toFixed(5)}, ${loc.lon.toFixed(5)}`;
 }
 
-// Each photo is already resized to 480px wide and compressed to a ~72%
-// quality JPEG below (see watermarkPhoto) before it's stored — typically
-// 60-130KB once base64-encoded — so this cap exists only to stay clear of
-// Vercel's 4.5MB request/response ceiling on the job photos save, not
-// because a handful of photos is expensive on its own.
+// Each photo is already resized to PREVIEW_MAX_W wide and compressed to
+// PREVIEW_QUALITY below (see watermarkPhoto) before it's stored — so this
+// cap exists only to stay clear of Vercel's 4.5MB request/response
+// ceiling on the job photos save, not because a handful of photos is
+// expensive on its own.
 const MAX_ATTENDANCE_PHOTOS = 20;
+
+// Deliberately small — this is only ever the quick-glance preview shown
+// inline in the app and in report PDFs/emails now that the untouched,
+// full-resolution original is separately kept in Supabase Storage (see
+// uploadOriginalPhoto) and reachable via "View original" whenever the
+// sharper copy is actually needed. Every view of this preview still gets
+// served through a Vercel function (unlike the original, which bypasses
+// it entirely), so its size directly drives Vercel's own bandwidth —
+// smaller here means real headroom there.
+const PREVIEW_MAX_W = 360;
+const PREVIEW_QUALITY = 0.55;
 
 // Loads `file` pre-scaled to at most maxW wide wherever the browser
 // supports it, instead of always materializing the full-resolution photo
@@ -425,8 +436,8 @@ async function loadScaledBitmap(file, maxW) {
 }
 
 async function watermarkPhoto(file, label, location, locationName) {
-  const bitmap = await loadScaledBitmap(file, 480);
-  const scale = Math.min(1, 480 / bitmap.width);
+  const bitmap = await loadScaledBitmap(file, PREVIEW_MAX_W);
+  const scale = Math.min(1, PREVIEW_MAX_W / bitmap.width);
   const w = Math.round(bitmap.width * scale);
   const h = Math.round(bitmap.height * scale);
   const canvas = document.createElement("canvas");
@@ -448,7 +459,7 @@ async function watermarkPhoto(file, label, location, locationName) {
   ctx.fillStyle = "#F5A623";
   lines.forEach((line, i) => ctx.fillText(line, 8, h - boxH + 16 * (i + 1)));
   return {
-    dataUrl: canvas.toDataURL("image/jpeg", 0.72),
+    dataUrl: canvas.toDataURL("image/jpeg", PREVIEW_QUALITY),
     ts: new Date().toISOString(),
     location: location ? { lat: location.lat, lon: location.lon } : null,
     locationName: locationName || null,
@@ -462,8 +473,8 @@ async function watermarkPhoto(file, label, location, locationName) {
 // somewhere else entirely) would misrepresent it, not document it. Same
 // resize/compression as watermarkPhoto, just without the canvas overlay.
 async function resizePhotoPlain(file) {
-  const bitmap = await loadScaledBitmap(file, 480);
-  const scale = Math.min(1, 480 / bitmap.width);
+  const bitmap = await loadScaledBitmap(file, PREVIEW_MAX_W);
+  const scale = Math.min(1, PREVIEW_MAX_W / bitmap.width);
   const w = Math.round(bitmap.width * scale);
   const h = Math.round(bitmap.height * scale);
   const canvas = document.createElement("canvas");
@@ -472,7 +483,7 @@ async function resizePhotoPlain(file) {
   const ctx = canvas.getContext("2d");
   ctx.drawImage(bitmap, 0, 0, w, h);
   if (typeof bitmap.close === "function") bitmap.close();
-  return { dataUrl: canvas.toDataURL("image/jpeg", 0.72), ts: null, location: null, locationName: null };
+  return { dataUrl: canvas.toDataURL("image/jpeg", PREVIEW_QUALITY), ts: null, location: null, locationName: null };
 }
 
 function resizeLogo(file) {

@@ -254,6 +254,15 @@ export default async function handler(req, res) {
     try {
       if (req.method === "GET") {
         const value = await kvGet(key);
+        // A job's photos are written exactly once, at submit (see
+        // persistJobPhotos's only call site in App.jsx) — never edited or
+        // replaced afterward — so this response is safe to cache for a
+        // full day. Every open of a job's photos (Control Room, the
+        // patrolman's own view, PDF generation, emailing) was re-fetching
+        // this from scratch through Vercel's own functions every time,
+        // which is by far the largest thing in these responses; this is
+        // what actually keeps repeat views from re-transferring it.
+        res.setHeader("Cache-Control", "private, max-age=86400, immutable");
         return res.status(200).json({ key, value: value === null ? "[]" : value });
       }
       if (req.method === "POST") {
