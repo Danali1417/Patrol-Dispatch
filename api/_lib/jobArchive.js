@@ -110,34 +110,19 @@ async function cleanupOriginals(jobId) {
   }
 }
 
-async function backupAndDeletePhotos(job, { transporter } = {}) {
-  const photosKey = `${JOB_PHOTOS_PREFIX}${job.id}`;
-  const raw = await kvGet(photosKey);
-  if (!raw) return "none";
-
-  let photos;
-  try { photos = JSON.parse(raw); } catch (e) { return "none"; }
-  if (!Array.isArray(photos) || photos.length === 0) {
-    await kvDelete(photosKey);
-    await cleanupOriginals(job.id);
-    return "none";
-  }
-
-  if (job.photosBackedUpAt) {
-    await kvDelete(photosKey);
-    await cleanupOriginals(job.id);
-    return "already-sent";
-  }
-
+// The actual send, split out of backupAndDeletePhotos below so a forced
+// resend (see forceResendPhotoBackups) can reuse it without going through
+// that function's "already backed up, don't bother re-sending" shortcut —
+// that shortcut trusts sendMail() not throwing as proof of a good send,
+// which doesn't hold up if the *destination address itself* was wrong: the
+// send still "succeeds" (the mail relay accepted it), the job gets stamped
+// as backed up, and it's stuck undeliverable at an address nobody reads.
+async function sendPhotoBackupMail(job, photos, { transporter } = {}) {
   const to = process.env.JOB_BACKUP_RECIPIENTS;
   if (!to || !isMailConfigured()) return "not-configured";
 
   const attachments = photoAttachmentsFor(job, photos);
-  if (!attachments.length) {
-    await kvDelete(photosKey);
-    await cleanupOriginals(job.id);
-    return "none";
-  }
+  if (!attachments.length) return "none";
 
   const subject = `Attendance photo backup — ${job.jobNumber || job.id}${job.siteName ? ` — ${job.siteName}` : ""}`;
   const text = [
@@ -160,9 +145,82 @@ async function backupAndDeletePhotos(job, { transporter } = {}) {
     console.error(`photo backup email failed for job ${job.id}:`, err);
     return "failed";
   }
-  await kvDelete(photosKey);
-  await cleanupOriginals(job.id);
   return "sent";
+}
+
+async function backupAndDeletePhotos(job, { transporter } = {}) {
+  const photosKey = `${JOB_PHOTOS_PREFIX}${job.id}`;
+  const raw = await kvGet(photosKey);
+  if (!raw) return "none";
+
+  let photos;
+  try { photos = JSON.parse(raw); } catch (e) { return "none"; }
+  if (!Array.isArray(photos) || photos.length === 0) {
+    await kvDelete(photosKey);
+    await cleanupOriginals(job.id);
+    return "none";
+  }
+
+  if (job.photosBackedUpAt) {
+    await kvDelete(photosKey);
+    await cleanupOriginals(job.id);
+    return "already-sent";
+  }
+
+  const outcome = await sendPhotoBackupMail(job, photos, { transporter });
+  if (outcome === "sent" || outcome === "none") {
+    await kvDelete(photosKey);
+    await cleanupOriginals(job.id);
+  }
+  return outcome;
+}
+
+// Manual, safely-re-runnable fix for jobs whose backup email "succeeded"
+// (the mail relay accepted it — see sendPhotoBackupMail's own comment)
+// but was actually misdirected — e.g. a typo'd JOB_BACKUP_RECIPIENTS
+// address, since corrected. Those jobs are already stamped
+// photosBackedUpAt, which backupAndDeletePhotos trusts at face value, so
+// the normal 48h archive sweep would just delete their photos without
+// ever resending. Takes explicit job numbers (never "resend everything")
+// since this is for a known, specific incident, still on the live board
+// (photos for an already-archived job are gone the moment it's archived —
+// see backupAndDeletePhotos — so this can't help those). Re-running it is
+// harmless: a job number that already has a good copy on file just sends
+// a second, identical email.
+export async function forceResendPhotoBackups(jobNumbers, { transporter } = {}) {
+  const wanted = new Set(jobNumbers.map((n) => String(n).trim()).filter(Boolean));
+  const raw = await kvGet(JOBS_KEY);
+  let jobs;
+  try { jobs = raw ? JSON.parse(raw) : []; } catch (e) { jobs = []; }
+  if (!Array.isArray(jobs)) jobs = [];
+
+  const results = {};
+  let changed = false;
+  await mapWithConcurrency(jobs, 5, async (job) => {
+    if (!wanted.has(String(job.jobNumber || "").trim())) return;
+    const photosRaw = await kvGet(`${JOB_PHOTOS_PREFIX}${job.id}`);
+    let photos;
+    try { photos = photosRaw ? JSON.parse(photosRaw) : []; } catch (e) { photos = []; }
+    if (!Array.isArray(photos) || photos.length === 0) {
+      results[job.jobNumber] = "no-photos-on-file";
+      return;
+    }
+    const outcome = await sendPhotoBackupMail(job, photos, { transporter });
+    results[job.jobNumber] = outcome;
+    if (outcome === "sent") {
+      job.photosBackedUpAt = new Date().toISOString();
+      changed = true;
+    }
+  });
+
+  for (const n of wanted) {
+    if (!(n in results) && !jobs.some((j) => String(j.jobNumber || "").trim() === n)) {
+      results[n] = "job-not-found-on-live-board";
+    }
+  }
+
+  if (changed) await kvSet(JOBS_KEY, JSON.stringify(jobs));
+  return results;
 }
 
 // One-time (safe to re-run) catch-up for jobs whose photo backup email

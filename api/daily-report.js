@@ -41,7 +41,7 @@ import { getZonedNow } from "./_lib/time.js";
 import { kvGet, kvSet } from "./_lib/supabase.js";
 import { gatherReportData } from "./_lib/buildReport.js";
 import { sendReportEmail } from "./_lib/mailer.js";
-import { archiveOldJobs, backfillOrphanedPhotoBackups } from "./_lib/jobArchive.js";
+import { archiveOldJobs, backfillOrphanedPhotoBackups, forceResendPhotoBackups } from "./_lib/jobArchive.js";
 import { isMailConfigured, getMailFrom, createMailTransporter } from "./_lib/mail.js";
 
 const SENT_DATE_KEY = "ops:dailyReportSentDate";
@@ -110,6 +110,24 @@ export default async function handler(req, res) {
       return res.status(200).json({ backfill: result });
     } catch (err) {
       console.error("photo backup backfill failed:", err);
+      return res.status(500).json({ error: String(err?.message || err) });
+    }
+  }
+
+  // Manual, safely-re-runnable fix for specific jobs whose backup email
+  // was accepted by the mail relay but misdirected (see
+  // forceResendPhotoBackups's own comment in jobArchive.js) — e.g. after
+  // correcting a typo'd JOB_BACKUP_RECIPIENTS. Only ever acts on the exact
+  // job numbers given, comma-separated:
+  // /api/daily-report?resendPhotoBackups=1&jobNumbers=423636,423730&secret=YOUR_CRON_SECRET
+  if (req.query?.resendPhotoBackups === "1") {
+    const jobNumbers = String(req.query?.jobNumbers || "").split(",").map((s) => s.trim()).filter(Boolean);
+    if (!jobNumbers.length) return res.status(400).json({ error: "jobNumbers is required (comma-separated)" });
+    try {
+      const result = await forceResendPhotoBackups(jobNumbers);
+      return res.status(200).json({ resend: result });
+    } catch (err) {
+      console.error("photo backup force-resend failed:", err);
       return res.status(500).json({ error: String(err?.message || err) });
     }
   }
