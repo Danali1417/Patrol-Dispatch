@@ -57,8 +57,12 @@ export async function createUploadUrl(path) {
   await ensureBucket();
   const res = await storageFetch(`object/upload/sign/${BUCKET}/${path}`, { method: "POST", body: JSON.stringify({}) });
   if (!res.ok) throw new Error(`Couldn't create an upload URL (${res.status})`);
-  const { signedUrl, path: storedPath } = await res.json();
-  const uploadUrl = signedUrl.startsWith("http") ? signedUrl : `${SUPABASE_URL}/storage/v1${signedUrl}`;
+  // The raw API returns the relative path as `url`, not `signedUrl` — that
+  // camelCase name only exists inside the official supabase-js SDK, which
+  // renames it after fetching; calling the REST endpoint directly (as
+  // here, via plain fetch) gets the unrenamed field.
+  const { url, path: storedPath } = await res.json();
+  const uploadUrl = url.startsWith("http") ? url : `${SUPABASE_URL}/storage/v1${url}`;
   return { uploadUrl, path: storedPath || path };
 }
 
@@ -70,8 +74,10 @@ export async function createUploadUrl(path) {
 export async function createReadUrl(path, expiresIn = 3600) {
   const res = await storageFetch(`object/sign/${BUCKET}/${path}`, { method: "POST", body: JSON.stringify({ expiresIn }) });
   if (!res.ok) throw new Error(`Couldn't create a read URL (${res.status})`);
-  const { signedUrl } = await res.json();
-  return signedUrl.startsWith("http") ? signedUrl : `${SUPABASE_URL}/storage/v1${signedUrl}`;
+  // Same raw-vs-SDK field name mismatch as createUploadUrl above — the
+  // unrenamed field here is `signedURL` (capital URL), not `signedUrl`.
+  const { signedURL } = await res.json();
+  return signedURL.startsWith("http") ? signedURL : `${SUPABASE_URL}/storage/v1${signedURL}`;
 }
 
 // Deletes every original filed under a job's own folder (`${jobId}/...`)
