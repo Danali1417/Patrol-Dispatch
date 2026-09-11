@@ -1782,8 +1782,16 @@ function JobCard({ job, now, onClick, roster }) {
         {job.delayReason && <span title={job.delayReason}><AlertTriangle size={14} color="var(--warn)" /></span>}
         {job.status === "dispatched" && !job.onsiteTime && (
           job.acknowledgedAt
-            ? <span title={`Acknowledged by ${patrolmanName} at ${fmtTime(job.acknowledgedAt)}`}><CheckCircle2 size={14} color="var(--ok)" /></span>
-            : <span title="Not yet acknowledged by the patrolman"><Bell size={14} color="var(--warn)" /></span>
+            ? (
+              <span
+                title={`Acknowledged by ${patrolmanName} at ${fmtTime(job.acknowledgedAt)}`}
+                style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--ok)", fontSize: 11.5, fontWeight: 600 }}
+              >
+                <CheckCircle2 size={14} />
+                {job.eta ? `ETA ${job.eta.label === "Other" ? job.eta.detail : job.eta.label}` : "Acknowledged"}
+              </span>
+            )
+            : <span title="Not yet acknowledged by the patrolman" style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--warn)", fontSize: 11.5, fontWeight: 600 }}><Bell size={14} /> Not acknowledged</span>
         )}
         <JobUrgencyChip job={job} now={now} />
       </div>
