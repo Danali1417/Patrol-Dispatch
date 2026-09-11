@@ -223,6 +223,43 @@ export async function forceResendPhotoBackups(jobNumbers, { transporter } = {}) 
   return results;
 }
 
+// Read-only status check, no side effects — lists every closed/cancelled
+// job still on the live board with whether the app believes its photo
+// backup went out (photosBackedUpAt) and when. A timestamp only proves
+// the mail relay accepted the send (see sendPhotoBackupMail's own
+// comment), not that it was actually delivered, so this is meant to be
+// read against a known point in time (e.g. when a bad JOB_BACKUP_RECIPIENTS
+// address was corrected) — anything stamped before that point is suspect
+// and worth re-sending with forceResendPhotoBackups; anything after should
+// be genuine. `null` means the immediate on-close send never even reported
+// success, which is its own separate thing worth investigating.
+export async function listPhotoBackupStatus() {
+  const raw = await kvGet(JOBS_KEY);
+  let jobs;
+  try { jobs = raw ? JSON.parse(raw) : []; } catch (e) { jobs = []; }
+  if (!Array.isArray(jobs)) jobs = [];
+
+  const terminal = jobs.filter((j) => j.status === "emailed" || j.status === "cancelled");
+  const rows = new Array(terminal.length);
+  await mapWithConcurrency(terminal, 5, async (job, i) => {
+    const photosRaw = await kvGet(`${JOB_PHOTOS_PREFIX}${job.id}`);
+    let photoCount = 0;
+    try {
+      const photos = photosRaw ? JSON.parse(photosRaw) : [];
+      photoCount = Array.isArray(photos) ? photos.length : 0;
+    } catch (e) { /* leave at 0 */ }
+    rows[i] = {
+      jobNumber: job.jobNumber || job.id,
+      siteName: job.siteName || "",
+      status: job.status,
+      closedAt: job.status === "cancelled" ? job.cancelledAt : job.emailedAt,
+      photosBackedUpAt: job.photosBackedUpAt || null,
+      photosOnFile: photoCount,
+    };
+  });
+  return rows.sort((a, b) => new Date(b.closedAt || 0) - new Date(a.closedAt || 0));
+}
+
 // One-time (safe to re-run) catch-up for jobs whose photo backup email
 // never went out — notably every job that got archived while outbound
 // mail was blocked (see README). archiveOldJobs() above only retries a

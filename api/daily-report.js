@@ -41,7 +41,7 @@ import { getZonedNow } from "./_lib/time.js";
 import { kvGet, kvSet } from "./_lib/supabase.js";
 import { gatherReportData } from "./_lib/buildReport.js";
 import { sendReportEmail } from "./_lib/mailer.js";
-import { archiveOldJobs, backfillOrphanedPhotoBackups, forceResendPhotoBackups } from "./_lib/jobArchive.js";
+import { archiveOldJobs, backfillOrphanedPhotoBackups, forceResendPhotoBackups, listPhotoBackupStatus } from "./_lib/jobArchive.js";
 import { isMailConfigured, getMailFrom, createMailTransporter } from "./_lib/mail.js";
 
 const SENT_DATE_KEY = "ops:dailyReportSentDate";
@@ -128,6 +128,20 @@ export default async function handler(req, res) {
       return res.status(200).json({ resend: result });
     } catch (err) {
       console.error("photo backup force-resend failed:", err);
+      return res.status(500).json({ error: String(err?.message || err) });
+    }
+  }
+
+  // Read-only — lists every closed/cancelled job still on the live board
+  // with its photosBackedUpAt timestamp (see listPhotoBackupStatus's own
+  // comment for how to read it against a known fix time).
+  // /api/daily-report?checkPhotoBackups=1&secret=YOUR_CRON_SECRET
+  if (req.query?.checkPhotoBackups === "1") {
+    try {
+      const result = await listPhotoBackupStatus();
+      return res.status(200).json({ jobs: result });
+    } catch (err) {
+      console.error("photo backup status check failed:", err);
       return res.status(500).json({ error: String(err?.message || err) });
     }
   }
