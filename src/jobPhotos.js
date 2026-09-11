@@ -52,11 +52,19 @@ export async function uploadOriginalPhoto(jobId, file) {
   try {
     const ext = (file.name || "").split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
     const signRes = await apiFetch("/api/kv?photoUploadUrl=1", { method: "POST", body: JSON.stringify({ jobId, ext }) });
-    if (!signRes.ok) return null;
+    if (!signRes.ok) {
+      console.error("original photo upload: couldn't get an upload URL —", signRes.status, await signRes.text().catch(() => ""));
+      return null;
+    }
     const { path, uploadUrl } = await signRes.json();
     const putRes = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": file.type || "image/jpeg" }, body: file });
-    return putRes.ok ? path : null;
+    if (!putRes.ok) {
+      console.error("original photo upload: PUT to Storage failed —", putRes.status, await putRes.text().catch(() => ""));
+      return null;
+    }
+    return path;
   } catch (e) {
+    console.error("original photo upload threw —", e);
     return null;
   }
 }
