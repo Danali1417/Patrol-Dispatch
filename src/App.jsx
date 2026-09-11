@@ -3654,6 +3654,7 @@ function Reports({ jobs, companyName, logoUrl, roster }) {
   const cancelledCount = cancelledJobCount(filtered);
   const typeCounts = jobTypeCounts(filtered);
   const totalResponses = summary.reduce((sum, s) => sum + s.count, 0);
+  const totalSummaryCancelled = summary.reduce((sum, s) => sum + (s.cancelled || 0), 0);
   const totalByType = typeCounts.reduce((sum, t) => sum + t.count, 0);
   const hasFilter = dateFrom || dateTo || timeFrom || timeTo || tableSearch;
 
@@ -3715,9 +3716,9 @@ function Reports({ jobs, companyName, logoUrl, roster }) {
     doc.text("Patrolman job summary", 40, summaryStartY);
     autoTable(doc, {
       startY: summaryStartY + 8,
-      head: [["Patrolman", "Run", "Jobs"]],
-      body: summary.map((s) => [s.patrolman, s.run, String(s.count)]),
-      foot: [["Total", "", String(totalResponses)]],
+      head: [["Patrolman", "Run", "Cancelled", "Jobs"]],
+      body: summary.map((s) => [s.patrolman, s.run, String(s.cancelled || 0), String(s.count)]),
+      foot: [["Total", "", String(totalSummaryCancelled), String(totalResponses)]],
       ...summaryTableOpts,
     });
 
@@ -3842,13 +3843,22 @@ function Reports({ jobs, companyName, logoUrl, roster }) {
               <div key={`${s.patrolman}||${s.run}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12.5 }}>
                 <span><b>{s.patrolman}</b> on <b>{s.run}</b></span>
                 <span style={{ color: "var(--text-dim)" }}>—</span>
+                {s.cancelled > 0 && (
+                  <>
+                    <span style={{ fontFamily: "var(--mono)", fontWeight: 700, color: "var(--warn)" }}>{s.cancelled}</span>
+                    <span style={{ color: "var(--text-dim)" }}>cancelled,</span>
+                  </>
+                )}
                 <span style={{ fontFamily: "var(--mono)", fontWeight: 700, color: "var(--accent)" }}>{s.count}</span>
                 <span style={{ color: "var(--text-dim)" }}>job{s.count !== 1 ? "s" : ""}</span>
               </div>
             ))}
             <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 7, background: "var(--panel-alt)", border: "1px solid var(--border)", fontSize: 12.5, fontWeight: 700 }}>
               <span>Total</span>
-              <span style={{ fontFamily: "var(--mono)", color: "var(--accent)", marginLeft: "auto" }}>{totalResponses}</span>
+              {totalSummaryCancelled > 0 && (
+                <span style={{ fontFamily: "var(--mono)", color: "var(--warn)", marginLeft: "auto" }}>{totalSummaryCancelled} cancelled</span>
+              )}
+              <span style={{ fontFamily: "var(--mono)", color: "var(--accent)", marginLeft: totalSummaryCancelled > 0 ? 10 : "auto" }}>{totalResponses}</span>
               <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>job{totalResponses !== 1 ? "s" : ""}</span>
             </div>
           </div>
