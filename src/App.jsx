@@ -1793,6 +1793,7 @@ function JobCard({ job, now, onClick, roster }) {
             )
             : <span title="Not yet acknowledged by the patrolman" style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--warn)", fontSize: 11.5, fontWeight: 600 }}><Bell size={14} /> Not acknowledged</span>
         )}
+        <EtaChip job={job} now={now} />
         <JobUrgencyChip job={job} now={now} />
       </div>
       <div style={{ marginTop: 8 }}>
