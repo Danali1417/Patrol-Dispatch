@@ -48,15 +48,16 @@ export function buildReportPdf({ reportType, companyName, columns, rows, summary
   });
 
   const totalResponses = summary.reduce((sum, s) => sum + s.count, 0);
+  const totalSummaryCancelled = summary.reduce((sum, s) => sum + (s.cancelled || 0), 0);
   const summaryStartY = (doc.lastAutoTable?.finalY || typeStartY) + 26;
   doc.setFontSize(11);
   doc.setTextColor(20);
   doc.text("Patrolman job summary", 40, summaryStartY);
   autoTable(doc, {
     startY: summaryStartY + 8,
-    head: [["Patrolman", "Run", "Jobs"]],
-    body: summary.map((s) => [s.patrolman, s.run, String(s.count)]),
-    foot: [["Total", "", String(totalResponses)]],
+    head: [["Patrolman", "Run", "Cancelled", "Jobs"]],
+    body: summary.map((s) => [s.patrolman, s.run, String(s.cancelled || 0), String(s.count)]),
+    foot: [["Total", "", String(totalSummaryCancelled), String(totalResponses)]],
     ...SUMMARY_TABLE_OPTS,
   });
 

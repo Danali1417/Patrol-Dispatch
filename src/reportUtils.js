@@ -156,17 +156,19 @@ export function reportRow(job, reportType, timeZone, roster) {
   ];
 }
 
-// Counts jobs a patrolman actually attended — a cancelled job was never
-// responded to (see cancelledJobCount for that separate tally), so it
-// shouldn't inflate a patrolman's response count just for having been
-// dispatched to it.
+// `count` is jobs a patrolman actually attended — a cancelled job was
+// never responded to, so it doesn't inflate that figure. `cancelled` is
+// tracked alongside it (same patrolman/run) rather than dropped entirely,
+// so a report can still show how many of a patrolman's assigned jobs got
+// called off without counting them as attended.
 export function patrolmanRunSummary(filteredJobs, roster, timeZone) {
   const byKey = {};
-  filteredJobs.filter((j) => j.status !== "cancelled").forEach((j) => {
+  filteredJobs.forEach((j) => {
     const { run, patrolmanName: patrolman } = resolveJobRoster(j, roster, timeZone);
     const key = `${patrolman}||${run}`;
-    byKey[key] = byKey[key] || { patrolman, run, count: 0 };
-    byKey[key].count++;
+    byKey[key] = byKey[key] || { patrolman, run, count: 0, cancelled: 0 };
+    if (j.status === "cancelled") byKey[key].cancelled++;
+    else byKey[key].count++;
   });
   return Object.values(byKey).sort((a, b) => b.count - a.count || a.patrolman.localeCompare(b.patrolman));
 }
