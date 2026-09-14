@@ -24,12 +24,25 @@ async function apiFetch(path, opts = {}) {
   return res;
 }
 
+// Attaches the HTTP status to a thrown error so callers can tell a
+// genuinely-never-set key (404) apart from a real failure (network error,
+// 5xx) — conflating the two once caused a real data-loss incident (see
+// the sites/zones/etc. loaders in App.jsx that seed + persist a default
+// when a key "isn't there yet": treating a transient fetch failure the
+// same as "never set" silently overwrote real stored data with the
+// default).
+function statusError(message, status) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
 window.storage = {
   get: async (key) => {
     const res = await apiFetch(`/api/kv?key=${encodeURIComponent(key)}`);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `key not found: ${key}`);
+      throw statusError(body.error || `key not found: ${key}`, res.status);
     }
     const data = await res.json();
     return { key, value: data.value, shared: true };
@@ -44,7 +57,7 @@ window.storage = {
     const res = await apiFetch(`/api/kv?key=${encodeURIComponent(key)}${qs}`);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `key not found: ${key}`);
+      throw statusError(body.error || `key not found: ${key}`, res.status);
     }
     const data = await res.json();
     if (data.unchanged) return { key, unchanged: true, updatedAt: data.updatedAt };
@@ -66,5 +79,20 @@ window.storage = {
     // merged value to keep its local state in sync.
     const data = await res.json().catch(() => ({ value }));
     return { key, value: data.value ?? value, shared: true };
+  },
+  // For a handful of keys (sites, bureaus, monitoring companies) the
+  // server rejects a plain full-array `set` and instead applies a named
+  // operation to whatever it currently has stored, immediately before
+  // writing back — see LIST_OP_KEYS in api/kv.js. That's what makes this
+  // safe against a stale local snapshot: unlike set(), nothing this
+  // client last polled is ever sent as the new value.
+  applyOp: async (key, op, payload) => {
+    const res = await apiFetch("/api/kv", {
+      method: "POST",
+      body: JSON.stringify({ key, op, ...payload }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Couldn't update ${key}`);
+    return { key, value: data.value, shared: true };
   },
 };
