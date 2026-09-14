@@ -229,17 +229,27 @@ export function jobTypeCounts(filteredJobs) {
     .sort((a, b) => b.count - a.count);
 }
 
-// The alarm-response callout rate card: $53.12 for the first 20 minutes
-// onsite, plus $17.70 per additional 10-minute block (any partial minute
-// rounds up to a full block). GST-inclusive at Australia's standard 10%
-// rate. Manager-facing only — see jobCharge's own comment for why.
-const RESPONSE_BASE_RATE = 53.12;
-const RESPONSE_BASE_MINUTES = 20;
-const RESPONSE_BLOCK_RATE = 17.70;
-const RESPONSE_BLOCK_MINUTES = 10;
+// Starting point for the alarm-response callout rate card — Manager-
+// editable from here (Monitoring & Bureau screen), not fixed in code.
+// $53.12 for the first 20 minutes onsite, then $17.70 per additional
+// 10-minute block (any partial minute rounds up to a full block).
+// GST-inclusive at Australia's standard 10% rate.
+export const DEFAULT_RESPONSE_RATE = { baseRate: 53.12, baseMinutes: 20, blockRate: 17.70, blockMinutes: 10 };
 const GST_MULTIPLIER = 1.10;
 
-// What one job is charged under the rate card above — Manager-only
+// A Bureau-specific rate wins if that job's bureau has one set; otherwise
+// a Monitoring-company rate; otherwise the org-wide default. `rateConfig`
+// is `{ defaultRate, bureauRates, monitoringRates }` — all optional, each
+// falling through to DEFAULT_RESPONSE_RATE if nothing is configured yet
+// (e.g. a fresh install that's never touched the rate settings).
+function resolveResponseRate(job, rateConfig) {
+  const { defaultRate, bureauRates, monitoringRates } = rateConfig || {};
+  if (job.bureau && bureauRates?.[job.bureau]) return bureauRates[job.bureau];
+  if (job.monitoringCo && monitoringRates?.[job.monitoringCo]) return monitoringRates[job.monitoringCo];
+  return defaultRate || DEFAULT_RESPONSE_RATE;
+}
+
+// What one job is charged under the resolved rate card — Manager-only
 // reporting, never the automated daily email (which goes beyond just
 // Manager logins). Only a Response job is billed this way at all; Random
 // Patrol, Key Pickup and Key Drop Off return null ("—", not a dollar
@@ -250,14 +260,15 @@ const GST_MULTIPLIER = 1.10;
 // but $0." Returns null rather than 0 for a job still in progress (no
 // offsite time yet) since the final duration — and so the charge —
 // isn't known yet.
-export function jobCharge(job) {
+export function jobCharge(job, rateConfig) {
   const isResponse = !job.jobType || job.jobType === "response";
   if (!isResponse) return null;
   if (job.status === "cancelled") return 0;
   if (!job.onsiteTime || !job.offsiteTime) return null;
+  const rate = resolveResponseRate(job, rateConfig);
   const minutes = (new Date(job.offsiteTime).getTime() - new Date(job.onsiteTime).getTime()) / 60000;
-  const extraBlocks = minutes <= RESPONSE_BASE_MINUTES ? 0 : Math.ceil((minutes - RESPONSE_BASE_MINUTES) / RESPONSE_BLOCK_MINUTES);
-  const base = RESPONSE_BASE_RATE + extraBlocks * RESPONSE_BLOCK_RATE;
+  const extraBlocks = minutes <= rate.baseMinutes ? 0 : Math.ceil((minutes - rate.baseMinutes) / rate.blockMinutes);
+  const base = rate.baseRate + extraBlocks * rate.blockRate;
   return base * GST_MULTIPLIER;
 }
 
