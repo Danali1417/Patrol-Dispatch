@@ -51,6 +51,17 @@ export async function fetchArchivedJobsInRange(fromDateISO, toDateISO) {
   return queryArchive(params);
 }
 
+// Manager > Sites & runs "Recover from job history" — read-only preview
+// of sites reconstructable from what past jobs recorded about them (see
+// the recoverSitesPreview mode in api/kv.js for what can and can't be
+// recovered this way).
+export async function previewSiteRecovery() {
+  const res = await apiFetch("/api/kv?recoverSitesPreview=1");
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Couldn't check job history.");
+  return data;
+}
+
 // "Reset test data" wiping the archive (and, separately, all job photo
 // records) in one statement each — see api/kv.js. No enumeration step,
 // so this stays safe no matter how large either has grown.

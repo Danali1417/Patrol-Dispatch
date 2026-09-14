@@ -285,6 +285,77 @@ export default async function handler(req, res) {
     }
   }
 
+  // Manager-only, read-only: rebuilds candidate site records from job
+  // history, for recovering from the ops:sites data-loss incident this same
+  // PR fixes the cause of. Every dispatched job snapshots its site's own
+  // fields at the moment of dispatch (see doDispatch in App.jsx) —
+  // siteId, siteName, address, run, monitoringCo, monitoringEmail, bureau,
+  // poNumber, keyInfo, alarmCode — so any site that was ever dispatched to
+  // can be substantially reconstructed from whichever job referencing its
+  // siteId was dispatched most recently. Only siteNotes/siteContact (never
+  // copied onto a job) can't be recovered this way. Never writes anything —
+  // the Manager reviews the candidates and picks which to actually add back
+  // via the ordinary "addMany" sites op.
+  if (req.method === "GET" && req.query?.recoverSitesPreview === "1") {
+    const session = await requireRole(req, res, ["manager"]);
+    if (!session) return;
+    try {
+      const [liveRaw, sitesRaw, archiveRows] = await Promise.all([
+        kvGet(JOBS_KEY),
+        kvGet("ops:sites"),
+        kvQueryPrefix(JOB_ARCHIVE_PREFIX, { limit: 5000 }),
+      ]);
+      let liveJobs = [];
+      try { liveJobs = liveRaw ? JSON.parse(liveRaw) : []; } catch (e) { /* ignore */ }
+      let currentSites = [];
+      try { currentSites = sitesRaw ? JSON.parse(sitesRaw) : []; } catch (e) { /* ignore */ }
+      if (!Array.isArray(liveJobs)) liveJobs = [];
+      if (!Array.isArray(currentSites)) currentSites = [];
+
+      const knownIds = new Set(currentSites.map((s) => s.id));
+      const knownKeys = new Set(currentSites.map((s) => `${(s.name || "").trim().toLowerCase()}|${(s.address || "").trim().toLowerCase()}`));
+
+      const archivedJobs = archiveRows.map((r) => { try { return JSON.parse(r.value); } catch (e) { return null; } }).filter(Boolean);
+      const allJobs = [...liveJobs, ...archivedJobs].filter((j) => j && j.siteId && j.siteName && j.address);
+
+      // Latest dispatch per siteId wins, so a since-edited site's fields
+      // are as fresh as job history can offer.
+      const bySiteId = new Map();
+      for (const j of allJobs) {
+        const prev = bySiteId.get(j.siteId);
+        if (!prev || new Date(j.dispatchTime || 0) > new Date(prev.dispatchTime || 0)) bySiteId.set(j.siteId, j);
+      }
+
+      const candidates = [];
+      for (const [siteId, j] of bySiteId) {
+        if (knownIds.has(siteId)) continue;
+        const key = `${(j.siteName || "").trim().toLowerCase()}|${(j.address || "").trim().toLowerCase()}`;
+        if (knownKeys.has(key)) continue;
+        candidates.push({
+          id: siteId,
+          name: j.siteName,
+          address: j.address,
+          run: j.run || "Unassigned",
+          monitoringCo: j.monitoringCo || "",
+          monitoringEmail: j.monitoringEmail || "",
+          bureau: j.bureau || "",
+          poNumber: j.poNumber || "",
+          keyInfo: j.keyInfo || "",
+          alarmCode: j.alarmCode || "",
+          siteNotes: "",
+          siteContact: "",
+          lastJobNumber: j.jobNumber || "",
+          lastDispatchTime: j.dispatchTime || "",
+        });
+      }
+      candidates.sort((a, b) => a.name.localeCompare(b.name));
+      return res.status(200).json({ candidates, jobsScanned: allJobs.length, currentSiteCount: currentSites.length });
+    } catch (err) {
+      console.error("recoverSitesPreview failed:", err);
+      return res.status(500).json({ error: String(err?.message || err) });
+    }
+  }
+
   // Manager-only: "Reset test data" wiping the whole archive / all photo
   // records in one statement each, rather than ever having to enumerate
   // every row first — a plain DELETE-by-prefix stays cheap and safe

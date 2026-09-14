@@ -24,7 +24,7 @@ import { reverseGeocode, fetchStaticMap } from "./geocode.js";
 import { fetchJobPhotos, persistJobPhotos, uploadOriginalPhoto, fetchOriginalPhotoUrl } from "./jobPhotos.js";
 import { loadJobDraft, saveJobDraft, clearJobDraft } from "./jobDraft.js";
 import { fetchJobChat, sendJobChatMessage } from "./jobChat.js";
-import { searchArchivedJobs, fetchArchivedJobsInRange, resetArchiveAndPhotos } from "./jobArchive.js";
+import { searchArchivedJobs, fetchArchivedJobsInRange, resetArchiveAndPhotos, previewSiteRecovery } from "./jobArchive.js";
 
 /* ---------------------------------------------------------------
    SEED / REFERENCE DATA
@@ -5566,6 +5566,102 @@ function normalizeHeader(h) {
   return String(h || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+// Reconstructs sites from job history — every dispatched job snapshots its
+// site's own fields at the time (see doDispatch), so a site that's gone
+// missing from the list but was dispatched to at some point can usually be
+// rebuilt from the most recent job that referenced it. Only site notes and
+// site contact were never copied onto a job, so those come back blank.
+// Read-only until "Add selected" is pressed — nothing here writes anything
+// on its own.
+function SitesRecovery({ persistSites }) {
+  const [checking, setChecking] = useState(false);
+  const [candidates, setCandidates] = useState(null); // null = not checked yet
+  const [selected, setSelected] = useState(() => new Set());
+  const [error, setError] = useState("");
+  const [adding, setAdding] = useState(false);
+  const showToast = useToast();
+
+  async function check() {
+    setChecking(true);
+    setError("");
+    try {
+      const data = await previewSiteRecovery();
+      setCandidates(data.candidates || []);
+      setSelected(new Set((data.candidates || []).map((c) => c.id)));
+    } catch (err) {
+      setError(err.message || "Couldn't check job history.");
+    }
+    setChecking(false);
+  }
+
+  function toggle(id) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function addSelected() {
+    const chosen = candidates.filter((c) => selected.has(c.id)).map(({ lastJobNumber, lastDispatchTime, ...site }) => site);
+    if (!chosen.length) return;
+    setAdding(true);
+    const ok = await persistSites("addMany", { sites: chosen });
+    setAdding(false);
+    if (ok) {
+      showToast(`Added ${chosen.length} site(s) back from job history.`);
+      setCandidates((prev) => prev.filter((c) => !selected.has(c.id)));
+      setSelected(new Set());
+    } else {
+      showToast("Couldn't add those sites — try again.", "error");
+    }
+  }
+
+  return (
+    <div style={{ padding: 14, borderRadius: 8, border: "1px dashed var(--border)", background: "var(--panel-alt)", marginBottom: 24, maxWidth: 720 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>Recover missing sites from job history</div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>
+            Every dispatched job keeps a copy of its site's details. If a site has gone missing but was ever dispatched to, it can usually be rebuilt from that — except site notes and site contact, which aren't kept on a job.
+          </div>
+        </div>
+        <button onClick={check} disabled={checking} style={secondaryBtn}>
+          <RotateCcw size={13} /> {checking ? "Checking…" : "Check job history"}
+        </button>
+      </div>
+      {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 10 }}>{error}</div>}
+      {candidates && candidates.length === 0 && !error && (
+        <div style={{ color: "var(--text-dim)", fontSize: 12, marginTop: 10 }}>Nothing to recover — every site job history knows about is already in the list.</div>
+      )}
+      {candidates && candidates.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 8 }}>
+            Found {candidates.length} site(s) referenced by past jobs that aren't in the current list. Review, then add the ones you want back.
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 280, overflowY: "auto", marginBottom: 10 }}>
+            {candidates.map((c) => (
+              <label key={c.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 10px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12, cursor: "pointer" }}>
+                <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggle(c.id)} style={{ marginTop: 2 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600 }}>{c.name}</div>
+                  <div style={{ color: "var(--text-dim)", fontSize: 11 }}>{c.address}</div>
+                  <div style={{ color: "var(--text-dim)", fontSize: 10.5, marginTop: 2 }}>
+                    Run: {c.run}{c.monitoringCo ? ` · Monitoring: ${c.monitoringCo}` : ""}{c.bureau ? ` · Bureau: ${c.bureau}` : ""} · last seen on {c.lastJobNumber || "a job"}
+                  </div>
+                </div>
+              </label>
+            ))}
+          </div>
+          <button onClick={addSelected} disabled={adding || selected.size === 0} style={primaryBtn}>
+            {adding ? "Adding…" : `Add ${selected.size} selected site(s)`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SitesImport({ zones, sites, persistSites }) {
   const fileRef = useRef(null);
   const [busy, setBusy] = useState(false);
@@ -5742,6 +5838,8 @@ function SitesEditor({ zones, sites, persistSites }) {
           {editingId && <button onClick={cancelEdit} style={secondaryBtn}>Cancel</button>}
         </div>
       </div>
+
+      <SitesRecovery persistSites={persistSites} />
 
       <SitesImport zones={zones} sites={sites} persistSites={persistSites} />
 
