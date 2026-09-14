@@ -111,19 +111,45 @@ const DEFAULT_OUTCOME_PHRASES = [
   { id: "p8", name: "Police attended", text: "Police attended — no further action required." },
 ];
 
-// Case-insensitive de-dupe (first-seen casing wins) + alphabetical sort —
-// used for the Monitoring companies / Bureaus lists, which are built up
-// from manual adds, Excel imports, and "New Client" picks that could
-// easily introduce the same name twice with different casing.
-function dedupeSorted(names) {
-  const seen = new Map();
-  names.forEach((n) => {
-    const trimmed = (n || "").trim();
-    if (!trimmed) return;
-    const key = trimmed.toLowerCase();
-    if (!seen.has(key)) seen.set(key, trimmed);
-  });
-  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+// A load of a "seed with a default on first use" key (zones, sites,
+// public holidays, outcome phrases) throws the same way whether the key
+// was genuinely never set (404 — safe to seed) or the read simply failed
+// (network blip, cold start, a transient Supabase error — 5xx). Treating
+// those alike caused a real incident: a failed sites read got seeded with
+// the empty default and persisted, wiping out sites that really were
+// there. Only a confirmed 404 means "nothing stored yet".
+function isMissingKeyError(e) {
+  return e?.status === 404;
+}
+
+// Client-side mirror of applySitesOp in api/kv.js, used only to update
+// local state instantly (so e.g. a just-added site is immediately
+// findable in `sites` without waiting on a round trip) while the server
+// call for the same op is in flight — the server's response is still
+// what gets kept (see persistSites), this is a rendering nicety only.
+function applySitesOpLocal(current, op, payload) {
+  switch (op) {
+    case "add": return [...current, payload.site];
+    case "addMany": return [...current, ...payload.sites];
+    case "update": return current.map((s) => (s.id === payload.id ? { ...payload.site, id: payload.id } : s));
+    case "remove": return current.filter((s) => s.id !== payload.id);
+    case "renameRun": return current.map((s) => (s.run === payload.oldName ? { ...s, run: payload.newName } : s));
+    case "clearRunForZone": return current.map((s) => (s.run === payload.zone ? { ...s, run: "Unassigned" } : s));
+    case "clearAll": return [];
+    default: return current;
+  }
+}
+
+// Same idea as applySitesOpLocal, for Bureaus/Monitoring companies —
+// mirrors applyNameListOp in api/kv.js closely enough for an instant local
+// preview; the server's de-duped/sorted response is what actually sticks.
+function applyNameListOpLocal(current, op, payload) {
+  switch (op) {
+    case "add": return [...current, payload.name];
+    case "addMany": return [...current, ...payload.names];
+    case "remove": return current.filter((n) => n !== payload.name);
+    default: return current;
+  }
 }
 
 function makePhraseId() {
@@ -733,22 +759,30 @@ export default function SentrylinePrototype() {
     if (!session) return;
     (async () => {
       let z = [];
+      let zMissing = false;
       try {
         const res = await window.storage.get(ZONES_KEY, true);
         if (res && res.value) z = JSON.parse(res.value);
-      } catch (e) { /* nothing stored yet */ }
-      if (z.length === 0) {
+      } catch (e) {
+        if (isMissingKeyError(e)) zMissing = true;
+        else console.error("Failed to load runs — leaving the in-memory list empty rather than risk overwriting what's stored.", e);
+      }
+      if (zMissing) {
         z = DEFAULT_ZONES;
         try { await window.storage.set(ZONES_KEY, JSON.stringify(z), true); } catch (e) { /* ignore */ }
       }
       setZones(z);
 
       let s = [];
+      let sMissing = false;
       try {
         const res = await window.storage.get(SITES_KEY, true);
         if (res && res.value) s = JSON.parse(res.value);
-      } catch (e) { /* nothing stored yet */ }
-      if (s.length === 0) {
+      } catch (e) {
+        if (isMissingKeyError(e)) sMissing = true;
+        else console.error("Failed to load sites — leaving the in-memory list empty rather than risk overwriting what's stored.", e);
+      }
+      if (sMissing) {
         s = DEFAULT_SITES;
         try { await window.storage.set(SITES_KEY, JSON.stringify(s), true); } catch (e) { /* ignore */ }
       }
@@ -764,11 +798,15 @@ export default function SentrylinePrototype() {
     if (!session) return;
     (async () => {
       let h = [];
+      let hMissing = false;
       try {
         const res = await window.storage.get(PUBLIC_HOLIDAYS_KEY, true);
         if (res && res.value) h = JSON.parse(res.value);
-      } catch (e) { /* nothing stored yet */ }
-      if (h.length === 0) {
+      } catch (e) {
+        if (isMissingKeyError(e)) hMissing = true;
+        else console.error("Failed to load public holidays — leaving the in-memory list empty rather than risk overwriting what's stored.", e);
+      }
+      if (hMissing) {
         h = DEFAULT_PUBLIC_HOLIDAYS;
         try { await window.storage.set(PUBLIC_HOLIDAYS_KEY, JSON.stringify(h), true); } catch (e) { /* ignore */ }
       }
@@ -795,6 +833,7 @@ export default function SentrylinePrototype() {
     (async () => {
       let p = [];
       let needsResave = false;
+      let readFailed = false;
       try {
         const res = await window.storage.get(OUTCOME_PHRASES_KEY, true);
         if (res && res.value) {
@@ -802,12 +841,17 @@ export default function SentrylinePrototype() {
           needsResave = raw.some((x) => typeof x === "string");
           p = raw.map(normalizePhrase);
         }
-      } catch (e) { /* nothing stored yet */ }
-      if (p.length === 0) {
+      } catch (e) {
+        if (!isMissingKeyError(e)) {
+          readFailed = true;
+          console.error("Failed to load outcome phrases — leaving the in-memory list empty rather than risk overwriting what's stored.", e);
+        }
+      }
+      if (p.length === 0 && !readFailed) {
         p = DEFAULT_OUTCOME_PHRASES;
         needsResave = true;
       }
-      if (needsResave) {
+      if (needsResave && !readFailed) {
         try { await window.storage.set(OUTCOME_PHRASES_KEY, JSON.stringify(p), true); } catch (e) { /* ignore — will retry migrating next load */ }
       }
       setOutcomePhrases(p);
@@ -914,9 +958,25 @@ export default function SentrylinePrototype() {
     try { await window.storage.set(ZONES_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
   }, []);
 
-  const persistSites = useCallback(async (updated) => {
-    setSites(updated);
-    try { await window.storage.set(SITES_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
+  // Every mutation is a named operation (add one, update one by id, delete
+  // one by id, ...) applied server-side to whatever's currently stored,
+  // read fresh immediately before writing back — never a client-computed
+  // full array. Sites can be added by both Manager and Control Room (see
+  // OPERATOR_UP_WRITE_KEYS in api/kv.js), so a full-array overwrite
+  // computed from one device's possibly-stale local `sites` could
+  // silently erase a site added elsewhere since its last load — this is
+  // what actually happened in a real incident. See LIST_OP_KEYS/
+  // applySitesOp in api/kv.js for the server side of this.
+  const persistSites = useCallback(async (op, payload) => {
+    setSites((prev) => applySitesOpLocal(prev, op, payload));
+    try {
+      const res = await window.storage.applyOp(SITES_KEY, op, payload);
+      setSites(JSON.parse(res.value));
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
   }, []);
 
   const persistRoster = useCallback(async (updated) => {
@@ -929,19 +989,33 @@ export default function SentrylinePrototype() {
     try { await window.storage.set(OUTCOME_PHRASES_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
   }, []);
 
-  // Sorted + case-insensitively deduped on every save, since both lists
-  // are built up piecemeal (manual adds, Excel imports, "New Client" picks
-  // from the dispatch screen) and nothing else enforces uniqueness.
-  const persistMonitoringCompanies = useCallback(async (updated) => {
-    const clean = dedupeSorted(updated);
-    setMonitoringCompanies(clean);
-    try { await window.storage.set(MONITORING_COMPANIES_KEY, JSON.stringify(clean), true); } catch (e) { console.error(e); }
+  // Same op-based, read-fresh-then-write pattern as persistSites above
+  // (see its comment, and applyNameListOp in api/kv.js) — these lists can
+  // be open for editing in more than one Manager tab at once, so a
+  // client-computed full-array replacement risked the same silent-erase
+  // bug. Dedupe + sort still happens server-side (applyNameListOp).
+  const persistMonitoringCompanies = useCallback(async (op, payload) => {
+    setMonitoringCompanies((prev) => applyNameListOpLocal(prev, op, payload));
+    try {
+      const res = await window.storage.applyOp(MONITORING_COMPANIES_KEY, op, payload);
+      setMonitoringCompanies(JSON.parse(res.value));
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
   }, []);
 
-  const persistBureaus = useCallback(async (updated) => {
-    const clean = dedupeSorted(updated);
-    setBureaus(clean);
-    try { await window.storage.set(BUREAUS_KEY, JSON.stringify(clean), true); } catch (e) { console.error(e); }
+  const persistBureaus = useCallback(async (op, payload) => {
+    setBureaus((prev) => applyNameListOpLocal(prev, op, payload));
+    try {
+      const res = await window.storage.applyOp(BUREAUS_KEY, op, payload);
+      setBureaus(JSON.parse(res.value));
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
   }, []);
 
   const persistResponseRate = useCallback(async (updated) => {
@@ -1928,7 +2002,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
   }
 
   function handleSiteAdded(newSite) {
-    persistSites([...sites, newSite]);
+    persistSites("add", { site: newSite });
     setSiteId(newSite.id);
     setSiteQuery(siteLabel(newSite));
     setAddingSite(false);
@@ -4911,14 +4985,14 @@ function NameListEditor({ title, singular, items, persistItems, columnHints, rat
     const trimmed = name.trim();
     if (!trimmed) { setError("Enter a name."); return; }
     if (items.some((i) => i.toLowerCase() === trimmed.toLowerCase())) { setError("That name is already in the list."); return; }
-    persistItems([...items, trimmed]);
+    persistItems("add", { name: trimmed });
     setName("");
     showToast(`${singular} added.`);
   }
 
   function removeName(n) {
     showConfirm(`Remove "${n}" from ${title.toLowerCase()}?`, () => {
-      persistItems(items.filter((i) => i !== n));
+      persistItems("remove", { name: n });
       showToast("Removed.");
     });
   }
@@ -4956,7 +5030,7 @@ function NameListEditor({ title, singular, items, persistItems, columnHints, rat
         imported.push(n);
       });
 
-      if (imported.length) persistItems([...items, ...imported]);
+      if (imported.length) persistItems("addMany", { names: imported });
       setImportResult({ imported: imported.length, total: rows.length });
     } catch (err) {
       setError("Couldn't read that file — make sure it's a valid .xlsx, .xls, or .csv export.");
@@ -5402,7 +5476,7 @@ function ZonesEditor({ zones, persistZones, sites, persistSites, accounts, setAc
     if (zones.some((z) => z.toLowerCase() === newName.toLowerCase() && z !== oldName)) { setError("That run name already exists."); return; }
     const affected = accounts.filter((a) => a.role === "patrolman" && a.run === oldName);
     persistZones(zones.map((z) => (z === oldName ? newName : z)));
-    persistSites(sites.map((s) => (s.run === oldName ? { ...s, run: newName } : s)));
+    persistSites("renameRun", { oldName, newName });
     setRenaming(null);
     setError("");
     try {
@@ -5424,7 +5498,7 @@ function ZonesEditor({ zones, persistZones, sites, persistSites, accounts, setAc
       : `Delete run "${z}"?`;
     showConfirm(msg, async () => {
       persistZones(zones.filter((r) => r !== z));
-      if (siteCount) persistSites(sites.map((s) => (s.run === z ? { ...s, run: "Unassigned" } : s)));
+      if (siteCount) persistSites("clearRunForZone", { zone: z });
       try {
         if (patrolAffected.length) {
           await apiBulkUpdateAccounts({ updates: patrolAffected.map((a) => ({ loginName: a.loginName, role: a.role, patch: { run: "Unassigned" } })) });
@@ -5549,7 +5623,7 @@ function SitesImport({ zones, sites, persistSites }) {
         });
       });
 
-      if (imported.length) persistSites([...sites, ...imported]);
+      if (imported.length) persistSites("addMany", { sites: imported });
       setResult({ imported: imported.length, skippedMissing, skippedDupe, total: rows.length });
     } catch (err) {
       setError("Couldn't read that file — make sure it's a valid .xlsx, .xls, or .csv export.");
@@ -5601,10 +5675,10 @@ function SitesEditor({ zones, sites, persistSites }) {
     setError("");
     if (!form.name.trim() || !form.address.trim()) { setError("Site name and address are required."); return; }
     if (editingId) {
-      persistSites(sites.map((s) => (s.id === editingId ? { ...form, id: editingId } : s)));
+      persistSites("update", { id: editingId, site: form });
       showToast("Site changes saved.");
     } else {
-      persistSites([...sites, { ...form, id: `site_${Date.now()}` }]);
+      persistSites("add", { site: { ...form, id: `site_${Date.now()}` } });
       showToast(`Site "${form.name.trim()}" added.`);
     }
     cancelEdit();
@@ -5612,7 +5686,7 @@ function SitesEditor({ zones, sites, persistSites }) {
 
   function remove(id) {
     showConfirm("Delete this site? Past jobs already dispatched to it keep their own record.", () => {
-      persistSites(sites.filter((s) => s.id !== id));
+      persistSites("remove", { id });
       if (editingId === id) cancelEdit();
       showToast("Site removed.");
     });
@@ -5622,7 +5696,7 @@ function SitesEditor({ zones, sites, persistSites }) {
     showConfirm(
       `Delete all ${sites.length} site(s)? This can't be undone — past jobs already dispatched keep their own record, but the site list will be empty.`,
       () => {
-        persistSites([]);
+        persistSites("clearAll", {});
         cancelEdit();
         showToast("All sites removed.");
       },

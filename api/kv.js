@@ -20,6 +20,103 @@ const MANAGER_ONLY_WRITE_KEYS = new Set(["ops:logo", "ops:companyName", "ops:out
 const OPERATOR_UP_WRITE_KEYS = new Set(["ops:sites", "ops:zones", "ops:roster"]);
 const KNOWN_KEYS = new Set(["ops:jobs", "ops:sites", "ops:zones", "ops:roster", "ops:logo", "ops:companyName", "ops:outcomePhrases", "ops:monitoringCompanies", "ops:bureaus", "ops:publicHolidays", "ops:responseRate", "ops:bureauRates", "ops:monitoringRates"]);
 
+// ops:sites is written by both Manager (Sites & runs) and Control Room
+// (adding a site inline while dispatching), and ops:bureaus /
+// ops:monitoringCompanies can be edited from more than one open Manager
+// tab — every write here used to be a client-computed full-array
+// replacement, the same shape of bug as ops:jobs (see mergeJobsWrite's
+// comment): whichever stale snapshot a device last polled would silently
+// win and erase anything added elsewhere since. Unlike ops:jobs though,
+// these lists have no reliable per-item "last touched" timestamp, and a
+// legitimate single-item delete must actually shrink the list — a
+// diff/carry-forward merge can't tell that apart from a stale array
+// that simply forgot to mention an item. So instead every mutation is a
+// named operation applied to a copy read fresh from Supabase immediately
+// before writing back, the same read-then-write-immediately pattern the
+// job-chat POST branch above uses.
+const LIST_OP_KEYS = new Set(["ops:sites", "ops:bureaus", "ops:monitoringCompanies"]);
+
+function applySitesOp(current, op, payload) {
+  switch (op) {
+    case "add": {
+      const site = payload?.site;
+      if (!site || !site.id) throw new Error("site is required");
+      return [...current, site];
+    }
+    case "addMany": {
+      const sites = Array.isArray(payload?.sites) ? payload.sites : [];
+      return [...current, ...sites];
+    }
+    case "update": {
+      const { id, site } = payload || {};
+      if (!id || !site) throw new Error("id and site are required");
+      return current.map((s) => (s.id === id ? { ...site, id } : s));
+    }
+    case "remove": {
+      if (!payload?.id) throw new Error("id is required");
+      return current.filter((s) => s.id !== payload.id);
+    }
+    case "renameRun": {
+      const { oldName, newName } = payload || {};
+      if (!oldName || !newName) throw new Error("oldName and newName are required");
+      return current.map((s) => (s.run === oldName ? { ...s, run: newName } : s));
+    }
+    case "clearRunForZone": {
+      if (!payload?.zone) throw new Error("zone is required");
+      return current.map((s) => (s.run === payload.zone ? { ...s, run: "Unassigned" } : s));
+    }
+    case "clearAll":
+      return [];
+    default:
+      throw new Error(`Unknown sites op: ${op}`);
+  }
+}
+
+// Same case-insensitive de-dupe + alphabetical sort as dedupeSorted() in
+// App.jsx — kept in step with it since both places need to agree on what
+// "the same name" means.
+function dedupeSortedNames(names) {
+  const seen = new Map();
+  names.forEach((n) => {
+    const trimmed = String(n || "").trim();
+    if (!trimmed) return;
+    const key = trimmed.toLowerCase();
+    if (!seen.has(key)) seen.set(key, trimmed);
+  });
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+
+function applyNameListOp(current, op, payload) {
+  switch (op) {
+    case "add": {
+      if (!payload?.name) throw new Error("name is required");
+      return dedupeSortedNames([...current, payload.name]);
+    }
+    case "addMany": {
+      const names = Array.isArray(payload?.names) ? payload.names : [];
+      return dedupeSortedNames([...current, ...names]);
+    }
+    case "remove": {
+      if (!payload?.name) throw new Error("name is required");
+      return current.filter((n) => n !== payload.name);
+    }
+    default:
+      throw new Error(`Unknown name-list op: ${op}`);
+  }
+}
+
+async function applyListOp(key, op, payload) {
+  const raw = await kvGet(key);
+  let current;
+  try { current = raw ? JSON.parse(raw) : []; } catch (e) { current = []; }
+  if (!Array.isArray(current)) current = [];
+
+  const next = key === "ops:sites" ? applySitesOp(current, op, payload) : applyNameListOp(current, op, payload);
+  const value = JSON.stringify(next);
+  await kvSet(key, value);
+  return value;
+}
+
 const JOBS_KEY = "ops:jobs";
 
 // Best-effort "how recently was this job touched" — the max timestamp
@@ -380,6 +477,18 @@ export default async function handler(req, res) {
       : ["manager", "operator", "patrolman"];
     const session = await requireRole(req, res, roles);
     if (!session) return; // response already sent
+
+    if (LIST_OP_KEYS.has(key)) {
+      const { op, ...payload } = req.body || {};
+      if (!op) return res.status(400).json({ error: "op is required for this key" });
+      try {
+        const value = await applyListOp(key, op, payload);
+        return res.status(200).json({ key, value });
+      } catch (err) {
+        console.error("kv list-op POST failed:", err);
+        return res.status(400).json({ error: String(err?.message || err) });
+      }
+    }
 
     const { value } = req.body || {};
     if (value === undefined) return res.status(400).json({ error: "value is required" });
