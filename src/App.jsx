@@ -11,7 +11,7 @@ import {
   reportStatusLabel, REPORT_COLUMNS_BRIEF, REPORT_COLUMNS_DETAILED,
   reportRow, patrolmanRunSummary, operatorSummary, cancelledJobCount,
   JOB_TYPES, jobTypeLabel, isResponseJob, jobTypeCounts, rosterDateFor, resolveJobRoster,
-  jobCharge, formatCharge,
+  jobCharge, formatCharge, DEFAULT_RESPONSE_RATE,
 } from "./reportUtils.js";
 import { restoreSession, login as apiLogin, logout as apiLogout, setOnUnauthorized } from "./auth.js";
 import {
@@ -56,6 +56,9 @@ const DEFAULT_COMPANY_NAME = "Ausgroup";
 const OUTCOME_PHRASES_KEY = "ops:outcomePhrases";
 const MONITORING_COMPANIES_KEY = "ops:monitoringCompanies";
 const BUREAUS_KEY = "ops:bureaus";
+const RESPONSE_RATE_KEY = "ops:responseRate";
+const BUREAU_RATES_KEY = "ops:bureauRates";
+const MONITORING_RATES_KEY = "ops:monitoringRates";
 const PUBLIC_HOLIDAYS_KEY = "ops:publicHolidays";
 // NSW public holidays, used by the weekend/holiday SLA bucket below —
 // a starting list only (2026-2027). There's no reliable government feed
@@ -528,6 +531,9 @@ export default function SentrylinePrototype() {
   const [outcomePhrases, setOutcomePhrases] = useState([]);
   const [monitoringCompanies, setMonitoringCompanies] = useState([]);
   const [bureaus, setBureaus] = useState([]);
+  const [responseRate, setResponseRate] = useState(DEFAULT_RESPONSE_RATE);
+  const [bureauRates, setBureauRates] = useState({});
+  const [monitoringRates, setMonitoringRates] = useState({});
   const [publicHolidays, setPublicHolidays] = useState([]);
   const [logoUrl, setLogoUrl] = useState("");
   const [companyName, setCompanyName] = useState(DEFAULT_COMPANY_NAME);
@@ -823,6 +829,18 @@ export default function SentrylinePrototype() {
         const res = await window.storage.get(BUREAUS_KEY, true);
         if (res && res.value) setBureaus(JSON.parse(res.value));
       } catch (e) { /* nothing stored yet */ }
+      try {
+        const res = await window.storage.get(RESPONSE_RATE_KEY, true);
+        if (res && res.value) setResponseRate(JSON.parse(res.value));
+      } catch (e) { /* not set yet — DEFAULT_RESPONSE_RATE stays in effect */ }
+      try {
+        const res = await window.storage.get(BUREAU_RATES_KEY, true);
+        if (res && res.value) setBureauRates(JSON.parse(res.value));
+      } catch (e) { /* nothing stored yet */ }
+      try {
+        const res = await window.storage.get(MONITORING_RATES_KEY, true);
+        if (res && res.value) setMonitoringRates(JSON.parse(res.value));
+      } catch (e) { /* nothing stored yet */ }
     })();
   }, [session]);
 
@@ -924,6 +942,21 @@ export default function SentrylinePrototype() {
     const clean = dedupeSorted(updated);
     setBureaus(clean);
     try { await window.storage.set(BUREAUS_KEY, JSON.stringify(clean), true); } catch (e) { console.error(e); }
+  }, []);
+
+  const persistResponseRate = useCallback(async (updated) => {
+    setResponseRate(updated);
+    try { await window.storage.set(RESPONSE_RATE_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
+  }, []);
+
+  const persistBureauRates = useCallback(async (updated) => {
+    setBureauRates(updated);
+    try { await window.storage.set(BUREAU_RATES_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
+  }, []);
+
+  const persistMonitoringRates = useCallback(async (updated) => {
+    setMonitoringRates(updated);
+    try { await window.storage.set(MONITORING_RATES_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
   }, []);
 
   const persistPublicHolidays = useCallback(async (updated) => {
@@ -1049,7 +1082,7 @@ export default function SentrylinePrototype() {
           {!accountsLoaded || !sitesLoaded ? (
             <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
           ) : session.role === "manager" ? (
-            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
+            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
           ) : session.role === "operator" ? (
             <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} logoUrl={logoUrl} monitoringCompanies={monitoringCompanies} bureaus={bureaus} />
           ) : (
@@ -3514,7 +3547,7 @@ function EmailModal({ job, companyName, onClose, onSent }) {
 
 /* ---------------------- Logs ---------------------- */
 
-function Logs({ jobs, now, role, companyName, logoUrl, roster }) {
+function Logs({ jobs, now, role, companyName, logoUrl, roster, responseRate, bureauRates, monitoringRates }) {
   const [subTab, setSubTab] = useState("overview");
   const showReports = role === "manager";
 
@@ -3544,7 +3577,7 @@ function Logs({ jobs, now, role, companyName, logoUrl, roster }) {
         ))}
       </div>
       {subTab === "overview" && <LogsOverview jobs={jobs} now={now} />}
-      {subTab === "reports" && <Reports jobs={jobs} companyName={companyName} logoUrl={logoUrl} roster={roster} />}
+      {subTab === "reports" && <Reports jobs={jobs} companyName={companyName} logoUrl={logoUrl} roster={roster} responseRate={responseRate} bureauRates={bureauRates} monitoringRates={monitoringRates} />}
     </div>
   );
 }
@@ -3626,7 +3659,8 @@ function LogsOverview({ jobs, now }) {
   );
 }
 
-function Reports({ jobs, companyName, logoUrl, roster }) {
+function Reports({ jobs, companyName, logoUrl, roster, responseRate, bureauRates, monitoringRates }) {
+  const rateConfig = { defaultRate: responseRate, bureauRates, monitoringRates };
   const [reportType, setReportType] = useState("brief");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -3684,8 +3718,8 @@ function Reports({ jobs, companyName, logoUrl, roster }) {
   // report (api/_lib/buildReport.js), which this deliberately stays out
   // of. See jobCharge's own comment in reportUtils.js for the rate card.
   const chargeColumns = [...columns, "Charged"];
-  const chargeRows = rows.map((r, i) => [...r, formatCharge(jobCharge(filtered[i]))]);
-  const totalCharged = filtered.reduce((sum, j) => sum + (jobCharge(j) || 0), 0);
+  const chargeRows = rows.map((r, i) => [...r, formatCharge(jobCharge(filtered[i], rateConfig))]);
+  const totalCharged = filtered.reduce((sum, j) => sum + (jobCharge(j, rateConfig) || 0), 0);
 
   // A quick on-screen search across every column (job #, date, time, site,
   // run, patrolman, operator, status, ...) — separate from the date/time
@@ -4483,7 +4517,7 @@ function DetailRow({ icon: Icon, label, value }) {
    MANAGER VIEW — create & manage logins
 ---------------------------------------------------------------- */
 
-function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
+function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, responseRate, persistResponseRate, bureauRates, persistBureauRates, monitoringRates, persistMonitoringRates, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
   const [tab, setTab] = useState("accounts");
   const showConfirm = useConfirm();
   const showToast = useToast();
@@ -4527,10 +4561,10 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
       <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
         {tab === "accounts" && <AccountsManager accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />}
         {tab === "phrases" && <OutcomePhrasesEditor outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} />}
-        {tab === "clients" && <ClientListsManager monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} />}
+        {tab === "clients" && <ClientListsManager monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} />}
         {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} />}
-        {tab === "logs" && <Logs jobs={jobs} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} roster={roster} />}
+        {tab === "logs" && <Logs jobs={jobs} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} roster={roster} responseRate={responseRate} bureauRates={bureauRates} monitoringRates={monitoringRates} />}
       </div>
     </div>
   );
@@ -4762,7 +4796,65 @@ function OutcomePhrasesEditor({ outcomePhrases, persistOutcomePhrases }) {
   );
 }
 
-function ClientListsManager({ monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus }) {
+// Four labeled number inputs shared by the org-wide default rate editor
+// and each per-item (Bureau/Monitoring company) override editor below —
+// same shape either way, just a different rate object and onChange.
+function RateFields({ rate, onChange }) {
+  function set(field, value) {
+    const num = parseFloat(value);
+    onChange({ ...rate, [field]: Number.isFinite(num) ? num : 0 });
+  }
+  return (
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+      <Field label="Base rate ($, incl. GST)" style={{ marginBottom: 0 }}>
+        <input type="number" step="0.01" min="0" value={rate.baseRate} onChange={(e) => set("baseRate", e.target.value)} style={{ ...selectStyle, width: 130 }} />
+      </Field>
+      <Field label="First (minutes)" style={{ marginBottom: 0 }}>
+        <input type="number" step="1" min="1" value={rate.baseMinutes} onChange={(e) => set("baseMinutes", e.target.value)} style={{ ...selectStyle, width: 100 }} />
+      </Field>
+      <Field label="Then, per block ($)" style={{ marginBottom: 0 }}>
+        <input type="number" step="0.01" min="0" value={rate.blockRate} onChange={(e) => set("blockRate", e.target.value)} style={{ ...selectStyle, width: 130 }} />
+      </Field>
+      <Field label="Block size (minutes)" style={{ marginBottom: 0 }}>
+        <input type="number" step="1" min="1" value={rate.blockMinutes} onChange={(e) => set("blockMinutes", e.target.value)} style={{ ...selectStyle, width: 100 }} />
+      </Field>
+    </div>
+  );
+}
+
+// The org-wide fallback rate — applied to a Response job's "Charged"
+// figure in Reports whenever neither its Bureau nor its Monitoring
+// company (see NameListEditor's rate override below) has one set.
+function ResponseRateEditor({ responseRate, persistResponseRate }) {
+  const [draft, setDraft] = useState(responseRate);
+  const showToast = useToast();
+  useEffect(() => { setDraft(responseRate); }, [responseRate]);
+  const dirty = JSON.stringify(draft) !== JSON.stringify(responseRate);
+
+  function save() {
+    persistResponseRate(draft);
+    showToast("Default response rate saved.");
+  }
+
+  return (
+    <div style={{ padding: 14, borderRadius: 8, border: "1px dashed var(--border)", background: "var(--panel-alt)", marginBottom: 24, maxWidth: 640 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Default response rate</div>
+      <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 10 }}>
+        Used for every Response job's "Charged" figure in Reports (Manager only), unless its Bureau or Monitoring
+        company below has its own rate set — a Bureau's own rate always wins if both are set.
+      </div>
+      <RateFields rate={draft} onChange={setDraft} />
+      <button onClick={save} disabled={!dirty} style={{ ...primaryBtn, marginTop: 12, opacity: dirty ? 1 : 0.5, cursor: dirty ? "pointer" : "not-allowed" }}>
+        Save default rate
+      </button>
+    </div>
+  );
+}
+
+function ClientListsManager({
+  monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus,
+  responseRate, persistResponseRate, bureauRates, persistBureauRates, monitoringRates, persistMonitoringRates,
+}) {
   return (
     <div>
       <SectionTitle icon={Building2} title="Monitoring & Bureau" />
@@ -4771,22 +4863,48 @@ function ClientListsManager({ monitoringCompanies, persistMonitoringCompanies, b
         "New Client" option the moment a name isn't listed yet (which emails a follow-up here so it can be added
         properly). Add names one at a time below, or upload a spreadsheet with a column of names.
       </div>
+      <ResponseRateEditor responseRate={responseRate} persistResponseRate={persistResponseRate} />
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-        <NameListEditor title="Monitoring companies" singular="Monitoring company" items={monitoringCompanies} persistItems={persistMonitoringCompanies} columnHints={["monitoring"]} />
-        <NameListEditor title="Bureaus" singular="Bureau" items={bureaus} persistItems={persistBureaus} columnHints={["bureau"]} />
+        <NameListEditor title="Monitoring companies" singular="Monitoring company" items={monitoringCompanies} persistItems={persistMonitoringCompanies} columnHints={["monitoring"]} rates={monitoringRates} persistRates={persistMonitoringRates} />
+        <NameListEditor title="Bureaus" singular="Bureau" items={bureaus} persistItems={persistBureaus} columnHints={["bureau"]} rates={bureauRates} persistRates={persistBureauRates} />
       </div>
     </div>
   );
 }
 
-function NameListEditor({ title, singular, items, persistItems, columnHints }) {
+function NameListEditor({ title, singular, items, persistItems, columnHints, rates, persistRates }) {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  const [editingRate, setEditingRate] = useState(null);
+  const [rateDraft, setRateDraft] = useState(DEFAULT_RESPONSE_RATE);
   const fileRef = useRef(null);
   const showToast = useToast();
   const showConfirm = useConfirm();
+
+  // Only Bureaus and Monitoring companies pass `rates`/`persistRates` — a
+  // per-item rate override for the alarm-response callout charge shown in
+  // Manager's Reports tab (see jobCharge in reportUtils.js). A Bureau's
+  // own rate wins over a Monitoring company's if a job's site has both.
+  function openRateEditor(n) {
+    setEditingRate(editingRate === n ? null : n);
+    setRateDraft((rates && rates[n]) || DEFAULT_RESPONSE_RATE);
+  }
+
+  function saveRate(n) {
+    persistRates({ ...rates, [n]: rateDraft });
+    setEditingRate(null);
+    showToast(`Custom rate saved for ${n}.`);
+  }
+
+  function clearRate(n) {
+    const updated = { ...rates };
+    delete updated[n];
+    persistRates(updated);
+    setEditingRate(null);
+    showToast(`${n} now uses the default rate.`);
+  }
 
   function addName() {
     setError("");
@@ -4853,9 +4971,30 @@ function NameListEditor({ title, singular, items, persistItems, columnHints }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12, maxHeight: 280, overflowY: "auto" }}>
         {items.length === 0 && <Empty text="None added yet." />}
         {items.map((n) => (
-          <div key={n} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12.5 }}>
-            <span style={{ flex: 1 }}>{n}</span>
-            <button onClick={() => removeName(n)} title="Remove" style={iconBtn}><Trash2 size={12} color="var(--breach)" /></button>
+          <div key={n}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12.5 }}>
+              <span style={{ flex: 1 }}>{n}</span>
+              {persistRates && (
+                <button
+                  onClick={() => openRateEditor(n)}
+                  title={rates?.[n] ? "Edit this custom rate" : "Set a custom rate for this one"}
+                  style={iconBtn}
+                >
+                  <CreditCard size={12} color={rates?.[n] ? "var(--accent)" : "var(--text-dim)"} />
+                </button>
+              )}
+              <button onClick={() => removeName(n)} title="Remove" style={iconBtn}><Trash2 size={12} color="var(--breach)" /></button>
+            </div>
+            {editingRate === n && (
+              <div style={{ padding: 10, marginTop: 4, marginBottom: 2, borderRadius: 7, background: "var(--panel-alt)", border: "1px solid var(--border)" }}>
+                <RateFields rate={rateDraft} onChange={setRateDraft} />
+                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                  <button onClick={() => saveRate(n)} style={primaryBtn}>Save</button>
+                  {rates?.[n] && <button onClick={() => clearRate(n)} style={secondaryBtn}>Use default rate</button>}
+                  <button onClick={() => setEditingRate(null)} style={secondaryBtn}>Cancel</button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
