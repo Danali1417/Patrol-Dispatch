@@ -228,3 +228,38 @@ export function jobTypeCounts(filteredJobs) {
     .map((t) => ({ jobType: t.id, label: t.label, count: byType[t.id] }))
     .sort((a, b) => b.count - a.count);
 }
+
+// The alarm-response callout rate card: $53.12 for the first 20 minutes
+// onsite, plus $17.70 per additional 10-minute block (any partial minute
+// rounds up to a full block). GST-inclusive at Australia's standard 10%
+// rate. Manager-facing only — see jobEarnings's own comment for why.
+const RESPONSE_BASE_RATE = 53.12;
+const RESPONSE_BASE_MINUTES = 20;
+const RESPONSE_BLOCK_RATE = 17.70;
+const RESPONSE_BLOCK_MINUTES = 10;
+const GST_MULTIPLIER = 1.10;
+
+// What one job earned under the rate card above — Manager-only reporting,
+// never the automated daily email (which goes beyond just Manager logins).
+// Only a Response job is billed this way at all; Random Patrol, Key
+// Pickup and Key Drop Off return null ("—", not a dollar figure) since
+// they're outside this rate card entirely. A cancelled Response job
+// returns 0 — attendance never happened, so there's nothing to charge —
+// which is deliberately distinct from null: null means "not applicable to
+// this job type or not finished yet," 0 means "applicable, but $0."
+// Returns null rather than 0 for a job still in progress (no offsite time
+// yet) since the final duration — and so the charge — isn't known yet.
+export function jobEarnings(job) {
+  const isResponse = !job.jobType || job.jobType === "response";
+  if (!isResponse) return null;
+  if (job.status === "cancelled") return 0;
+  if (!job.onsiteTime || !job.offsiteTime) return null;
+  const minutes = (new Date(job.offsiteTime).getTime() - new Date(job.onsiteTime).getTime()) / 60000;
+  const extraBlocks = minutes <= RESPONSE_BASE_MINUTES ? 0 : Math.ceil((minutes - RESPONSE_BASE_MINUTES) / RESPONSE_BLOCK_MINUTES);
+  const base = RESPONSE_BASE_RATE + extraBlocks * RESPONSE_BLOCK_RATE;
+  return base * GST_MULTIPLIER;
+}
+
+export function formatEarnings(amount) {
+  return amount === null ? "—" : `$${amount.toFixed(2)}`;
+}

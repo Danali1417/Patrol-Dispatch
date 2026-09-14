@@ -11,6 +11,7 @@ import {
   reportStatusLabel, REPORT_COLUMNS_BRIEF, REPORT_COLUMNS_DETAILED,
   reportRow, patrolmanRunSummary, operatorSummary, cancelledJobCount,
   JOB_TYPES, jobTypeLabel, isResponseJob, jobTypeCounts, rosterDateFor, resolveJobRoster,
+  jobEarnings, formatEarnings,
 } from "./reportUtils.js";
 import { restoreSession, login as apiLogin, logout as apiLogout, setOnUnauthorized } from "./auth.js";
 import {
@@ -3678,13 +3679,21 @@ function Reports({ jobs, companyName, logoUrl, roster }) {
   const totalByType = typeCounts.reduce((sum, t) => sum + t.count, 0);
   const hasFilter = dateFrom || dateTo || timeFrom || timeTo || tableSearch;
 
+  // Manager-only — appended here rather than in reportRow/REPORT_COLUMNS
+  // themselves, since those are shared with the automated daily email
+  // report (api/_lib/buildReport.js), which this deliberately stays out
+  // of. See jobEarnings's own comment in reportUtils.js for the rate card.
+  const earnedColumns = [...columns, "Earned"];
+  const earnedRows = rows.map((r, i) => [...r, formatEarnings(jobEarnings(filtered[i]))]);
+  const totalEarned = filtered.reduce((sum, j) => sum + (jobEarnings(j) || 0), 0);
+
   // A quick on-screen search across every column (job #, date, time, site,
   // run, patrolman, operator, status, ...) — separate from the date/time
   // range above, which decides what's *in* the report at all (and what
   // the PDF/email include). This only narrows what's shown on screen
   // right now, useful once a report runs into the hundreds of rows.
   const q = tableSearch.trim().toLowerCase();
-  const displayRows = q ? rows.filter((r) => r.some((cell) => String(cell ?? "").toLowerCase().includes(q))) : rows;
+  const displayRows = q ? earnedRows.filter((r) => r.some((cell) => String(cell ?? "").toLowerCase().includes(q))) : earnedRows;
 
   function clearFilters() { setDateFrom(""); setDateTo(""); setTimeFrom(""); setTimeTo(""); setTableSearch(""); }
 
@@ -3708,17 +3717,18 @@ function Reports({ jobs, companyName, logoUrl, roster }) {
     doc.text(`Date range: ${dateFrom || "any"} to ${dateTo || "any"}${timeFrom || timeTo ? `  ·  Time: ${timeFrom || "any"} to ${timeTo || "any"}` : ""}`, 40, 58);
     doc.text(`Generated ${fmtDateTime(new Date().toISOString())}`, 40, 72);
     doc.text(`${rows.length} job(s) — ${cancelledCount} cancelled`, 40, 86);
+    doc.text(`Total earned: $${totalEarned.toFixed(2)}`, 40, 100);
     autoTable(doc, {
-      startY: 100,
-      head: [columns],
-      body: rows,
+      startY: 114,
+      head: [earnedColumns],
+      body: earnedRows,
       styles: { fontSize: 8, cellPadding: 4, overflow: "linebreak" },
       headStyles: { fillColor: [255, 176, 32], textColor: [20, 20, 20] },
       columnStyles: reportType === "detailed" ? { 12: { cellWidth: 160 }, 13: { cellWidth: 160 } } : undefined,
       margin: { bottom: 50 },
     });
 
-    const typeStartY = (doc.lastAutoTable?.finalY || 100) + 26;
+    const typeStartY = (doc.lastAutoTable?.finalY || 114) + 26;
     doc.setFontSize(11);
     doc.setTextColor(20);
     doc.text("Job type breakdown", 40, typeStartY);
@@ -3905,7 +3915,7 @@ function Reports({ jobs, companyName, logoUrl, roster }) {
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
         <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
-          {rows.length} job{rows.length !== 1 ? "s" : ""} in this report — {cancelledCount} cancelled
+          {rows.length} job{rows.length !== 1 ? "s" : ""} in this report — {cancelledCount} cancelled — Total earned <b style={{ color: "var(--accent)" }}>${totalEarned.toFixed(2)}</b>
           {q && ` — ${displayRows.length} shown`}
         </div>
         {rows.length > 0 && (
@@ -3927,7 +3937,7 @@ function Reports({ jobs, companyName, logoUrl, roster }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
             <thead>
               <tr style={{ background: "var(--panel-alt)" }}>
-                {columns.map((c) => <th key={c} style={{ textAlign: "left", padding: "8px 10px", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", position: "sticky", top: 0, background: "var(--panel-alt)", zIndex: 1 }}>{c}</th>)}
+                {earnedColumns.map((c) => <th key={c} style={{ textAlign: "left", padding: "8px 10px", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap", position: "sticky", top: 0, background: "var(--panel-alt)", zIndex: 1 }}>{c}</th>)}
               </tr>
             </thead>
             <tbody>
