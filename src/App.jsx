@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback, useContext, createContext } from "react";
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback, useContext, createContext } from "react";
 import {
   Bell, Camera, CheckCircle2, AlertTriangle, Clock, LogOut, Mail,
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
@@ -2199,20 +2199,20 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
 
       <div style={{ display: "flex", gap: 12 }}>
         <Field label="Job number" style={{ flex: 1 }}>
-          <input value={jobNumber} onChange={(e) => setJobNumber(e.target.value.toUpperCase())} placeholder="Our own job reference" style={selectStyle} />
+          <UpperInput value={jobNumber} onChange={setJobNumber} placeholder="Our own job reference" style={selectStyle} />
         </Field>
         <Field label="Order number (optional)" style={{ flex: 1 }}>
-          <input value={orderNo} onChange={(e) => setOrderNo(e.target.value.toUpperCase())} placeholder="Client / monitoring company's reference" style={selectStyle} />
+          <UpperInput value={orderNo} onChange={setOrderNo} placeholder="Client / monitoring company's reference" style={selectStyle} />
         </Field>
       </div>
 
       <Field label={descriptionLabel}>
-        <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value.toUpperCase())} placeholder={descriptionPlaceholder} style={{ ...selectStyle, resize: "vertical", fontFamily: "var(--sans)" }} />
+        <UpperTextarea rows={3} value={description} onChange={setDescription} placeholder={descriptionPlaceholder} style={{ ...selectStyle, resize: "vertical", fontFamily: "var(--sans)" }} />
       </Field>
 
       <div style={{ display: "flex", gap: 12 }}>
-        <Field label="Key number / code" style={{ flex: 1 }}><input value={keyInfo} onChange={(e) => setKeyInfo(e.target.value.toUpperCase())} style={selectStyle} /></Field>
-        <Field label="Alarm code" style={{ width: 130 }}><input value={alarmCode} onChange={(e) => setAlarmCode(e.target.value.toUpperCase())} style={selectStyle} /></Field>
+        <Field label="Key number / code" style={{ flex: 1 }}><UpperInput value={keyInfo} onChange={setKeyInfo} style={selectStyle} /></Field>
+        <Field label="Alarm code" style={{ width: 130 }}><UpperInput value={alarmCode} onChange={setAlarmCode} style={selectStyle} /></Field>
       </div>
 
       {(jobType === "keyPickup" || jobType === "keyDropoff") && (
@@ -2327,9 +2327,9 @@ function ComboSelect({ label, value, options, onChange, onNewClient, placeholder
   return (
     <div style={{ position: "relative", ...style }}>
       <Field label={label}>
-        <input
+        <UpperInput
           value={query}
-          onChange={(e) => { setQuery(e.target.value.toUpperCase()); onChange(""); setOpen(true); }}
+          onChange={(v) => { setQuery(v); onChange(""); setOpen(true); }}
           onFocus={() => setOpen(true)}
           onBlur={() => { blurTimer.current = setTimeout(() => setOpen(false), 150); }}
           onKeyDown={handleKeyDown}
@@ -2421,10 +2421,10 @@ function AddSiteInline({ zones, initialName = "", monitoringCompanies, bureaus, 
   return (
     <div style={{ padding: 14, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel-alt)", marginBottom: 14 }}>
       <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>New site</div>
-      <Field label="Site name"><input value={form.name} onChange={(e) => set("name", e.target.value.toUpperCase())} style={selectStyle} /></Field>
-      <Field label="Address"><input value={form.address} onChange={(e) => set("address", e.target.value.toUpperCase())} placeholder="Street, suburb, state" style={selectStyle} /></Field>
+      <Field label="Site name"><UpperInput value={form.name} onChange={(v) => set("name", v)} style={selectStyle} /></Field>
+      <Field label="Address"><UpperInput value={form.address} onChange={(v) => set("address", v)} placeholder="Street, suburb, state" style={selectStyle} /></Field>
       <div style={{ display: "flex", gap: 12 }}>
-        <Field label="PO number" style={{ flex: 1 }}><input value={form.poNumber} onChange={(e) => set("poNumber", e.target.value.toUpperCase())} style={selectStyle} /></Field>
+        <Field label="PO number" style={{ flex: 1 }}><UpperInput value={form.poNumber} onChange={(v) => set("poNumber", v)} style={selectStyle} /></Field>
         <Field label="Run / zone" style={{ width: 160 }}>
           <select value={form.run} onChange={(e) => set("run", e.target.value)} style={selectStyle}>
             <option value="Unassigned">Unassigned</option>
@@ -2454,8 +2454,8 @@ function AddSiteInline({ zones, initialName = "", monitoringCompanies, bureaus, 
       </div>
       <Field label="Monitoring email (optional)"><input type="email" value={form.monitoringEmail} onChange={(e) => set("monitoringEmail", e.target.value)} placeholder="Where to send the outcome report" style={selectStyle} /></Field>
       <div style={{ display: "flex", gap: 12 }}>
-        <Field label="Key / swipe card (optional)" style={{ flex: 1 }}><input value={form.keyInfo} onChange={(e) => set("keyInfo", e.target.value.toUpperCase())} style={selectStyle} /></Field>
-        <Field label="Alarm code (optional)" style={{ width: 130 }}><input value={form.alarmCode} onChange={(e) => set("alarmCode", e.target.value.toUpperCase())} style={selectStyle} /></Field>
+        <Field label="Key / swipe card (optional)" style={{ flex: 1 }}><UpperInput value={form.keyInfo} onChange={(v) => set("keyInfo", v)} style={selectStyle} /></Field>
+        <Field label="Alarm code (optional)" style={{ width: 130 }}><UpperInput value={form.alarmCode} onChange={(v) => set("alarmCode", v)} style={selectStyle} /></Field>
       </div>
       {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
       <div style={{ display: "flex", gap: 8 }}>
@@ -2809,31 +2809,31 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
           <SectionTitle icon={Pencil} title="Edit job details" small />
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 10 }}>
             <Field label="Job number" style={{ flex: "1 1 140px" }}>
-              <input value={editJobNumber} onChange={(e) => setEditJobNumber(e.target.value.toUpperCase())} style={selectStyle} />
+              <UpperInput value={editJobNumber} onChange={setEditJobNumber} style={selectStyle} />
             </Field>
             <Field label="Order No" style={{ flex: "1 1 140px" }}>
-              <input value={editOrderNo} onChange={(e) => setEditOrderNo(e.target.value.toUpperCase())} style={selectStyle} />
+              <UpperInput value={editOrderNo} onChange={setEditOrderNo} style={selectStyle} />
             </Field>
             <Field label="Docket No" style={{ flex: "1 1 140px" }}>
-              <input value={editDocketNo} onChange={(e) => setEditDocketNo(e.target.value.toUpperCase())} style={selectStyle} />
+              <UpperInput value={editDocketNo} onChange={setEditDocketNo} style={selectStyle} />
             </Field>
           </div>
           <Field label="Site name">
-            <input value={editSiteName} onChange={(e) => setEditSiteName(e.target.value.toUpperCase())} style={selectStyle} />
+            <UpperInput value={editSiteName} onChange={setEditSiteName} style={selectStyle} />
           </Field>
           <Field label="Address">
-            <input value={editAddress} onChange={(e) => setEditAddress(e.target.value.toUpperCase())} style={selectStyle} />
+            <UpperInput value={editAddress} onChange={setEditAddress} style={selectStyle} />
           </Field>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <Field label="Monitoring company" style={{ flex: "1 1 160px" }}>
-              <input value={editMonitoringCo} onChange={(e) => setEditMonitoringCo(e.target.value.toUpperCase())} style={selectStyle} />
+              <UpperInput value={editMonitoringCo} onChange={setEditMonitoringCo} style={selectStyle} />
             </Field>
             <Field label="Bureau" style={{ flex: "1 1 160px" }}>
-              <input value={editBureau} onChange={(e) => setEditBureau(e.target.value.toUpperCase())} style={selectStyle} />
+              <UpperInput value={editBureau} onChange={setEditBureau} style={selectStyle} />
             </Field>
           </div>
           <Field label="Alarm description / area(s) in alarm">
-            <textarea rows={2} value={editDescription} onChange={(e) => setEditDescription(e.target.value.toUpperCase())} style={{ ...selectStyle, resize: "vertical", fontFamily: "var(--sans)" }} />
+            <UpperTextarea rows={2} value={editDescription} onChange={setEditDescription} style={{ ...selectStyle, resize: "vertical", fontFamily: "var(--sans)" }} />
           </Field>
           <div style={{ display: "flex", gap: 8 }}>
             <button onClick={saveJobDetails} disabled={!canSaveJobEdit} style={{ ...primaryBtn, opacity: canSaveJobEdit ? 1 : 0.5, cursor: canSaveJobEdit ? "pointer" : "not-allowed" }}>
@@ -2916,7 +2916,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
           <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#B91C1C", fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>
             <Ban size={14} /> Cancel this job — the patrolman will be notified to stand down
           </div>
-          <textarea rows={2} value={cancelReason} onChange={(e) => setCancelReason(e.target.value.toUpperCase())} placeholder="e.g. Monitoring advised stand down — client cancelled the alarm" style={{ ...selectStyle, resize: "vertical" }} />
+          <UpperTextarea rows={2} value={cancelReason} onChange={setCancelReason} placeholder="e.g. Monitoring advised stand down — client cancelled the alarm" style={{ ...selectStyle, resize: "vertical" }} />
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <button onClick={confirmCancel} disabled={cancelBusy} style={{ ...primaryBtn, background: "var(--breach)", opacity: cancelBusy ? 0.6 : 1, cursor: cancelBusy ? "not-allowed" : "pointer" }}>
               <Ban size={14} /> {cancelBusy ? "Cancelling…" : "Confirm cancel"}
@@ -2937,7 +2937,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
           <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#B91C1C", fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>
             <AlertTriangle size={14} /> Response time exceeded — log a reason and advise the client
           </div>
-          <textarea rows={2} value={delayText} onChange={(e) => setDelayText(e.target.value.toUpperCase())} placeholder="e.g. Traffic incident on route, ETA 15 min — client notified by phone at 21:42" style={{ ...selectStyle, resize: "vertical" }} />
+          <UpperTextarea rows={2} value={delayText} onChange={setDelayText} placeholder="e.g. Traffic incident on route, ETA 15 min — client notified by phone at 21:42" style={{ ...selectStyle, resize: "vertical" }} />
           <button disabled={!delayText.trim()} onClick={() => logAction("Delay logged", delayText.trim(), { delayReason: delayText.trim(), delayLoggedAt: new Date().toISOString() })} style={{ ...primaryBtn, marginTop: 8, opacity: delayText.trim() ? 1 : 0.4 }}>
             Save delay reason
           </button>
@@ -3025,7 +3025,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
           {isArchived ? (
             <div style={{ ...selectStyle, minHeight: 84, whiteSpace: "pre-wrap", color: "var(--text)" }}>{notes || "—"}</div>
           ) : (
-            <textarea rows={4} value={notes} onChange={(e) => setNotes(e.target.value.toUpperCase())} style={{ ...selectStyle, resize: "vertical" }} />
+            <UpperTextarea rows={4} value={notes} onChange={setNotes} style={{ ...selectStyle, resize: "vertical" }} />
           )}
           {isArchived && photosLoaded && photos.length === 0 && job.photoCount > 0 && (
             <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 8 }}>
@@ -4518,7 +4518,7 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
               ))}
             </div>
           )}
-          <textarea rows={4} value={outcome} onChange={(e) => setOutcome(e.target.value.toUpperCase())} placeholder="What did you find on attendance? e.g. Premises secure, false alarm — sensor fault suspected." style={{ ...selectStyle, resize: "vertical" }} />
+          <UpperTextarea rows={4} value={outcome} onChange={setOutcome} placeholder="What did you find on attendance? e.g. Premises secure, false alarm — sensor fault suspected." style={{ ...selectStyle, resize: "vertical" }} />
           <Field label="Docket number (optional)">
             <input value={docketNo} onChange={(e) => setDocketNo(e.target.value)} placeholder="Your patrol docket / report number" style={selectStyle} />
           </Field>
@@ -6276,6 +6276,47 @@ function SectionTitle({ icon: Icon, title, small }) {
       <div style={{ fontSize: small ? 13 : 15, fontWeight: 700 }}>{title}</div>
     </div>
   );
+}
+
+// Every "always uppercase" text field in this app rewrites its whole
+// value on each keystroke (onChange={(e) => setX(e.target.value.toUpperCase())}).
+// Typing a lowercase character makes that a genuinely different string,
+// so React resets the input/textarea's `.value` — and browsers drop the
+// caret to the end of the field whenever `.value` is reassigned like
+// that. In practice this meant editing anywhere but the very end (fixing
+// a name or number in the middle of an already-filled-in phrase, say)
+// felt like the cursor kept jumping away after every keystroke. Fixed
+// once here: remember the caret position from the raw keystroke, then
+// restore it right after the transformed value commits, via
+// useLayoutEffect — before the browser paints, so there's no visible
+// jump. Used in place of a plain <input>/<textarea> wherever the value is
+// forced to uppercase.
+function useUppercaseField(value, onChange) {
+  const ref = useRef(null);
+  const pendingSelection = useRef(null);
+  useLayoutEffect(() => {
+    const sel = pendingSelection.current;
+    if (sel && ref.current) {
+      ref.current.selectionStart = sel.start;
+      ref.current.selectionEnd = sel.end;
+      pendingSelection.current = null;
+    }
+  }, [value]);
+  function handleChange(e) {
+    pendingSelection.current = { start: e.target.selectionStart, end: e.target.selectionEnd };
+    onChange(e.target.value.toUpperCase());
+  }
+  return { ref, handleChange };
+}
+
+function UpperInput({ value, onChange, ...props }) {
+  const { ref, handleChange } = useUppercaseField(value, onChange);
+  return <input ref={ref} value={value} onChange={handleChange} {...props} />;
+}
+
+function UpperTextarea({ value, onChange, ...props }) {
+  const { ref, handleChange } = useUppercaseField(value, onChange);
+  return <textarea ref={ref} value={value} onChange={handleChange} {...props} />;
 }
 
 function Field({ label, children, style }) {
