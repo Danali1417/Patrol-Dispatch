@@ -22,11 +22,13 @@ const KNOWN_KEYS = new Set(["ops:jobs", "ops:sites", "ops:zones", "ops:roster", 
 
 // ops:sites is written by both Manager (Sites & runs) and Control Room
 // (adding a site inline while dispatching), and ops:bureaus /
-// ops:monitoringCompanies can be edited from more than one open Manager
-// tab — every write here used to be a client-computed full-array
-// replacement, the same shape of bug as ops:jobs (see mergeJobsWrite's
-// comment): whichever stale snapshot a device last polled would silently
-// win and erase anything added elsewhere since. Unlike ops:jobs though,
+// ops:monitoringCompanies / ops:outcomePhrases can be edited from more
+// than one open Manager tab — every write here used to be a
+// client-computed full-array replacement, the same shape of bug as
+// ops:jobs (see mergeJobsWrite's comment): whichever stale snapshot a
+// device last polled would silently win and erase anything added
+// elsewhere since, including a phrase just added in another tab/session.
+// Unlike ops:jobs though,
 // these lists have no reliable per-item "last touched" timestamp, and a
 // legitimate single-item delete must actually shrink the list — a
 // diff/carry-forward merge can't tell that apart from a stale array
@@ -34,7 +36,7 @@ const KNOWN_KEYS = new Set(["ops:jobs", "ops:sites", "ops:zones", "ops:roster", 
 // named operation applied to a copy read fresh from Supabase immediately
 // before writing back, the same read-then-write-immediately pattern the
 // job-chat POST branch above uses.
-const LIST_OP_KEYS = new Set(["ops:sites", "ops:bureaus", "ops:monitoringCompanies"]);
+const LIST_OP_KEYS = new Set(["ops:sites", "ops:bureaus", "ops:monitoringCompanies", "ops:outcomePhrases"]);
 
 function applySitesOp(current, op, payload) {
   switch (op) {
@@ -86,6 +88,27 @@ function dedupeSortedNames(names) {
   return [...seen.values()].sort((a, b) => a.localeCompare(b));
 }
 
+function applyPhrasesOp(current, op, payload) {
+  switch (op) {
+    case "add": {
+      const phrase = payload?.phrase;
+      if (!phrase || !phrase.id) throw new Error("phrase is required");
+      return [...current, phrase];
+    }
+    case "update": {
+      const { id, phrase } = payload || {};
+      if (!id || !phrase) throw new Error("id and phrase are required");
+      return current.map((p) => (p.id === id ? { ...phrase, id } : p));
+    }
+    case "remove": {
+      if (!payload?.id) throw new Error("id is required");
+      return current.filter((p) => p.id !== payload.id);
+    }
+    default:
+      throw new Error(`Unknown phrases op: ${op}`);
+  }
+}
+
 function applyNameListOp(current, op, payload) {
   switch (op) {
     case "add": {
@@ -111,7 +134,11 @@ async function applyListOp(key, op, payload) {
   try { current = raw ? JSON.parse(raw) : []; } catch (e) { current = []; }
   if (!Array.isArray(current)) current = [];
 
-  const next = key === "ops:sites" ? applySitesOp(current, op, payload) : applyNameListOp(current, op, payload);
+  const next = key === "ops:sites"
+    ? applySitesOp(current, op, payload)
+    : key === "ops:outcomePhrases"
+    ? applyPhrasesOp(current, op, payload)
+    : applyNameListOp(current, op, payload);
   const value = JSON.stringify(next);
   await kvSet(key, value);
   return value;

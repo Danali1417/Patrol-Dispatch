@@ -152,6 +152,18 @@ function applyNameListOpLocal(current, op, payload) {
   }
 }
 
+// Same idea as applySitesOpLocal, for Standard Phrases — mirrors
+// applyPhrasesOp in api/kv.js for an instant local preview; the server's
+// response is what actually sticks.
+function applyPhrasesOpLocal(current, op, payload) {
+  switch (op) {
+    case "add": return [...current, payload.phrase];
+    case "update": return current.map((p) => (p.id === payload.id ? { ...payload.phrase, id: payload.id } : p));
+    case "remove": return current.filter((p) => p.id !== payload.id);
+    default: return current;
+  }
+}
+
 function makePhraseId() {
   return `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -993,9 +1005,23 @@ export default function SentrylinePrototype() {
     try { await window.storage.set(ROSTER_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
   }, []);
 
-  const persistOutcomePhrases = useCallback(async (updated) => {
-    setOutcomePhrases(updated);
-    try { await window.storage.set(OUTCOME_PHRASES_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
+  // Same op-based, read-fresh-then-write pattern as persistSites above —
+  // this used to be a blind full-array overwrite, and a Manager editing
+  // Standard Phrases from more than one tab/session hit exactly the
+  // stale-overwrite bug that motivated that fix: an add made in one tab
+  // could be silently erased by an unrelated edit saved from another,
+  // stale one. Returns true/false so callers can tell a genuine failure
+  // apart from success, instead of always reporting success regardless.
+  const persistOutcomePhrases = useCallback(async (op, payload) => {
+    setOutcomePhrases((prev) => applyPhrasesOpLocal(prev, op, payload));
+    try {
+      const res = await window.storage.applyOp(OUTCOME_PHRASES_KEY, op, payload);
+      setOutcomePhrases(JSON.parse(res.value));
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
   }, []);
 
   // Same op-based, read-fresh-then-write pattern as persistSites above
@@ -4801,21 +4827,26 @@ function OutcomePhrasesEditor({ outcomePhrases, persistOutcomePhrases }) {
   const showToast = useToast();
   const showConfirm = useConfirm();
 
-  function addPhrase() {
+  async function addPhrase() {
     setError("");
     const phraseText = text.trim().replace(/\s*\n\s*/g, " ");
     if (!phraseText) { setError("Enter the full phrase text."); return; }
     const phraseName = (name.trim() || (phraseText.length > 40 ? `${phraseText.slice(0, 40)}…` : phraseText));
     if (outcomePhrases.some((p) => p.name.toLowerCase() === phraseName.toLowerCase())) { setError("A phrase with that name already exists."); return; }
-    persistOutcomePhrases([...outcomePhrases, { id: makePhraseId(), name: phraseName, text: phraseText }]);
-    setName(""); setText("");
-    showToast("Standard phrase added.");
+    const ok = await persistOutcomePhrases("add", { phrase: { id: makePhraseId(), name: phraseName, text: phraseText } });
+    if (ok) {
+      setName(""); setText("");
+      showToast("Standard phrase added.");
+    } else {
+      showToast("Couldn't save that phrase — check your connection and try again.", "error");
+    }
   }
 
   function removePhrase(p) {
-    showConfirm(`Remove this standard phrase?\n\n"${p.name}"`, () => {
-      persistOutcomePhrases(outcomePhrases.filter((x) => x.id !== p.id));
-      showToast("Standard phrase removed.");
+    showConfirm(`Remove this standard phrase?\n\n"${p.name}"`, async () => {
+      const ok = await persistOutcomePhrases("remove", { id: p.id });
+      if (ok) showToast("Standard phrase removed.");
+      else showToast("Couldn't remove that phrase — check your connection and try again.", "error");
     });
   }
 
@@ -4825,13 +4856,18 @@ function OutcomePhrasesEditor({ outcomePhrases, persistOutcomePhrases }) {
     setEditText(p.text);
   }
 
-  function saveEdit() {
+  async function saveEdit() {
     const newName = editName.trim();
     const newText = editText.trim().replace(/\s*\n\s*/g, " ");
     if (!newName || !newText) return;
-    persistOutcomePhrases(outcomePhrases.map((p) => (p.id === editingId ? { ...p, name: newName, text: newText } : p)));
-    setEditingId(null);
-    showToast("Standard phrase updated.");
+    const editedId = editingId;
+    const ok = await persistOutcomePhrases("update", { id: editedId, phrase: { name: newName, text: newText } });
+    if (ok) {
+      setEditingId(null);
+      showToast("Standard phrase updated.");
+    } else {
+      showToast("Couldn't save that change — check your connection and try again.", "error");
+    }
   }
 
   return (
