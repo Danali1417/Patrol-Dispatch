@@ -844,14 +844,23 @@ export default function SentrylinePrototype() {
       } catch (e) {
         if (!isMissingKeyError(e)) {
           readFailed = true;
-          console.error("Failed to load outcome phrases — leaving the in-memory list empty rather than risk overwriting what's stored.", e);
+          console.error("Failed to load outcome phrases — falling back to the default set for display only; not overwriting what's actually stored.", e);
         }
       }
-      if (p.length === 0 && !readFailed) {
+      if (p.length === 0) {
+        // Unlike sites/zones/holidays, showing the wrong (default) phrases
+        // for one session because of a failed read is harmless — a
+        // patrolman can still type the outcome by hand — whereas showing
+        // NO phrases at all on a job they're about to submit is a real
+        // problem (this is exactly what happened: a patrolman on a flaky
+        // field connection got a failed read and, before this, saw
+        // nothing). So a failed read still falls back to the default list
+        // locally; only a read that actually succeeded and came back
+        // genuinely empty is safe to persist as the seeded default.
         p = DEFAULT_OUTCOME_PHRASES;
-        needsResave = true;
+        needsResave = !readFailed;
       }
-      if (needsResave && !readFailed) {
+      if (needsResave) {
         try { await window.storage.set(OUTCOME_PHRASES_KEY, JSON.stringify(p), true); } catch (e) { /* ignore — will retry migrating next load */ }
       }
       setOutcomePhrases(p);
