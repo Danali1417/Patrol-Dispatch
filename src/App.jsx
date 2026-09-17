@@ -2025,6 +2025,18 @@ function Empty({ text }) {
   return <div style={{ padding: 40, textAlign: "center", color: "var(--text-dim)", fontSize: 13, border: "1px dashed var(--border)", borderRadius: 10 }}>{text}</div>;
 }
 
+// Natural, run-then-name ordering for the "Dispatch to" list — a plain
+// string sort would put "T15" before "T2" (comparing character by
+// character), so localeCompare's numeric mode is used instead to sort
+// runs the way a human would expect (T1, T2, ..., T15, T22, ...). When
+// every entry shares the same run (a single-run group), this just
+// degenerates to sorting by name.
+function compareByRunThenName(a, b) {
+  const runCmp = (a.run || "").localeCompare(b.run || "", undefined, { numeric: true, sensitivity: "base" });
+  if (runCmp !== 0) return runCmp;
+  return (a.displayName || "").localeCompare(b.displayName || "", undefined, { sensitivity: "base" });
+}
+
 /* ---------------------- New job form ---------------------- */
 
 function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, session, persist, monitoringCompanies, bureaus, onCreated }) {
@@ -2058,8 +2070,8 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       .filter((p) => p && !seen.has(p.loginName) && seen.add(p.loginName));
   }
 
-  const rosteredOnThisRun = site ? rosteredPatrolmenFor(site.run) : [];
-  const fallbackOnThisRun = site && rosteredOnThisRun.length === 0 ? patrolmen.filter((p) => p.run === site.run) : [];
+  const rosteredOnThisRun = (site ? rosteredPatrolmenFor(site.run) : []).sort(compareByRunThenName);
+  const fallbackOnThisRun = (site && rosteredOnThisRun.length === 0 ? patrolmen.filter((p) => p.run === site.run) : []).sort(compareByRunThenName);
   const rosteredElsewhereToday = (() => {
     const seen = new Set(rosteredOnThisRun.map((p) => p.loginName));
     return todaysEntries
@@ -2068,8 +2080,14 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
         const p = patrolmen.find((p) => p.loginName === r.patrolmanLoginName);
         return p ? { ...p, run: r.run } : null;
       })
-      .filter((p) => p && !seen.has(p.loginName) && seen.add(p.loginName));
+      .filter((p) => p && !seen.has(p.loginName) && seen.add(p.loginName))
+      .sort(compareByRunThenName);
   })();
+  // Sorted copy for the "All patrolmen" fallback group — the raw
+  // `patrolmen` array (whatever order accounts came back from the
+  // server) stays untouched since assigneeCandidates below only ever
+  // looks a specific loginName up in it, never relies on its order.
+  const patrolmenByRun = [...patrolmen].sort(compareByRunThenName);
 
   const recommended = rosteredOnThisRun.length ? rosteredOnThisRun : fallbackOnThisRun;
   // Same order as the "Dispatch to" dropdown below — roster-corrected
@@ -2334,10 +2352,10 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       <Field label="Dispatch to">
         <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} style={selectStyle}>
           <option value="">Select patrolman…</option>
-          {rosteredOnThisRun.length > 0 && <optgroup label="Rostered on this run today">{rosteredOnThisRun.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName} · {r.loginName}</option>)}</optgroup>}
-          {fallbackOnThisRun.length > 0 && <optgroup label="On this run">{fallbackOnThisRun.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName} · {r.loginName}</option>)}</optgroup>}
-          {rosteredElsewhereToday.length > 0 && <optgroup label="Rostered today (other runs)">{rosteredElsewhereToday.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName} · {r.run} · {r.loginName}</option>)}</optgroup>}
-          <optgroup label="All patrolmen">{patrolmen.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName} · {r.run} · {r.loginName}</option>)}</optgroup>
+          {rosteredOnThisRun.length > 0 && <optgroup label="Rostered on this run today">{rosteredOnThisRun.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName}{r.contactNumber ? ` · ${r.contactNumber}` : ""}</option>)}</optgroup>}
+          {fallbackOnThisRun.length > 0 && <optgroup label="On this run">{fallbackOnThisRun.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName}{r.contactNumber ? ` · ${r.contactNumber}` : ""}</option>)}</optgroup>}
+          {rosteredElsewhereToday.length > 0 && <optgroup label="Rostered today (other runs)">{rosteredElsewhereToday.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName} · {r.run}{r.contactNumber ? ` · ${r.contactNumber}` : ""}</option>)}</optgroup>}
+          <optgroup label="All patrolmen">{patrolmenByRun.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName} · {r.run}{r.contactNumber ? ` · ${r.contactNumber}` : ""}</option>)}</optgroup>
         </select>
       </Field>
 
