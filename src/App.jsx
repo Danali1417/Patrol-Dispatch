@@ -164,6 +164,43 @@ function applyPhrasesOpLocal(current, op, payload) {
   }
 }
 
+// Same idea as applySitesOpLocal, for Runs/Zones — mirrors applyZonesOp in
+// api/kv.js for an instant local preview; the server's response is what
+// actually sticks.
+function applyZonesOpLocal(current, op, payload) {
+  switch (op) {
+    case "add": return [...current, payload.name];
+    case "rename": return current.map((z) => (z === payload.oldName ? payload.newName : z));
+    case "remove": return current.filter((z) => z !== payload.name);
+    default: return current;
+  }
+}
+
+// Same idea as applySitesOpLocal, for the Roster — mirrors applyRosterOp
+// in api/kv.js closely enough for an instant local preview, including its
+// bulk import merge; the server's response (with the real created/updated
+// counts) is what actually sticks.
+function applyRosterOpLocal(current, op, payload) {
+  switch (op) {
+    case "add": return [...current, payload.entry];
+    case "update": return current.map((r) => (r.id === payload.id ? { ...payload.entry, id: payload.id } : r));
+    case "remove": return current.filter((r) => r.id !== payload.id);
+    case "importRows": {
+      const working = current.slice();
+      const keyOf = (r) => `${r.date}|${String(r.run || "").toLowerCase()}|${String(r.patrolmanName || "").toLowerCase()}`;
+      const indexByKey = new Map(working.map((r, idx) => [keyOf(r), idx]));
+      (payload.rows || []).forEach((row) => {
+        const k = keyOf(row);
+        const idx = indexByKey.get(k);
+        if (idx !== undefined) working[idx] = { ...working[idx], ...row };
+        else { working.push({ id: `roster_tmp_${Math.random().toString(36).slice(2, 8)}`, ...row }); indexByKey.set(k, working.length - 1); }
+      });
+      return working;
+    }
+    default: return current;
+  }
+}
+
 function makePhraseId() {
   return `p_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -974,9 +1011,19 @@ export default function SentrylinePrototype() {
     }
   }, []);
 
-  const persistZones = useCallback(async (updated) => {
-    setZones(updated);
-    try { await window.storage.set(ZONES_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
+  // Same op-based, read-fresh-then-write pattern as persistSites below —
+  // this used to be a blind full-array overwrite, the same class of bug
+  // fixed there.
+  const persistZones = useCallback(async (op, payload) => {
+    setZones((prev) => applyZonesOpLocal(prev, op, payload));
+    try {
+      const res = await window.storage.applyOp(ZONES_KEY, op, payload);
+      setZones(JSON.parse(res.value));
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
   }, []);
 
   // Every mutation is a named operation (add one, update one by id, delete
@@ -1000,9 +1047,26 @@ export default function SentrylinePrototype() {
     }
   }, []);
 
-  const persistRoster = useCallback(async (updated) => {
-    setRoster(updated);
-    try { await window.storage.set(ROSTER_KEY, JSON.stringify(updated), true); } catch (e) { console.error(e); }
+  // Same op-based, read-fresh-then-write pattern as persistSites below —
+  // this used to be a blind full-array overwrite, the same class of bug
+  // fixed there. A patrolman's roster entry for today going missing (only
+  // showing under "All patrolmen" instead of "Rostered today" on the
+  // dispatch form) traced back to exactly this: the Excel roster import
+  // in particular computed its whole merged array from whatever `roster`
+  // the browser had loaded, so an import run from a stale tab could
+  // silently drop an entry someone else had just added. `importRows`
+  // returns `{ created, updated }` alongside the new value, computed
+  // server-side against the fresh copy — surfaced here for the import UI.
+  const persistRoster = useCallback(async (op, payload) => {
+    setRoster((prev) => applyRosterOpLocal(prev, op, payload));
+    try {
+      const res = await window.storage.applyOp(ROSTER_KEY, op, payload);
+      setRoster(JSON.parse(res.value));
+      return { ok: true, created: res.created, updated: res.updated };
+    } catch (e) {
+      console.error(e);
+      return { ok: false };
+    }
   }, []);
 
   // Same op-based, read-fresh-then-write pattern as persistSites above —
@@ -5507,7 +5571,7 @@ function ZonesEditor({ zones, persistZones, sites, persistSites, accounts, setAc
     const name = newZone.trim();
     if (!name) return;
     if (zones.some((z) => z.toLowerCase() === name.toLowerCase())) { setError("That run name already exists."); return; }
-    persistZones([...zones, name]);
+    persistZones("add", { name });
     setNewZone("");
     showToast(`Run "${name}" added.`);
   }
@@ -5520,7 +5584,7 @@ function ZonesEditor({ zones, persistZones, sites, persistSites, accounts, setAc
     if (!newName || newName === oldName) { setRenaming(null); return; }
     if (zones.some((z) => z.toLowerCase() === newName.toLowerCase() && z !== oldName)) { setError("That run name already exists."); return; }
     const affected = accounts.filter((a) => a.role === "patrolman" && a.run === oldName);
-    persistZones(zones.map((z) => (z === oldName ? newName : z)));
+    persistZones("rename", { oldName, newName });
     persistSites("renameRun", { oldName, newName });
     setRenaming(null);
     setError("");
@@ -5542,7 +5606,7 @@ function ZonesEditor({ zones, persistZones, sites, persistSites, accounts, setAc
       ? `"${z}" is used by ${siteCount} site(s) and ${patrolAffected.length} patrolman login(s). Delete anyway? They'll be set to Unassigned.`
       : `Delete run "${z}"?`;
     showConfirm(msg, async () => {
-      persistZones(zones.filter((r) => r !== z));
+      persistZones("remove", { name: z });
       if (siteCount) persistSites("clearRunForZone", { zone: z });
       try {
         if (patrolAffected.length) {
@@ -5951,7 +6015,7 @@ const ROSTER_IMPORT_FIELDS = [
   { key: "securityLicenceNumber", match: (h) => h.includes("licen") },
 ];
 
-function RosterImport({ zones, accounts, roster, persistRoster }) {
+function RosterImport({ zones, accounts, persistRoster }) {
   const fileRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
@@ -5979,24 +6043,22 @@ function RosterImport({ zones, accounts, roster, persistRoster }) {
         if (h) fieldToHeader[key] = h;
       });
 
-      const working = roster.slice();
-      // Maps date|run|name -> index in `working`, so a row matching an
-      // existing entry updates it in place instead of just being counted
-      // as a duplicate and dropped — that used to mean a sheet re-uploaded
-      // to backfill a field the first import didn't carry (e.g. a licence
-      // number added to the sheet after the roster was already entered)
-      // silently changed nothing.
-      const existingIndexByKey = new Map(
-        working.map((r, idx) => [`${r.date}|${r.run.toLowerCase()}|${r.patrolmanName.toLowerCase()}`, idx])
-      );
-
-      let created = 0;
-      let updated = 0;
+      // Each valid row becomes a "candidate" — the actual dedupe-by
+      // date|run|name merge (patch a matching existing entry, or add a
+      // new one) now happens server-side, against a copy of the roster
+      // read fresh immediately before writing back (see the importRows op
+      // in api/kv.js), instead of computed here from this tab's
+      // possibly-stale `roster`. That's what a sheet re-uploaded to
+      // backfill a field the first import didn't carry (e.g. a licence
+      // number added later) relies on to actually patch the existing
+      // entry rather than risk silently dropping something added
+      // elsewhere since this tab last loaded the roster.
       let skippedMissing = 0;
       let runNotRecognized = 0;
       let badDate = 0;
+      const candidateRows = [];
 
-      rows.forEach((row, i) => {
+      rows.forEach((row) => {
         const get = (key) => (fieldToHeader[key] ? row[fieldToHeader[key]] : "");
         const date = parseRosterDate(get("date"));
         const name = String(get("name") ?? "").trim();
@@ -6014,22 +6076,7 @@ function RosterImport({ zones, accounts, roster, persistRoster }) {
 
         const account = accounts.find((a) => a.role === "patrolman" && (a.displayName.toLowerCase() === name.toLowerCase() || a.loginName.toLowerCase() === name.toLowerCase()));
 
-        const dedupeKey = `${date}|${run.toLowerCase()}|${name.toLowerCase()}`;
-        const existingIdx = existingIndexByKey.get(dedupeKey);
-        if (existingIdx !== undefined) {
-          const patch = {};
-          if (shift) patch.shift = shift;
-          if (contactNumber) patch.contactNumber = contactNumber;
-          if (securityLicenceNumber) patch.securityLicenceNumber = securityLicenceNumber;
-          if (Object.keys(patch).length) {
-            working[existingIdx] = { ...working[existingIdx], ...patch };
-            updated++;
-          }
-          return;
-        }
-
-        working.push({
-          id: `roster_${Date.now()}_${i}`,
+        candidateRows.push({
           date,
           run,
           patrolmanLoginName: account ? account.loginName : "",
@@ -6038,11 +6085,16 @@ function RosterImport({ zones, accounts, roster, persistRoster }) {
           contactNumber: contactNumber || (account?.contactNumber || ""),
           securityLicenceNumber: securityLicenceNumber || (account?.securityLicenceNumber || ""),
         });
-        existingIndexByKey.set(dedupeKey, working.length - 1);
-        created++;
       });
 
-      if (created || updated) persistRoster(working);
+      let created = 0;
+      let updated = 0;
+      if (candidateRows.length) {
+        const res = await persistRoster("importRows", { rows: candidateRows });
+        if (!res.ok) { setError("Couldn't save the import — check your connection and try again."); setBusy(false); return; }
+        created = res.created || 0;
+        updated = res.updated || 0;
+      }
       setResult({ created, updated, skippedMissing, runNotRecognized, badDate, total: rows.length });
     } catch (err) {
       setError("Couldn't read that file — make sure it's a valid .xlsx, .xls, or .csv export.");
@@ -6114,10 +6166,10 @@ function RosterView({ zones, accounts, roster, persistRoster, publicHolidays, pe
     if (!form.date || !form.run || !form.patrolmanName.trim()) { setError("Date, run, and patrolman name are required."); return; }
     const entry = { ...form, patrolmanName: form.patrolmanName.trim() };
     if (editingId) {
-      persistRoster(roster.map((r) => (r.id === editingId ? { ...entry, id: editingId } : r)));
+      persistRoster("update", { id: editingId, entry });
       showToast("Roster entry updated.");
     } else {
-      persistRoster([...roster, { ...entry, id: `roster_${Date.now()}` }]);
+      persistRoster("add", { entry: { ...entry, id: `roster_${Date.now()}` } });
       showToast("Roster entry added.");
     }
     cancelEdit();
@@ -6125,7 +6177,7 @@ function RosterView({ zones, accounts, roster, persistRoster, publicHolidays, pe
 
   function remove(id) {
     showConfirm("Remove this roster entry?", () => {
-      persistRoster(roster.filter((r) => r.id !== id));
+      persistRoster("remove", { id });
       if (editingId === id) cancelEdit();
       showToast("Roster entry removed.");
     });
@@ -6196,7 +6248,7 @@ function RosterView({ zones, accounts, roster, persistRoster, publicHolidays, pe
         </div>
       </div>
 
-      <RosterImport zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />
+      <RosterImport zones={zones} accounts={accounts} persistRoster={persistRoster} />
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
         <SectionTitle icon={CalendarDays} title={fmtRosterDate(selectedDate)} small />

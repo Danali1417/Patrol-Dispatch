@@ -80,12 +80,15 @@ window.storage = {
     const data = await res.json().catch(() => ({ value }));
     return { key, value: data.value ?? value, shared: true };
   },
-  // For a handful of keys (sites, bureaus, monitoring companies) the
-  // server rejects a plain full-array `set` and instead applies a named
-  // operation to whatever it currently has stored, immediately before
-  // writing back — see LIST_OP_KEYS in api/kv.js. That's what makes this
-  // safe against a stale local snapshot: unlike set(), nothing this
-  // client last polled is ever sent as the new value.
+  // For a handful of keys (sites, bureaus, monitoring companies, standard
+  // phrases, roster, zones) the server rejects a plain full-array `set`
+  // and instead applies a named operation to whatever it currently has
+  // stored, immediately before writing back — see LIST_OP_KEYS in
+  // api/kv.js. That's what makes this safe against a stale local
+  // snapshot: unlike set(), nothing this client last polled is ever sent
+  // as the new value. Some ops (roster's bulk import) return extra fields
+  // alongside `value` — spread the whole response through so callers can
+  // read those too, not just the new value.
   applyOp: async (key, op, payload) => {
     const res = await apiFetch("/api/kv", {
       method: "POST",
@@ -93,6 +96,6 @@ window.storage = {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `Couldn't update ${key}`);
-    return { key, value: data.value, shared: true };
+    return { ...data, key, shared: true };
   },
 };
