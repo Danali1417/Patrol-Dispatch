@@ -2354,8 +2354,8 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
           <option value="">Select patrolman…</option>
           {rosteredOnThisRun.length > 0 && <optgroup label="Rostered on this run today">{rosteredOnThisRun.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName}{r.contactNumber ? ` · ${r.contactNumber}` : ""}</option>)}</optgroup>}
           {fallbackOnThisRun.length > 0 && <optgroup label="On this run">{fallbackOnThisRun.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName}{r.contactNumber ? ` · ${r.contactNumber}` : ""}</option>)}</optgroup>}
-          {rosteredElsewhereToday.length > 0 && <optgroup label="Rostered today (other runs)">{rosteredElsewhereToday.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName} · {r.run}{r.contactNumber ? ` · ${r.contactNumber}` : ""}</option>)}</optgroup>}
-          <optgroup label="All patrolmen">{patrolmenByRun.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName} · {r.run}{r.contactNumber ? ` · ${r.contactNumber}` : ""}</option>)}</optgroup>
+          {rosteredElsewhereToday.length > 0 && <optgroup label="Rostered today (other runs)">{rosteredElsewhereToday.map((r) => <option key={r.loginName} value={r.loginName}>{r.run} · {r.displayName}{r.contactNumber ? ` · ${r.contactNumber}` : ""}</option>)}</optgroup>}
+          <optgroup label="All patrolmen">{patrolmenByRun.map((r) => <option key={r.loginName} value={r.loginName}>{r.run} · {r.displayName}{r.contactNumber ? ` · ${r.contactNumber}` : ""}</option>)}</optgroup>
         </select>
       </Field>
 
