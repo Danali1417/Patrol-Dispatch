@@ -36,7 +36,7 @@ const KNOWN_KEYS = new Set(["ops:jobs", "ops:sites", "ops:zones", "ops:roster", 
 // named operation applied to a copy read fresh from Supabase immediately
 // before writing back, the same read-then-write-immediately pattern the
 // job-chat POST branch above uses.
-const LIST_OP_KEYS = new Set(["ops:sites", "ops:bureaus", "ops:monitoringCompanies", "ops:outcomePhrases"]);
+const LIST_OP_KEYS = new Set(["ops:sites", "ops:bureaus", "ops:monitoringCompanies", "ops:outcomePhrases", "ops:roster", "ops:zones"]);
 
 function applySitesOp(current, op, payload) {
   switch (op) {
@@ -109,6 +109,88 @@ function applyPhrasesOp(current, op, payload) {
   }
 }
 
+// A run/zone name (used elsewhere as a plain array of strings, same shape
+// as bureaus/monitoring companies) but with its own "rename" op since
+// renaming a run needs to update the matching entry in place rather than
+// remove-then-add, and (unlike bureaus/monitoring) never de-dupes on add
+// — zones already checks for an existing name client-side before calling
+// this, and de-duping here could silently no-op a legitimate rename.
+function applyZonesOp(current, op, payload) {
+  switch (op) {
+    case "add": {
+      if (!payload?.name) throw new Error("name is required");
+      return [...current, payload.name];
+    }
+    case "rename": {
+      const { oldName, newName } = payload || {};
+      if (!oldName || !newName) throw new Error("oldName and newName are required");
+      return current.map((z) => (z === oldName ? newName : z));
+    }
+    case "remove": {
+      if (!payload?.name) throw new Error("name is required");
+      return current.filter((z) => z !== payload.name);
+    }
+    default:
+      throw new Error(`Unknown zones op: ${op}`);
+  }
+}
+
+// Same id-keyed shape as sites, plus one bulk op: the Excel roster import
+// used to compute its whole merged array client-side (dedupe-by
+// date|run|name, patch a matching row or append a new one) from whatever
+// `roster` the browser had loaded, then overwrite the entire key with it
+// — exactly the stale-snapshot bug this file exists to avoid elsewhere.
+// `importRows` moves that same merge logic here, applied to a copy read
+// fresh immediately before writing back, and returns the created/updated
+// counts the import UI shows.
+function applyRosterOp(current, op, payload) {
+  switch (op) {
+    case "add": {
+      const entry = payload?.entry;
+      if (!entry || !entry.id) throw new Error("entry is required");
+      return { list: [...current, entry] };
+    }
+    case "update": {
+      const { id, entry } = payload || {};
+      if (!id || !entry) throw new Error("id and entry are required");
+      return { list: current.map((r) => (r.id === id ? { ...entry, id } : r)) };
+    }
+    case "remove": {
+      if (!payload?.id) throw new Error("id is required");
+      return { list: current.filter((r) => r.id !== payload.id) };
+    }
+    case "importRows": {
+      const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+      const working = current.slice();
+      const keyOf = (r) => `${r.date}|${String(r.run || "").toLowerCase()}|${String(r.patrolmanName || "").toLowerCase()}`;
+      const indexByKey = new Map(working.map((r, idx) => [keyOf(r), idx]));
+      let created = 0;
+      let updated = 0;
+      rows.forEach((row, i) => {
+        const key = keyOf(row);
+        const idx = indexByKey.get(key);
+        if (idx !== undefined) {
+          const patch = {};
+          if (row.shift) patch.shift = row.shift;
+          if (row.contactNumber) patch.contactNumber = row.contactNumber;
+          if (row.securityLicenceNumber) patch.securityLicenceNumber = row.securityLicenceNumber;
+          if (Object.keys(patch).length) {
+            working[idx] = { ...working[idx], ...patch };
+            updated++;
+          }
+        } else {
+          working.push({ id: `roster_${Date.now()}_${i}`, ...row });
+          indexByKey.set(key, working.length - 1);
+          created++;
+        }
+      });
+      return { list: working, meta: { created, updated } };
+    }
+    default:
+      throw new Error(`Unknown roster op: ${op}`);
+  }
+}
+
 function applyNameListOp(current, op, payload) {
   switch (op) {
     case "add": {
@@ -134,14 +216,22 @@ async function applyListOp(key, op, payload) {
   try { current = raw ? JSON.parse(raw) : []; } catch (e) { current = []; }
   if (!Array.isArray(current)) current = [];
 
-  const next = key === "ops:sites"
-    ? applySitesOp(current, op, payload)
-    : key === "ops:outcomePhrases"
-    ? applyPhrasesOp(current, op, payload)
-    : applyNameListOp(current, op, payload);
+  let next;
+  let meta;
+  if (key === "ops:sites") {
+    next = applySitesOp(current, op, payload);
+  } else if (key === "ops:outcomePhrases") {
+    next = applyPhrasesOp(current, op, payload);
+  } else if (key === "ops:zones") {
+    next = applyZonesOp(current, op, payload);
+  } else if (key === "ops:roster") {
+    ({ list: next, meta } = applyRosterOp(current, op, payload));
+  } else {
+    next = applyNameListOp(current, op, payload);
+  }
   const value = JSON.stringify(next);
   await kvSet(key, value);
-  return value;
+  return { value, meta };
 }
 
 const JOBS_KEY = "ops:jobs";
@@ -580,8 +670,8 @@ export default async function handler(req, res) {
       const { op, ...payload } = req.body || {};
       if (!op) return res.status(400).json({ error: "op is required for this key" });
       try {
-        const value = await applyListOp(key, op, payload);
-        return res.status(200).json({ key, value });
+        const { value, meta } = await applyListOp(key, op, payload);
+        return res.status(200).json({ key, value, ...(meta || {}) });
       } catch (err) {
         console.error("kv list-op POST failed:", err);
         return res.status(400).json({ error: String(err?.message || err) });
