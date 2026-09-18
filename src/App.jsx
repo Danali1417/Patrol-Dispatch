@@ -47,6 +47,15 @@ const DEFAULT_ZONES = ["North Run", "South Run", "CBD Run", "East Run", "West Ru
 // the client bundle anymore.
 
 const JOBS_KEY = "ops:jobs";
+// Every signed-in device polls ops:jobs at this interval, all day — by
+// far the highest-volume request this app makes, and the main driver of
+// Vercel's Fluid Active CPU usage (see api/kv.js's own comment on
+// keyPrefixes.js for the other half of that fix). Widened from 8s to 15s
+// to cut invocation count by nearly half; new-job/stand-down pushes are
+// still instant regardless of this value — this only affects how quickly
+// everything else (another operator's edits, closed jobs, ETA updates,
+// SLA state) shows up on a board that isn't the one making the change.
+const BOARD_POLL_MS = 15000;
 const ZONES_KEY = "ops:zones";
 const SITES_KEY = "ops:sites";
 const ROSTER_KEY = "ops:roster";
@@ -624,7 +633,7 @@ export default function SentrylinePrototype() {
   const prevJobsRef = useRef([]);
   // Tracks the server's updated_at for ops:jobs so the poll below can ask
   // "anything new since this?" instead of re-fetching the whole board
-  // every 8 seconds regardless — see that poll's own comment.
+  // every tick regardless — see BOARD_POLL_MS's own comment.
   const jobsUpdatedAtRef = useRef(null);
   const lastActivityRef = useRef(Date.now());
   // Mirrors `session` for the unauthorized-callback below, which is
@@ -726,7 +735,7 @@ export default function SentrylinePrototype() {
   // already cleared this account's push subscriptions at that point (see
   // claimActiveSession), so disableJobAlerts() here is just tidying up this
   // device's own local registration for a device that's genuinely been
-  // replaced. A plain expired token is different: the board polls every 8s
+  // replaced. A plain expired token is different: the board polls
   // regardless of whether the session is still valid, so an ordinary
   // 24-hour token expiry fires this constantly for a patrolman who's simply
   // left the app open across a shift — disableJobAlerts() must NOT run for
@@ -1206,13 +1215,15 @@ export default function SentrylinePrototype() {
         setJobs(fresh);
         prevJobsRef.current = fresh;
       } catch (e) { /* ignore poll errors */ }
-      // Every signed-in device polls this on its own timer, all day — kept
-      // this frequent because dispatch/cancel/SLA-breach alerts need it.
-      // getIfChanged (see storageShim.js) keeps the cost of that down: a
-      // tick where nothing's changed — most of them — comes back as a few
-      // bytes instead of the whole board, since this was previously the
-      // single biggest driver of egress usage.
-    }, 8000);
+      // Every signed-in device polls this on its own timer, all day (see
+      // BOARD_POLL_MS's own comment for why it's 15s, not shorter) —
+      // push already delivers a new dispatch/stand-down instantly, so
+      // this poll only has to be fast enough for everything else (another
+      // operator's edits, SLA state, closed jobs) to feel current, not
+      // instant. getIfChanged (see storageShim.js) keeps the cost of each
+      // tick down further: one where nothing's changed — most of them —
+      // comes back as a few bytes instead of the whole board.
+    }, BOARD_POLL_MS);
     return () => clearInterval(t);
   }, [session]);
 

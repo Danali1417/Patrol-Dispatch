@@ -646,8 +646,9 @@ export default async function handler(req, res) {
       const since = req.query?.since;
       if (since) {
         // Checks updated_at alone first — ops:jobs in particular is polled
-        // every 8s by every signed-in device all day, and most of those
-        // ticks see no real change at all, so this skips pulling the
+        // by every signed-in device all day (see BOARD_POLL_MS in
+        // App.jsx), and most of those ticks see no real change at all, so
+        // this skips pulling the
         // (often large) value column out of Supabase entirely for exactly
         // those ticks, rather than only skipping what gets sent back to
         // the browser afterward (see kvGetUpdatedAt's own comment).
