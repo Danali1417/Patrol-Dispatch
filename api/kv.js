@@ -7,8 +7,14 @@
 
 import { requireRole, requireSession } from "./_lib/auth.js";
 import { kvGet, kvGetWithMeta, kvGetUpdatedAt, kvSet, kvQueryPrefix, kvDelete, kvDeletePrefix } from "./_lib/supabase.js";
-import { sendPushToRole, sendPushToPatrolman } from "./_lib/push.js";
-import { JOB_ARCHIVE_PREFIX, JOB_PHOTOS_PREFIX, JOB_CHAT_PREFIX } from "./_lib/jobArchive.js";
+// Imported from keyPrefixes.js, not jobArchive.js, deliberately — see
+// that file's comment. jobArchive.js pulls in nodemailer (via mail.js),
+// and this file's GET/POST handler runs on every single board poll (every
+// 8s, every signed-in device, all day), the vast majority of which never
+// touch mail or the archive — paying nodemailer's module-load cost on
+// every one of those was a real, avoidable chunk of Vercel's Fluid Active
+// CPU usage.
+import { JOB_ARCHIVE_PREFIX, JOB_PHOTOS_PREFIX, JOB_CHAT_PREFIX } from "./_lib/keyPrefixes.js";
 import { createUploadUrl, createReadUrl } from "./_lib/storage.js";
 
 const PUBLIC_READ_KEYS = new Set(["ops:logo", "ops:companyName"]);
@@ -354,6 +360,11 @@ async function migrateEmbeddedPhotos(rawJobsJson) {
 // the conversation — the assigned patrolman if Control Room/a manager
 // sent it, or every on-duty operator if the patrolman sent it (there's no
 // single "control room" login to target, unlike a specific patrolman).
+// push.js (web-push) is imported dynamically here rather than at module
+// top level, since this is the only path in this file that ever needs
+// it — loading it only on an actual chat send, instead of on every
+// invocation of this file (including the board's every-8-second poll),
+// is the same Active-CPU saving as keyPrefixes.js's own comment explains.
 async function notifyChatMessage(jobId, session, text) {
   const jobsRaw = await kvGet(JOBS_KEY);
   const jobs = jobsRaw ? JSON.parse(jobsRaw) : [];
@@ -369,6 +380,7 @@ async function notifyChatMessage(jobId, session, text) {
     kind: "chat",
   };
 
+  const { sendPushToRole, sendPushToPatrolman } = await import("./_lib/push.js");
   if (session.role === "patrolman") {
     await sendPushToRole("operator", payload);
   } else if (job.assigneeId) {

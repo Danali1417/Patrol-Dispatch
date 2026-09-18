@@ -23,11 +23,14 @@ import { isMailConfigured, getMailFrom, createMailTransporter } from "./mail.js"
 import { kvGet, kvSet, kvSetSearchable, kvGetPrefixMissingSearch, kvQueryPrefix, kvDelete } from "./supabase.js";
 import { deleteAllUnderPrefix } from "./storage.js";
 import { fmtDateTime } from "../../src/reportUtils.js";
+import { JOB_ARCHIVE_PREFIX, JOB_PHOTOS_PREFIX, JOB_CHAT_PREFIX } from "./keyPrefixes.js";
+
+// Re-exported so existing importers (daily-report.js) don't need to
+// change — see keyPrefixes.js for why api/kv.js specifically imports
+// these from there directly instead of from this module.
+export { JOB_ARCHIVE_PREFIX, JOB_PHOTOS_PREFIX, JOB_CHAT_PREFIX };
 
 const JOBS_KEY = "ops:jobs";
-export const JOB_ARCHIVE_PREFIX = "ops:jobarchive:";
-export const JOB_PHOTOS_PREFIX = "ops:jobphotos:";
-export const JOB_CHAT_PREFIX = "ops:jobchat:";
 
 // {jobNumber, siteName, dispatchDate} — small enough to index, and
 // everything Board's archive search / Logs & analysis' date range
