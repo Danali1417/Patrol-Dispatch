@@ -1847,11 +1847,12 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
 const BOARD_GROUPS = [
   { key: "dispatched", title: "Out with patrolmen" },
   { key: "submitted", title: "Awaiting your review" },
+  { key: "needsAction", title: "Sent back — waiting on patrolman" },
   { key: "reviewed", title: "Reviewed — ready to send" },
   { key: "emailed", title: "Closed out" },
   { key: "cancelled", title: "Cancelled / stood down" },
 ];
-const BOARD_ACTIVE_KEYS = new Set(["dispatched", "submitted", "reviewed"]);
+const BOARD_ACTIVE_KEYS = new Set(["dispatched", "submitted", "needsAction", "reviewed"]);
 const BOARD_STATUS_OPTIONS = [
   { value: "active", label: "Active jobs" },
   { value: "cancelled", label: "Cancelled / stood down" },
@@ -2677,6 +2678,8 @@ function EtaDelayModal({ etaMinutes, slaMin, onAcknowledge, onDismiss }) {
 
 function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now, onBack, companyName, logoUrl }) {
   const [notes, setNotes] = useState(job.reviewNotes || job.outcomeNotes);
+  const [showActionRequestForm, setShowActionRequestForm] = useState(false);
+  const [actionRequestText, setActionRequestText] = useState("");
   const [delayText, setDelayText] = useState("");
   const [showEmail, setShowEmail] = useState(false);
   const [showCancelForm, setShowCancelForm] = useState(false);
@@ -2700,6 +2703,10 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   const showToast = useToast();
 
   useEffect(() => setNotes(job.reviewNotes || job.outcomeNotes), [job.id]);
+  useEffect(() => {
+    setShowActionRequestForm(false);
+    setActionRequestText("");
+  }, [job.id]);
   useEffect(() => {
     setOnsiteEdit(toLocalInputValue(job.onsiteTime));
     setOffsiteEdit(toLocalInputValue(job.offsiteTime));
@@ -2872,6 +2879,39 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       } else if (standDownResult.sent === 0) {
         showToast(`${previousName} wasn't notified — the push alert failed to deliver.`, "error");
       }
+    }
+  }
+
+  // Sends a submitted job back to the patrolman for a correction/addition
+  // instead of either accepting it (Mark reviewed) or rejecting it outright
+  // (there's no such option) — logs the request, flips status so the
+  // outcome form reopens on their end (see JobDetailPatrolman's `submitted`
+  // gate), and pushes a notification the same way a fresh dispatch does.
+  // Persisted before the push fires, same sequencing reason as reassign()
+  // above.
+  async function requestFurtherAction() {
+    const text = actionRequestText.trim();
+    if (!text) return;
+    await logAction("Requested further action", text, {
+      status: "needsAction",
+      actionRequestText: text,
+      actionRequestedAt: new Date().toISOString(),
+      actionRequestedByName: session.displayName,
+    });
+    setShowActionRequestForm(false);
+    setActionRequestText("");
+    showToast("Sent back to the patrolman for further action.");
+    const result = await notifyJobDispatch({
+      jobId: job.id,
+      loginName: job.assigneeId,
+      role: "patrolman",
+      title: `Further action needed — ${job.jobNumber}`,
+      body: text,
+    });
+    if (result.total === 0) {
+      showToast("Sent back, but the patrolman hasn't turned on job alerts.", "error");
+    } else if (result.sent === 0) {
+      showToast("Sent back, but the push alert failed to deliver.", "error");
     }
   }
 
@@ -3119,6 +3159,19 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       {job.status !== "dispatched" && job.status !== "cancelled" && (
         <div style={{ marginTop: 18 }}>
           <SectionTitle icon={CheckCircle2} title="Outcome" small />
+          {job.status === "needsAction" && (
+            <div style={{ padding: 12, borderRadius: 8, border: "1px solid var(--breach)", background: "#FEF2F2", marginBottom: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#B91C1C", fontWeight: 700, fontSize: 12.5, marginBottom: 4 }}>
+                <AlertTriangle size={14} /> Waiting on the patrolman
+              </div>
+              <div style={{ fontSize: 12.5, color: "var(--text)" }}>{job.actionRequestText}</div>
+              {job.actionRequestedByName && (
+                <div style={{ fontSize: 10.5, color: "var(--text-dim)", marginTop: 4 }}>
+                  — {job.actionRequestedByName}{job.actionRequestedAt ? `, ${fmtDateTime(job.actionRequestedAt)}` : ""}
+                </div>
+              )}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end", marginBottom: 6 }}>
             {isArchived ? (
               <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
@@ -3201,6 +3254,9 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
               <button onClick={() => logAction("Results updated", notes.trim(), { reviewNotes: notes })} style={primaryBtn}><CheckCircle2 size={14} /> Save changes</button>
             )}
             {!isArchived && job.status === "submitted" && <button onClick={() => logAction("Marked reviewed", "", { status: "reviewed", reviewNotes: notes })} style={secondaryBtn}><CheckCircle2 size={14} /> Mark reviewed</button>}
+            {!isArchived && job.status === "submitted" && !showActionRequestForm && (
+              <button onClick={() => setShowActionRequestForm(true)} style={{ ...secondaryBtn, color: "var(--breach)", borderColor: "var(--breach)" }}><AlertTriangle size={14} /> Need further action</button>
+            )}
             {!isArchived && (job.status === "reviewed" || job.status === "submitted") && <button onClick={() => { logAction("Prepared client email", "", { reviewNotes: notes }); setShowEmail(true); }} style={primaryBtn}><Mail size={14} /> Prepare client email</button>}
             {job.status === "emailed" && (
               <span style={{ color: "var(--ok)", fontSize: 12.5, display: "flex", alignItems: "center", gap: 6 }}>
@@ -3208,6 +3264,30 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
               </span>
             )}
           </div>
+          {!isArchived && showActionRequestForm && (
+            <div style={{ marginTop: 12, padding: 14, borderRadius: 8, border: "1px solid var(--breach)", background: "#FEF2F2" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#B91C1C", fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>
+                <AlertTriangle size={14} /> What does the patrolman need to fix or add?
+              </div>
+              <UpperTextarea
+                rows={2}
+                value={actionRequestText}
+                onChange={setActionRequestText}
+                placeholder="e.g. Please confirm which door was forced and add a photo of it."
+                style={{ ...selectStyle, resize: "vertical" }}
+              />
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button
+                  onClick={requestFurtherAction}
+                  disabled={!actionRequestText.trim()}
+                  style={{ ...primaryBtn, background: "var(--breach)", opacity: actionRequestText.trim() ? 1 : 0.5, cursor: actionRequestText.trim() ? "pointer" : "not-allowed" }}
+                >
+                  <AlertTriangle size={14} /> Send back to patrolman
+                </button>
+                <button onClick={() => { setShowActionRequestForm(false); setActionRequestText(""); }} style={secondaryBtn}>Never mind</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -4368,7 +4448,13 @@ function EtaModal({ onConfirm, onClose }) {
 
 function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, onBack }) {
   const isCancelled = job.status === "cancelled";
-  const submitted = job.status !== "dispatched" && !isCancelled;
+  // Control room sent this back for a correction/addition — treated like
+  // a not-yet-submitted job below so the outcome form reopens (pre-filled
+  // with what was already submitted, since outcome/docketNo/photos all
+  // default from the job's current fields), rather than like a normal
+  // completed submission.
+  const needsAction = job.status === "needsAction";
+  const submitted = job.status !== "dispatched" && !needsAction && !isCancelled;
   // A still-in-progress job restores whatever outcome text, docket number,
   // and photos were last saved before the tab closed, crashed, or lost
   // signal — see jobDraft.js. A job the server already shows as
@@ -4530,7 +4616,12 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
   async function submit() {
     setActionBusy(true);
     try {
-      const location = await getCurrentLocation();
+      // A resubmission after "needs further action" isn't a new site visit
+      // — it's a correction to what was already submitted — so it must not
+      // re-stamp offsiteTime/offsiteLocation with right-now's GPS fix,
+      // which would silently corrupt the original attendance/response-time
+      // record everything else (SLA reporting, the PDF) relies on.
+      const location = needsAction ? null : await getCurrentLocation();
       const locationName = location ? await reverseGeocode(location.lat, location.lon) : null;
       // Photos are saved to their own key first (see jobPhotos.js) — the job
       // record itself only carries the count, so the board's poll never has
@@ -4543,9 +4634,13 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
         outcomeNotes: outcome.trim(),
         docketNo: docketNo.trim(),
         photoCount: photos.length,
-        offsiteTime: new Date().toISOString(),
-        offsiteLocation: location ? { lat: location.lat, lon: location.lon } : null,
-        offsiteLocationName: locationName,
+        ...(needsAction
+          ? { activityLog: [...(j.activityLog || []), logEntry(session, "Resubmitted after further action", outcome.trim())] }
+          : {
+              offsiteTime: new Date().toISOString(),
+              offsiteLocation: location ? { lat: location.lat, lon: location.lon } : null,
+              offsiteLocationName: locationName,
+            }),
       } : j));
       // throwOnError: this write must be confirmed before the local job
       // state is allowed to look "submitted" — otherwise the optimistic
@@ -4560,7 +4655,7 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
       // safe in the draft (see the effect above), so staying on this
       // screen costs nothing; leaving it would make the patrolman think
       // they need to redo the work they've already done.
-      showToast("Couldn't save — check your connection and try Mark offsite again.", "error");
+      showToast("Couldn't save — check your connection and try again.", "error");
     } finally {
       setActionBusy(false);
     }
@@ -4633,10 +4728,24 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
 
       {!submitted && !isCancelled && readyForOutcome && (
         <div style={{ marginTop: 20 }}>
-          <div style={{ fontSize: 11.5, color: "var(--ok)", marginBottom: 10 }}>
-            {isRandomPatrol ? `${patrolsCompleted} of ${patrolsRequired} patrols completed` : `Onsite at ${fmtTime(job.onsiteTime)}`}
-          </div>
-          <SectionTitle icon={CheckCircle2} title="Submit outcome" small />
+          {needsAction ? (
+            <div style={{ padding: 12, borderRadius: 8, border: "1px solid var(--breach)", background: "#FEF2F2", marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#B91C1C", fontWeight: 700, fontSize: 12.5, marginBottom: 4 }}>
+                <AlertTriangle size={14} /> Control room needs more information
+              </div>
+              <div style={{ fontSize: 12.5, color: "var(--text)" }}>{job.actionRequestText}</div>
+              {job.actionRequestedByName && (
+                <div style={{ fontSize: 10.5, color: "var(--text-dim)", marginTop: 4 }}>
+                  — {job.actionRequestedByName}{job.actionRequestedAt ? `, ${fmtDateTime(job.actionRequestedAt)}` : ""}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ fontSize: 11.5, color: "var(--ok)", marginBottom: 10 }}>
+              {isRandomPatrol ? `${patrolsCompleted} of ${patrolsRequired} patrols completed` : `Onsite at ${fmtTime(job.onsiteTime)}`}
+            </div>
+          )}
+          <SectionTitle icon={CheckCircle2} title={needsAction ? "Update outcome" : "Submit outcome"} small />
           {outcomePhrases?.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
               {outcomePhrases.map((p) => (
@@ -4672,7 +4781,7 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
           </div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 6 }}>Photos taken with "Take photo" are timestamped and geo-tagged automatically. Photos added from the gallery are not.</div>
           <button disabled={!outcome.trim() || actionBusy} onClick={submit} style={{ ...primaryBtn, width: "100%", marginTop: 16, justifyContent: "center", opacity: outcome.trim() && !actionBusy ? 1 : 0.4 }}>
-            <Send size={14} /> {actionBusy ? "Getting your location…" : "Mark offsite & submit"}
+            <Send size={14} /> {needsAction ? (actionBusy ? "Submitting…" : "Resubmit for review") : (actionBusy ? "Getting your location…" : "Mark offsite & submit")}
           </button>
         </div>
       )}

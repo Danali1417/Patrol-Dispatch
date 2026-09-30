@@ -28,6 +28,7 @@ export function isResponseJob(job) {
 export const STATUS_META = {
   dispatched: { label: "Dispatched", color: "var(--info)" },
   submitted: { label: "Awaiting review", color: "var(--warn)" },
+  needsAction: { label: "Needs further action", color: "var(--breach)" },
   reviewed: { label: "Reviewed", color: "#7C3AED" },
   emailed: { label: "Sent to client", color: "var(--ok)" },
   cancelled: { label: "Cancelled", color: "var(--text-dim)" },
