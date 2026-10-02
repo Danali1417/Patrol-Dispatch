@@ -31,7 +31,11 @@ export function getMailFrom() {
 // Short timeouts (nodemailer defaults to up to 2 minutes) so one bad
 // connection can't eat an interactive request or a big chunk of the
 // daily-report cron's own time budget — same reasoning each call site
-// already had for its own Gmail transporter.
+// already had for its own Gmail transporter. connectionTimeout and
+// greetingTimeout only govern connection setup, so they stay tight;
+// socketTimeout (idle time once the connection's up) gets more headroom
+// than that so relaying the client email's full-resolution photo
+// attachments — several MB each — doesn't get cut off mid-transfer.
 export function createMailTransporter() {
   return nodemailer.createTransport({
     host: "smtp.resend.com",
@@ -40,6 +44,6 @@ export function createMailTransporter() {
     auth: { user: "resend", pass: process.env.RESEND_API_KEY },
     connectionTimeout: 10000,
     greetingTimeout: 10000,
-    socketTimeout: 10000,
+    socketTimeout: 30000,
   });
 }
