@@ -670,6 +670,11 @@ export default function SentrylinePrototype() {
       const latest = await fetchLatestEntryScriptSrc();
       if (!cancelled && latest && latest !== baseline) setUpdateAvailable(true);
     }
+    // Also check right away rather than only after the first interval
+    // elapses — otherwise anyone who loads a stale cached index.html and
+    // closes the app again within UPDATE_CHECK_MS never finds out, every
+    // single time they reopen it.
+    check();
     const t = setInterval(check, UPDATE_CHECK_MS);
     function onVisible() {
       if (document.visibilityState === "visible") check();
