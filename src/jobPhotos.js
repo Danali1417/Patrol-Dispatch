@@ -36,10 +36,19 @@ export async function fetchJobPhotos(jobId) {
 }
 
 export async function persistJobPhotos(jobId, photos) {
-  await apiFetch("/api/kv", {
+  const res = await apiFetch("/api/kv", {
     method: "POST",
     body: JSON.stringify({ key: `${JOB_PHOTOS_PREFIX}${jobId}`, value: JSON.stringify(photos) }),
   });
+  // submit() in App.jsx relies on this throwing to keep its own guarantee
+  // ("a job is never marked submitted with a photoCount pointing at
+  // photos that failed to save") — apiFetch only throws on 401, so a 500
+  // or a request-too-large response here previously resolved as if the
+  // photos had saved, leaving the job's photoCount pointing at nothing.
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Couldn't save photos (${res.status})`);
+  }
 }
 
 // Uploads the untouched camera file straight to Supabase Storage (see
