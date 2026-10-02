@@ -550,17 +550,24 @@ export default async function handler(req, res) {
     if (!session) return;
     try {
       if (req.method === "GET") {
-        const value = await kvGet(key);
-        // A job's photos are written exactly once, at submit (see
-        // persistJobPhotos's only call site in App.jsx) — never edited or
-        // replaced afterward — so this response is safe to cache for a
-        // full day. Every open of a job's photos (Control Room, the
-        // patrolman's own view, PDF generation, emailing) was re-fetching
-        // this from scratch through Vercel's own functions every time,
-        // which is by far the largest thing in these responses; this is
-        // what actually keeps repeat views from re-transferring it.
-        res.setHeader("Cache-Control", "private, max-age=86400, immutable");
-        return res.status(200).json({ key, value: value === null ? "[]" : value });
+        // Photos used to be written exactly once, at submit, and never
+        // edited afterward — safe to cache outright for a full day, since
+        // every open of a job's photos (Control Room, the patrolman's own
+        // view, PDF generation, emailing) was otherwise re-fetching this
+        // from scratch every time, by far the largest thing in these
+        // responses. The "Need further action" review loop (see App.jsx)
+        // can now rewrite this same key with a new set of photos on
+        // resubmission, so that blind day-long cache could serve a stale —
+        // even empty — photo list for up to a day after one. An ETag keyed
+        // off the row's own updated_at keeps the original saving (a repeat
+        // view of the same version costs just a bodyless 304) while a
+        // resubmission is picked up on the very next request instead.
+        const row = await kvGetWithMeta(key);
+        const etag = row ? `"${new Date(row.updated_at).getTime()}"` : '"empty"';
+        res.setHeader("Cache-Control", "private, max-age=0, must-revalidate");
+        res.setHeader("ETag", etag);
+        if (req.headers["if-none-match"] === etag) return res.status(304).end();
+        return res.status(200).json({ key, value: row ? row.value : "[]" });
       }
       if (req.method === "POST") {
         const { value } = req.body || {};
