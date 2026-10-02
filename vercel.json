@@ -4,6 +4,6 @@
   ],
   "functions": {
     "api/daily-report.js": { "maxDuration": 60 },
-    "api/send-client-email.js": { "maxDuration": 20 }
+    "api/send-client-email.js": { "maxDuration": 60 }
   }
 }

@@ -30,6 +30,39 @@
 //                          found and hit by random internet scanners.
 
 import { isMailConfigured, getMailFrom, createMailTransporter } from "./_lib/mail.js";
+import { createReadUrl } from "./_lib/storage.js";
+
+// Attachments come in two shapes: inline base64 `content` (the PDF, and
+// photos taken before originalPath capture existed), or an `originalPath`
+// pointing at a full-resolution photo in Supabase Storage — EmailModal
+// never puts the original's bytes in its own request body (Vercel's
+// inbound body cap is well under what a phone photo can be), so those are
+// fetched here instead, entirely server-side, via a freshly minted signed
+// URL. A photo whose original can't be fetched is dropped rather than
+// failing the whole send — the attached PDF still has its preview either way.
+async function resolveAttachments(attachments) {
+  if (!Array.isArray(attachments) || !attachments.length) return [];
+  const resolved = await Promise.all(
+    attachments.map(async (a) => {
+      if (!a || !a.filename) return null;
+      if (a.originalPath) {
+        try {
+          const readUrl = await createReadUrl(a.originalPath);
+          const fileRes = await fetch(readUrl);
+          if (!fileRes.ok) throw new Error(`fetch failed (${fileRes.status})`);
+          const content = Buffer.from(await fileRes.arrayBuffer());
+          return { filename: a.filename, content };
+        } catch (err) {
+          console.error(`send-client-email: couldn't fetch original ${a.originalPath}:`, err);
+          return null;
+        }
+      }
+      if (!a.content) return null;
+      return { filename: a.filename, content: a.content, encoding: "base64", ...(a.contentType ? { contentType: a.contentType } : {}) };
+    })
+  );
+  return resolved.filter(Boolean);
+}
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -73,13 +106,12 @@ export default async function handler(req, res) {
     // moment a job closes/cancels — see sendPhotoBackupEmail in
     // src/App.jsx) — nodemailer's defaults (up to 2 minutes to even give
     // up on a connection) would otherwise freeze that action's button for
-    // just as long during an outage. 10s bounds the worst case.
+    // just as long during an outage — see api/_lib/mail.js for the bounds.
     const transporter = createMailTransporter();
     const mail = { from: getMailFrom(), to, subject, text, ...(html ? { html } : {}) };
-    if (Array.isArray(attachments) && attachments.length) {
-      mail.attachments = attachments
-        .filter((a) => a && a.content && a.filename)
-        .map((a) => ({ filename: a.filename, content: a.content, encoding: "base64", ...(a.contentType ? { contentType: a.contentType } : {}) }));
+    const resolvedAttachments = await resolveAttachments(attachments);
+    if (resolvedAttachments.length) {
+      mail.attachments = resolvedAttachments;
     }
     await transporter.sendMail(mail);
     return res.status(200).json({ sent: true });

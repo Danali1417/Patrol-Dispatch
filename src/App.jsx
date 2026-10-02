@@ -3313,6 +3313,10 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
         <EmailModal
           job={{ ...jobWithPhotos, reviewNotes: notes }}
           companyName={companyName}
+          now={now}
+          roster={roster}
+          patrolmen={patrolmen}
+          logoUrl={logoUrl}
           onClose={() => setShowEmail(false)}
           onSent={({ clientEmail, emailSentByApp, photosBackedUp }) => {
             logAction(emailSentByApp ? "Client email sent" : "Client email marked sent", clientEmail, {
@@ -3529,6 +3533,25 @@ function photoAttachments(job) {
   }).filter(Boolean);
 }
 
+// Client email only: attaches each photo at full resolution by pointing the
+// server at its original in Supabase Storage (fetched and attached entirely
+// server-side — see api/send-client-email.js) rather than sending the
+// compressed preview already embedded in the attendance PDF. Photos taken
+// before originalPath capture existed fall back to that preview.
+function clientEmailPhotoAttachments(job) {
+  return (job.photos || []).map((p, i) => {
+    if (p.originalPath) {
+      const ext = (p.originalPath.split(".").pop() || "jpg").toLowerCase();
+      return { filename: `${job.jobNumber}-photo-${i + 1}.${ext}`, originalPath: p.originalPath };
+    }
+    const match = /^data:([^;]+);base64,(.*)$/.exec(p.dataUrl || "");
+    if (!match) return null;
+    const [, contentType, content] = match;
+    const ext = contentType.split("/")[1] || "jpg";
+    return { filename: `${job.jobNumber}-photo-${i + 1}.${ext}`, content, contentType };
+  }).filter(Boolean);
+}
+
 // Fired the moment a job closes or cancels (confirmCancel, EmailModal's
 // sendNow, and "Mark as sent/closed") so the backup photo email goes out
 // right away instead of waiting for the 48h archive sweep. Best-effort —
@@ -3625,7 +3648,7 @@ function stampPdfFooter(doc) {
   }
 }
 
-async function downloadJobAttendancePdf(job, companyName, now, logoUrl, roster, patrolmen) {
+async function buildJobAttendancePdfDoc(job, companyName, now, logoUrl, roster, patrolmen) {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "pt" });
   const pageW = doc.internal.pageSize.getWidth();
@@ -3746,10 +3769,27 @@ async function downloadJobAttendancePdf(job, companyName, now, logoUrl, roster, 
   }
 
   stampPdfFooter(doc);
+  return doc;
+}
+
+async function downloadJobAttendancePdf(job, companyName, now, logoUrl, roster, patrolmen) {
+  const doc = await buildJobAttendancePdfDoc(job, companyName, now, logoUrl, roster, patrolmen);
   doc.save(`${job.jobNumber}-attendance.pdf`);
 }
 
-function EmailModal({ job, companyName, onClose, onSent }) {
+// Same report, as a base64 attachment for the client email instead of a
+// browser download — the dataurlstring form jsPDF returns is prefixed with
+// "data:application/pdf;filename=...;base64," so only the trailing part is
+// the actual attachment content.
+async function buildJobAttendancePdfBase64(job, companyName, now, logoUrl, roster, patrolmen) {
+  const doc = await buildJobAttendancePdfDoc(job, companyName, now, logoUrl, roster, patrolmen);
+  const dataUrl = doc.output("datauristring");
+  const match = /;base64,(.*)$/.exec(dataUrl);
+  if (!match) throw new Error("Couldn't build the attendance PDF.");
+  return match[1];
+}
+
+function EmailModal({ job, companyName, now, roster, patrolmen, logoUrl, onClose, onSent }) {
   const [clientEmail, setClientEmail] = useState(job.clientEmail || job.monitoringEmail || "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -3763,10 +3803,15 @@ function EmailModal({ job, companyName, onClose, onSent }) {
     setError("");
     setBusy(true);
     try {
+      const pdfBase64 = await buildJobAttendancePdfBase64(job, companyName, now, logoUrl, roster, patrolmen);
+      const attachments = [
+        { filename: `${job.jobNumber}-attendance.pdf`, content: pdfBase64, contentType: "application/pdf" },
+        ...clientEmailPhotoAttachments(job),
+      ];
       const res = await fetch("/api/send-client-email", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-App-Secret": import.meta.env.VITE_APP_MAIL_SECRET || "" },
-        body: JSON.stringify({ to: clientEmail.trim(), subject, text, html, attachments: photoAttachments(job) }),
+        body: JSON.stringify({ to: clientEmail.trim(), subject, text, html, attachments }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Send failed (${res.status})`);
@@ -3802,10 +3847,14 @@ function EmailModal({ job, companyName, onClose, onSent }) {
           style={{ background: "#fff", padding: 12, borderRadius: 7, maxHeight: 260, overflow: "auto", border: "1px solid var(--border)" }}
           dangerouslySetInnerHTML={{ __html: html }}
         />
+        <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 8 }}>
+          <FileText size={12} style={{ verticalAlign: -1, marginRight: 4 }} />
+          A full attendance report (PDF) will be attached.
+        </div>
         {job.photos?.length > 0 && (
-          <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 8 }}>
+          <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 4 }}>
             <Camera size={12} style={{ verticalAlign: -1, marginRight: 4 }} />
-            {job.photos.length} attendance photo{job.photos.length !== 1 ? "s" : ""} will be attached.
+            {job.photos.length} full-resolution attendance photo{job.photos.length !== 1 ? "s" : ""} will be attached.
           </div>
         )}
         {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 8 }}>{error}</div>}
