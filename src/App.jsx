@@ -2921,7 +2921,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       status: "cancelled", cancelReason: cancelReason.trim(), cancelledAt: new Date().toISOString(),
       cancelledByLoginName: session.loginName, cancelledByName: session.displayName,
     };
-    const backup = await sendPhotoBackupEmail({ ...jobWithPhotos, ...patch });
+    const backup = await sendPhotoBackupEmail({ ...jobWithPhotos, ...patch }, companyName, now, logoUrl, roster, patrolmen);
     if (backup.sent) patch.photosBackedUpAt = new Date().toISOString();
     await logAction("Cancelled", cancelReason.trim(), patch);
     setCancelBusy(false);
@@ -3523,22 +3523,13 @@ function buildAdviceEmail(job, companyName) {
   return { html, text };
 }
 
-function photoAttachments(job) {
-  return (job.photos || []).map((p, i) => {
-    const match = /^data:([^;]+);base64,(.*)$/.exec(p.dataUrl || "");
-    if (!match) return null;
-    const [, contentType, content] = match;
-    const ext = contentType.split("/")[1] || "jpg";
-    return { filename: `${job.jobNumber}-photo-${i + 1}.${ext}`, content, contentType };
-  }).filter(Boolean);
-}
-
-// Client email only: attaches each photo at full resolution by pointing the
-// server at its original in Supabase Storage (fetched and attached entirely
+// Used by both outgoing emails (client advice email and internal photo
+// backup): attaches each photo at full resolution by pointing the server at
+// its original in Supabase Storage (fetched and attached entirely
 // server-side — see api/send-client-email.js) rather than sending the
 // compressed preview already embedded in the attendance PDF. Photos taken
 // before originalPath capture existed fall back to that preview.
-function clientEmailPhotoAttachments(job) {
+function fullResPhotoAttachments(job) {
   return (job.photos || []).map((p, i) => {
     if (p.originalPath) {
       const ext = (p.originalPath.split(".").pop() || "jpg").toLowerCase();
@@ -3553,17 +3544,27 @@ function clientEmailPhotoAttachments(job) {
 }
 
 // Fired the moment a job closes or cancels (confirmCancel, EmailModal's
-// sendNow, and "Mark as sent/closed") so the backup photo email goes out
-// right away instead of waiting for the 48h archive sweep. Best-effort —
-// on any failure the archive sweep still catches it later (see
+// sendNow, and "Mark as sent/closed") so the backup email goes out right
+// away instead of waiting for the 48h archive sweep. Best-effort — on any
+// failure the archive sweep still catches it later (see
 // backupAndDeletePhotos in api/_lib/jobArchive.js), so a network blip here
-// never loses a photo, just delays its backup. `to` is deliberately never
-// passed: the server fills in REPORT_RECIPIENTS itself so that address
+// never loses a photo, just delays its backup. That sweep is a server-side
+// cron with no browser to build a PDF in, so it still falls back to a
+// compressed-photos-only backup — only this client-triggered send (the
+// common path) gets the full attendance PDF. `to` is deliberately never
+// passed: the server fills in JOB_BACKUP_RECIPIENTS itself so that address
 // never has to reach the browser.
-async function sendPhotoBackupEmail(job) {
-  const attachments = photoAttachments(job);
+async function sendPhotoBackupEmail(job, companyName, now, logoUrl, roster, patrolmen) {
+  const attachments = fullResPhotoAttachments(job);
   if (!attachments.length) return { sent: false };
   const subject = `Attendance photo backup — ${job.jobNumber}${job.siteName ? ` — ${job.siteName}` : ""}`;
+  let pdfAttachment = null;
+  try {
+    const pdfBase64 = await buildJobAttendancePdfBase64(job, companyName, now, logoUrl, roster, patrolmen);
+    pdfAttachment = { filename: `${job.jobNumber}-attendance.pdf`, content: pdfBase64, contentType: "application/pdf" };
+  } catch (e) {
+    // Best-effort — a failed PDF build shouldn't block the photo backup itself.
+  }
   const text = [
     `Job ${job.jobNumber} — ${job.siteName || "—"}`,
     `Address: ${job.address || "—"}`,
@@ -3574,13 +3575,13 @@ async function sendPhotoBackupEmail(job) {
     `Offsite: ${fmtDateTime(job.offsiteTime)}`,
     `Outcome: ${job.reviewNotes || job.cancelReason || "—"}`,
     ``,
-    `${attachments.length} attendance photo${attachments.length !== 1 ? "s" : ""} attached.`,
+    `${attachments.length} full-resolution attendance photo${attachments.length !== 1 ? "s" : ""} attached${pdfAttachment ? ", plus the attendance report PDF." : "."}`,
   ].join("\n");
   try {
     const res = await fetch("/api/send-client-email", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-App-Secret": import.meta.env.VITE_APP_MAIL_SECRET || "" },
-      body: JSON.stringify({ internalBackup: true, subject, text, attachments }),
+      body: JSON.stringify({ internalBackup: true, subject, text, attachments: [...(pdfAttachment ? [pdfAttachment] : []), ...attachments] }),
     });
     return { sent: res.ok };
   } catch (e) {
@@ -3806,7 +3807,7 @@ function EmailModal({ job, companyName, now, roster, patrolmen, logoUrl, onClose
       const pdfBase64 = await buildJobAttendancePdfBase64(job, companyName, now, logoUrl, roster, patrolmen);
       const attachments = [
         { filename: `${job.jobNumber}-attendance.pdf`, content: pdfBase64, contentType: "application/pdf" },
-        ...clientEmailPhotoAttachments(job),
+        ...fullResPhotoAttachments(job),
       ];
       const res = await fetch("/api/send-client-email", {
         method: "POST",
@@ -3816,7 +3817,7 @@ function EmailModal({ job, companyName, now, roster, patrolmen, logoUrl, onClose
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Send failed (${res.status})`);
       showToast("Email sent to client.");
-      const backup = await sendPhotoBackupEmail(job);
+      const backup = await sendPhotoBackupEmail(job, companyName, now, logoUrl, roster, patrolmen);
       onSent({ clientEmail: clientEmail.trim(), emailSentByApp: true, photosBackedUp: backup.sent });
     } catch (e) {
       setError(e.message || "Couldn't send — try again, or copy the text and send it yourself.");
@@ -3828,7 +3829,7 @@ function EmailModal({ job, companyName, now, roster, patrolmen, logoUrl, onClose
   // is exactly the path that used to leave photos with no email at all.
   async function markSentWithoutEmail() {
     setBusy(true);
-    const backup = await sendPhotoBackupEmail(job);
+    const backup = await sendPhotoBackupEmail(job, companyName, now, logoUrl, roster, patrolmen);
     setBusy(false);
     onSent({ clientEmail: clientEmail.trim(), emailSentByApp: false, photosBackedUp: backup.sent });
   }
