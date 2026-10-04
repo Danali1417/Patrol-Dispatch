@@ -3528,6 +3528,14 @@ function buildAdviceEmail(job, companyName) {
   return { html, text };
 }
 
+// Temporarily disabled — fetching multi-MB originals through
+// api/send-client-email.js for every job closure is a leading suspect in a
+// Vercel "Fast Origin Transfer" usage spike that risks the whole app being
+// auto-paused. Flip back to true once the real driver is confirmed and
+// usage is under control. While off, both outgoing emails fall back to the
+// compressed preview already embedded in the attendance PDF.
+const ATTACH_FULL_RES_PHOTOS = false;
+
 // Used by both outgoing emails (client advice email and internal photo
 // backup): attaches each photo at full resolution by pointing the server at
 // its original in Supabase Storage (fetched and attached entirely
@@ -3536,7 +3544,7 @@ function buildAdviceEmail(job, companyName) {
 // before originalPath capture existed fall back to that preview.
 function fullResPhotoAttachments(job) {
   return (job.photos || []).map((p, i) => {
-    if (p.originalPath) {
+    if (ATTACH_FULL_RES_PHOTOS && p.originalPath) {
       const ext = (p.originalPath.split(".").pop() || "jpg").toLowerCase();
       return { filename: `${job.jobNumber}-photo-${i + 1}.${ext}`, originalPath: p.originalPath };
     }
@@ -3580,7 +3588,7 @@ async function sendPhotoBackupEmail(job, companyName, now, logoUrl, roster, patr
     `Offsite: ${fmtDateTime(job.offsiteTime)}`,
     `Outcome: ${job.reviewNotes || job.cancelReason || "—"}`,
     ``,
-    `${attachments.length} full-resolution attendance photo${attachments.length !== 1 ? "s" : ""} attached${pdfAttachment ? ", plus the attendance report PDF." : "."}`,
+    `${attachments.length} ${ATTACH_FULL_RES_PHOTOS ? "full-resolution " : ""}attendance photo${attachments.length !== 1 ? "s" : ""} attached${pdfAttachment ? ", plus the attendance report PDF." : "."}`,
   ].join("\n");
   try {
     const res = await fetch("/api/send-client-email", {
@@ -3860,7 +3868,7 @@ function EmailModal({ job, companyName, now, roster, patrolmen, logoUrl, onClose
         {job.photos?.length > 0 && (
           <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 4 }}>
             <Camera size={12} style={{ verticalAlign: -1, marginRight: 4 }} />
-            {job.photos.length} full-resolution attendance photo{job.photos.length !== 1 ? "s" : ""} will be attached.
+            {job.photos.length} {ATTACH_FULL_RES_PHOTOS ? "full-resolution " : ""}attendance photo{job.photos.length !== 1 ? "s" : ""} will be attached.
           </div>
         )}
         {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 8 }}>{error}</div>}
