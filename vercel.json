@@ -1,6 +1,6 @@
 {
   "crons": [
-    { "path": "/api/daily-report", "schedule": "30 20 * * *" }
+    { "path": "/api/daily-report", "schedule": "30 19 * * *" }
   ],
   "functions": {
     "api/daily-report.js": { "maxDuration": 60 },
