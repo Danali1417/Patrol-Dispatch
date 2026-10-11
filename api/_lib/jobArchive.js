@@ -346,20 +346,38 @@ export async function archiveOldJobs(now = new Date(), { transporter } = {}) {
   }
 
   const photoBackupCounts = { sent: 0, none: 0, failed: 0, "not-configured": 0, "already-sent": 0 };
+  let archivedCount = 0;
+  const archiveFailures = [];
   if (toArchive.length > 0) {
+    // Each job gets its own try/catch — mapWithConcurrency's Promise.all
+    // rejects (and stops waiting on every other in-flight job) the instant
+    // any one callback throws, so one transient Supabase hiccup or
+    // malformed record used to silently abort the *entire* day's sweep.
+    // Caught only by daily-report.js's outer try/catch (console.error, no
+    // alert), that one job then kept failing the same way every single
+    // day — blocking cleanup for every other job too, indefinitely, with
+    // nothing surfaced anywhere. A failed job is left in `remaining` to
+    // retry tomorrow instead of taking the whole sweep down with it.
     await mapWithConcurrency(toArchive, 5, async (j) => {
-      const outcome = await backupAndDeletePhotos(j, { transporter });
-      photoBackupCounts[outcome] = (photoBackupCounts[outcome] || 0) + 1;
-      const chat = await archiveChat(j);
-      const archivedJob = chat ? { ...j, chat } : j;
-      await kvSetSearchable(`${JOB_ARCHIVE_PREFIX}${j.id}`, JSON.stringify(archivedJob), searchFieldsFor(j));
+      try {
+        const outcome = await backupAndDeletePhotos(j, { transporter });
+        photoBackupCounts[outcome] = (photoBackupCounts[outcome] || 0) + 1;
+        const chat = await archiveChat(j);
+        const archivedJob = chat ? { ...j, chat } : j;
+        await kvSetSearchable(`${JOB_ARCHIVE_PREFIX}${j.id}`, JSON.stringify(archivedJob), searchFieldsFor(j));
+        archivedCount++;
+      } catch (err) {
+        console.error(`archiving job ${j.jobNumber || j.id} failed, leaving it on the live board to retry tomorrow:`, err);
+        archiveFailures.push(j.jobNumber || j.id);
+        remaining.push(j);
+      }
     });
     await kvSet(JOBS_KEY, JSON.stringify(remaining));
   }
 
   const backfilled = await backfillSearchFields();
 
-  return { archived: toArchive.length, remaining: remaining.length, backfilled, photoBackupCounts };
+  return { archived: archivedCount, archiveFailures, remaining: remaining.length, backfilled, photoBackupCounts };
 }
 
 // One-time catch-up for jobs archived before the `search` column existed
