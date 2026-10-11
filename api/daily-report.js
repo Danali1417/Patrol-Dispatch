@@ -86,6 +86,32 @@ async function sendFailureAlert(req, reason, detail) {
   }
 }
 
+// A job that fails to archive (see archiveOldJobs's own comment on why one
+// bad job used to be able to silently abort the whole day's sweep) stays on
+// the live board and is retried tomorrow — harmless once, but invisible if
+// it then fails the same way every day, which is exactly how Storage grew
+// past its quota unnoticed. This surfaces that the moment it happens
+// instead of only in a console log nobody watches.
+async function sendArchiveFailureAlert(jobNumbers) {
+  const to = process.env.REPORT_RECIPIENTS;
+  if (!to || !isMailConfigured()) return;
+  try {
+    const transporter = createMailTransporter();
+    await transporter.sendMail({
+      from: getMailFrom(),
+      to,
+      subject: `${jobNumbers.length} job${jobNumbers.length !== 1 ? "s" : ""} failed to archive today`,
+      text: [
+        `${jobNumbers.length} job${jobNumbers.length !== 1 ? "s" : ""} failed archiving and will be retried tomorrow: ${jobNumbers.join(", ")}.`,
+        "",
+        "If the same job keeps appearing here day after day, something about that job's own record (not a one-off network blip) is causing it to fail — check Vercel's function logs for \"archiving job ... failed\" for the actual error.",
+      ].join("\n"),
+    });
+  } catch (err) {
+    console.error("archive failure alert email also failed to send:", err);
+  }
+}
+
 function isAuthorized(req) {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false; // fail closed — misconfigured, not "open"
@@ -208,6 +234,9 @@ export default async function handler(req, res) {
   let archiveResult = null;
   try {
     archiveResult = await archiveOldJobs();
+    if (archiveResult?.archiveFailures?.length) {
+      await sendArchiveFailureAlert(archiveResult.archiveFailures);
+    }
   } catch (err) {
     console.error("job archiving failed:", err);
   }
