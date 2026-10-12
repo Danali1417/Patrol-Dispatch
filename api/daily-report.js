@@ -5,13 +5,14 @@
 // saving transition; the tolerance check below accepts that and skips
 // itself if invoked well outside the target window for any other reason.
 //
-// vercel.json also raises this function's maxDuration to 60s (Hobby's
-// ceiling) — archiveOldJobs() below can send one photo-backup email per
-// job it archives (run with bounded concurrency, see jobArchive.js), and
-// the platform default (10s) could get cut off mid-run on a day with an
-// unusually large backlog. The report itself is built and sent before
-// archiving runs, specifically so a slow or maxed-out archive sweep can
-// never delay or block today's report email.
+// vercel.json raises this function's maxDuration to 300s (Vercel Pro's
+// default ceiling for a Node serverless function — was capped at 60s, the
+// Hobby plan's own ceiling, before upgrading) — archiveOldJobs() below can
+// send one photo-backup email per job it archives (run with bounded
+// concurrency, see jobArchive.js), and the platform default (10s) could get
+// cut off mid-run on a day with an unusually large backlog. The report
+// itself is built and sent before archiving runs, specifically so a slow or
+// maxed-out archive sweep can never delay or block today's report email.
 //
 // Required env vars (set in Vercel → Project Settings → Environment Variables):
 //   RESEND_API_KEY        from https://resend.com/api-keys — see api/_lib/mail.js
