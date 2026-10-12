@@ -2245,7 +2245,9 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       title: `New job — ${job.jobNumber}`,
       body: `${job.siteName} — tap Acknowledge to confirm receipt.`,
     }).then((result) => {
-      if (result.total === 0) {
+      if (!result.ok) {
+        showToast(`Job dispatched, but push notifications are down: ${result.error || "unknown error"}`, "error");
+      } else if (result.total === 0) {
         showToast("Job dispatched, but that patrolman hasn't turned on job alerts.", "error");
       } else if (result.sent === 0) {
         showToast("Job dispatched, but the push alert failed to deliver.", "error");
@@ -2867,7 +2869,9 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       title: `Job reassigned to you — ${job.jobNumber}`,
       body: `${job.siteName} — tap Acknowledge to confirm receipt.`,
     });
-    if (dispatchResult.total === 0) {
+    if (!dispatchResult.ok) {
+      showToast(`Reassigned, but push notifications are down: ${dispatchResult.error || "unknown error"}`, "error");
+    } else if (dispatchResult.total === 0) {
       showToast("Reassigned, but that patrolman hasn't turned on job alerts.", "error");
     } else if (dispatchResult.sent === 0) {
       showToast("Reassigned, but the push alert failed to deliver.", "error");
@@ -2879,7 +2883,9 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
         patrolmanName: previousName,
         reassignedToName: p.displayName,
       });
-      if (standDownResult.total === 0) {
+      if (!standDownResult.ok) {
+        showToast(`${previousName} wasn't notified — push notifications are down: ${standDownResult.error || "unknown error"}`, "error");
+      } else if (standDownResult.total === 0) {
         showToast(`${previousName} wasn't notified — they haven't turned on job alerts.`, "error");
       } else if (standDownResult.sent === 0) {
         showToast(`${previousName} wasn't notified — the push alert failed to deliver.`, "error");
@@ -2913,7 +2919,9 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       title: `Further action needed — ${job.jobNumber}`,
       body: text,
     });
-    if (result.total === 0) {
+    if (!result.ok) {
+      showToast(`Sent back, but push notifications are down: ${result.error || "unknown error"}`, "error");
+    } else if (result.total === 0) {
       showToast("Sent back, but the patrolman hasn't turned on job alerts.", "error");
     } else if (result.sent === 0) {
       showToast("Sent back, but the push alert failed to deliver.", "error");
