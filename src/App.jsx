@@ -3645,7 +3645,11 @@ async function addPdfLogo(doc, logoUrl, marginX, maxH = 34, topY = 16) {
     const w = maxH * (size.width / size.height);
     const pageW = doc.internal.pageSize.getWidth();
     doc.addImage(logoUrl, "PNG", pageW - marginX - w, topY, w, maxH);
-  } catch (e) { /* skip if the stored logo fails to embed */ }
+  } catch (e) {
+    // Was silently skipped with no trace — logged now so a report missing
+    // its logo is diagnosable from the browser console instead of a guess.
+    console.error("addPdfLogo: couldn't embed the company logo in this PDF:", e);
+  }
 }
 
 function stampPdfFooter(doc) {
