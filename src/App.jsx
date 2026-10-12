@@ -3528,13 +3528,14 @@ function buildAdviceEmail(job, companyName) {
   return { html, text };
 }
 
-// Temporarily disabled — fetching multi-MB originals through
-// api/send-client-email.js for every job closure is a leading suspect in a
-// Vercel "Fast Origin Transfer" usage spike that risks the whole app being
-// auto-paused. Flip back to true once the real driver is confirmed and
-// usage is under control. While off, both outgoing emails fall back to the
-// compressed preview already embedded in the attendance PDF.
-const ATTACH_FULL_RES_PHOTOS = false;
+// Re-enabled now that both Vercel and Supabase are on Pro plans — exceeding
+// the included allowance there bills extra instead of auto-pausing or
+// dropping requests outright, which was the actual risk that led to this
+// being disabled (see the Fast Origin Transfer / Supabase Storage quota
+// incidents this flag was added for). The archive sweep also no longer
+// silently stalls (see jobArchive.js), so Storage shouldn't grow unchecked
+// the way it did before either.
+const ATTACH_FULL_RES_PHOTOS = true;
 
 // Used by both outgoing emails (client advice email and internal photo
 // backup): attaches each photo at full resolution by pointing the server at
