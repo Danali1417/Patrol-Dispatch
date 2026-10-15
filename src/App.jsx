@@ -2259,16 +2259,16 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
     attendanceTimeIso: fromLocalInputValue(o.attendanceTimeInput),
   }));
   const extraOccurrencesValid = extraParsed.every((o) => o.jobNumber.trim() && o.scheduledForIso && o.attendanceTimeIso);
-  // Within this one batch only — not checked against the rest of the live
-  // board or archive, which would need a server round trip for what's
-  // really just a guard against an obvious copy-paste slip while filling
-  // in several rows at once.
+  // Flagged, not blocked — a monitoring company's own reference number is
+  // sometimes deliberately the same across a recurring patrol's visits,
+  // so reusing one here is a real, intended case, not just a copy-paste
+  // slip. The warning below still catches the slip; it just doesn't
+  // assume that's always what happened.
   const allJobNumbersInBatch = [jobNumber.trim(), ...extraParsed.map((o) => o.jobNumber.trim())];
   const hasDuplicateJobNumbers = new Set(allJobNumbersInBatch.map((n) => n.toUpperCase())).size !== allJobNumbersInBatch.length;
   const canDispatch = site && description.trim() && assigneeId && jobNumber.trim() && typeReady
     && (!isActuallyScheduled || (scheduledForIso && attendanceTimeIso))
-    && (!isActuallyScheduled || extraOccurrencesValid)
-    && !hasDuplicateJobNumbers;
+    && (!isActuallyScheduled || extraOccurrencesValid);
 
   // Guards against a double-click (or a slow network making someone tap
   // "Dispatch" again, thinking the first tap didn't register) creating
@@ -2573,8 +2573,8 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
           )}
 
           {isActuallyScheduled && hasDuplicateJobNumbers && (
-            <div style={{ fontSize: 11, color: "var(--breach)", marginTop: 8, fontWeight: 600 }}>
-              Two or more dates above share the same job number — give each one its own before scheduling.
+            <div style={{ fontSize: 11, color: "var(--warn)", marginTop: 8, fontWeight: 600 }}>
+              Two or more dates above share the same job number — fine if that's deliberate (e.g. the client's own reference is the same for every visit), otherwise give each one its own.
             </div>
           )}
 
