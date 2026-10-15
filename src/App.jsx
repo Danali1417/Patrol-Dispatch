@@ -1176,9 +1176,18 @@ export default function SentrylinePrototype() {
         const prev = prevJobsRef.current;
 
         if (session.role === "patrolman") {
-          const newlyAssigned = fresh.filter(
-            (j) => j.assigneeId === session.id && !prev.find((p) => p.id === j.id)
-          );
+          // A job that just popped from "scheduled" to "dispatched" (see
+          // promote-scheduled-jobs.js) is also "newly assigned" as far as
+          // this device is concerned — it was deliberately kept out of
+          // `mine` and this same check while still "scheduled", so this
+          // is the first moment it should beep/bank a banner. A job still
+          // "scheduled" is excluded outright — assigning it ahead of time
+          // must stay silent until it actually pops.
+          const newlyAssigned = fresh.filter((j) => {
+            if (j.assigneeId !== session.id || j.status === "scheduled") return false;
+            const wasPrev = prev.find((p) => p.id === j.id);
+            return !wasPrev || wasPrev.status === "scheduled";
+          });
           if (newlyAssigned.length) {
             beep([1046, 1046, 1046]);
             setBanner({ type: "job", text: `New job dispatched: ${newlyAssigned[0].jobNumber} — ${newlyAssigned[0].siteName}` });
@@ -1187,7 +1196,11 @@ export default function SentrylinePrototype() {
           const newlyCancelled = fresh.filter((j) => {
             if (j.assigneeId !== session.id || j.status !== "cancelled") return false;
             const wasPrev = prev.find((p) => p.id === j.id);
-            return wasPrev && wasPrev.status !== "cancelled";
+            // A scheduled job cancelled before it ever popped was never
+            // shown to this patrolman in the first place (see `mine`
+            // above) — no "stand down" notice is owed for a job they
+            // never saw as theirs.
+            return wasPrev && wasPrev.status !== "cancelled" && wasPrev.status !== "scheduled";
           });
           if (newlyCancelled.length) {
             beep([440, 330]);
@@ -1742,6 +1755,10 @@ function PatrolProgressChip({ job }) {
 // through this instead, so Response jobs keep their SLA chip untouched
 // and the other three types get their own equivalent.
 function JobUrgencyChip({ job, now }) {
+  // Nothing here means anything yet for a job that hasn't popped — no SLA
+  // clock, due-by countdown, or patrol progress applies before it's
+  // actually dispatched.
+  if (job.status === "scheduled") return null;
   if (isResponseJob(job)) return <SlaChip job={job} now={now} />;
   if (job.jobType === "keyPickup" || job.jobType === "keyDropoff") return <DueByChip job={job} now={now} />;
   if (job.jobType === "randomPatrol") return <PatrolProgressChip job={job} />;
@@ -1749,10 +1766,10 @@ function JobUrgencyChip({ job, now }) {
 }
 
 // Six-step lifecycle used by JobProgressBar. Returns null for cancelled
-// jobs (they don't have a meaningful "next milestone" to show progress
-// toward — the cancelled banner shown elsewhere covers that case).
+// and scheduled jobs (neither has a meaningful "next milestone" to show
+// progress toward — see JobProgressBar for what each shows instead).
 function jobMilestones(job) {
-  if (job.status === "cancelled") return null;
+  if (job.status === "cancelled" || job.status === "scheduled") return null;
   const submitted = job.status !== "dispatched";
   const resultDone = job.status === "reviewed" || job.status === "emailed";
   const resultLabel = job.status === "emailed" ? "Sent" : job.status === "reviewed" ? "Closed" : "Result";
@@ -1770,6 +1787,13 @@ function jobMilestones(job) {
 function JobProgressBar({ job, compact }) {
   const milestones = jobMilestones(job);
   if (!milestones) {
+    if (job.status === "scheduled") {
+      return compact ? null : (
+        <div style={{ fontSize: 11.5, color: "#0EA5E9", fontWeight: 600 }}>
+          Scheduled for {fmtDateTime(job.scheduledFor)}{job.attendanceTime ? ` — attendance due ${fmtTime(job.attendanceTime)}` : ""}
+        </div>
+      );
+    }
     return compact ? null : (
       <div style={{ fontSize: 11.5, color: "var(--breach)", fontWeight: 600 }}>Cancelled</div>
     );
@@ -1823,6 +1847,7 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
         {[
           { id: "board", label: "Dispatch board", icon: ShieldAlert },
           { id: "new", label: "New job", icon: Send },
+          { id: "scheduled", label: "Scheduled jobs", icon: Clock },
           { id: "cancelled", label: "Cancelled jobs", icon: Ban },
           { id: "closed", label: "Closed jobs", icon: CheckCircle2 },
           { id: "roster", label: "Roster", icon: CalendarDays },
@@ -1836,20 +1861,22 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
 
       <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
         {tab === "board" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} roster={roster} />}
+        {tab === "scheduled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="scheduled" roster={roster} />}
         {tab === "cancelled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="cancelled" roster={roster} />}
         {tab === "closed" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="emailed" roster={roster} />}
-        {(tab === "board" || tab === "cancelled" || tab === "closed") && selected && (
+        {(tab === "board" || tab === "scheduled" || tab === "cancelled" || tab === "closed") && selected && (
           <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} roster={roster} persist={persist} now={now} session={session} companyName={companyName} logoUrl={logoUrl} onBack={() => selectJob(null)} />
         )}
         {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} roster={roster} session={session} persist={persist} monitoringCompanies={monitoringCompanies} bureaus={bureaus} onCreated={(id) => { setTab("board"); selectJob(id); }} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
-        {tab === "logs" && <Logs jobs={jobs} now={now} role="operator" />}
+        {tab === "logs" && <Logs jobs={jobs.filter((j) => j.status !== "scheduled")} now={now} role="operator" />}
       </div>
     </div>
   );
 }
 
 const BOARD_GROUPS = [
+  { key: "scheduled", title: "Scheduled — not yet dispatched" },
   { key: "dispatched", title: "Out with patrolmen" },
   { key: "submitted", title: "Awaiting your review" },
   { key: "needsAction", title: "Sent back — waiting on patrolman" },
@@ -1857,9 +1884,15 @@ const BOARD_GROUPS = [
   { key: "emailed", title: "Closed out" },
   { key: "cancelled", title: "Cancelled / stood down" },
 ];
+// "scheduled" deliberately left out of BOARD_ACTIVE_KEYS — a scheduled job
+// hasn't dispatched yet, so it stays off the main Dispatch board's default
+// view (and off the patrolman's dashboard — see PatrolmanView) until it
+// pops; it gets its own "Scheduled jobs" tab instead (lockedStatus prop
+// below), the same pattern as the dedicated Cancelled/Closed tabs.
 const BOARD_ACTIVE_KEYS = new Set(["dispatched", "submitted", "needsAction", "reviewed"]);
 const BOARD_STATUS_OPTIONS = [
   { value: "active", label: "Active jobs" },
+  { value: "scheduled", label: "Scheduled" },
   { value: "cancelled", label: "Cancelled / stood down" },
   { value: "emailed", label: "Closed out" },
   { value: "all", label: "All statuses" },
@@ -2075,6 +2108,14 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
   const [patrolDurationHours, setPatrolDurationHours] = useState(1);
   const [addingSite, setAddingSite] = useState(false);
   const [dispatching, setDispatching] = useState(false);
+  // Schedule this job for later instead of dispatching it now — Control
+  // Room still picks the site/patrolman/etc. up front, but the job stays
+  // out of the live board and off the patrolman's dashboard (and sends no
+  // push) until `scheduledForInput` arrives; see ScheduledJobView and
+  // promote-scheduled-jobs.js for the rest of the lifecycle.
+  const [isScheduled, setIsScheduled] = useState(false);
+  const [scheduledForInput, setScheduledForInput] = useState("");
+  const [attendanceTimeInput, setAttendanceTimeInput] = useState("");
 
   const site = sites.find((s) => s.id === siteId);
 
@@ -2164,7 +2205,10 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
     jobType === "randomPatrol" ? patrolsRequired > 0 && patrolDurationHours > 0
     : jobType === "keyPickup" || jobType === "keyDropoff" ? !!dueByTime
     : true;
-  const canDispatch = site && description.trim() && assigneeId && jobNumber.trim() && typeReady;
+  const scheduledForIso = isScheduled ? fromLocalInputValue(scheduledForInput) : null;
+  const attendanceTimeIso = isScheduled ? fromLocalInputValue(attendanceTimeInput) : null;
+  const canDispatch = site && description.trim() && assigneeId && jobNumber.trim() && typeReady
+    && (!isScheduled || (scheduledForIso && attendanceTimeIso));
 
   // Guards against a double-click (or a slow network making someone tap
   // "Dispatch" again, thinking the first tap didn't register) creating
@@ -2185,6 +2229,11 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
   async function doDispatch() {
     const assignee = assigneeCandidates.find((r) => r.loginName === assigneeId);
     const dispatchTimeIso = new Date().toISOString();
+    // A scheduled job's "dispatch time" (used everywhere else for sorting/
+    // filtering/SLA-reference purposes) is the moment it's due to pop, not
+    // the moment Control Room filled in this form — promote-scheduled-jobs.js
+    // overwrites this with the real pop time once it actually fires.
+    const referenceTimeIso = scheduledForIso || dispatchTimeIso;
     const job = {
       id: `job_${Date.now()}`,
       jobNumber: jobNumber.trim(),
@@ -2202,13 +2251,13 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       alarmCode,
       jobType,
       ...(jobType === "keyPickup" || jobType === "keyDropoff"
-        ? { dueBy: computeDueBy(dueByTime, new Date(dispatchTimeIso)) }
+        ? { dueBy: computeDueBy(dueByTime, new Date(referenceTimeIso)) }
         : {}),
       ...(jobType === "randomPatrol"
         ? {
             patrolsRequired,
             patrolDurationHours,
-            patrolWindowEnd: new Date(new Date(dispatchTimeIso).getTime() + patrolDurationHours * 3600000).toISOString(),
+            patrolWindowEnd: new Date(new Date(referenceTimeIso).getTime() + patrolDurationHours * 3600000).toISOString(),
             patrolLogs: [],
           }
         : {}),
@@ -2218,8 +2267,9 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       dispatchedByName: session.displayName,
       handlingLoginName: session.loginName,
       handlingName: session.displayName,
-      dispatchTime: dispatchTimeIso,
-      status: "dispatched",
+      dispatchTime: referenceTimeIso,
+      status: isScheduled ? "scheduled" : "dispatched",
+      ...(isScheduled ? { scheduledFor: scheduledForIso, attendanceTime: attendanceTimeIso } : {}),
       outcomeNotes: "",
       docketNo: "",
       photos: [],
@@ -2234,27 +2284,38 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       onsiteLocationName: null,
       offsiteLocation: null,
       offsiteLocationName: null,
-      activityLog: [logEntry(session, "Dispatched", jobType === "response" ? `Assigned to ${assignee.displayName}` : `${jobTypeLabel(jobType)} — assigned to ${assignee.displayName}`)],
+      activityLog: [logEntry(
+        session,
+        isScheduled ? "Scheduled" : "Dispatched",
+        isScheduled
+          ? `Scheduled for ${fmtDateTime(scheduledForIso)} — attendance due ${fmtTime(attendanceTimeIso)} — assigned to ${assignee.displayName}`
+          : jobType === "response" ? `Assigned to ${assignee.displayName}` : `${jobTypeLabel(jobType)} — assigned to ${assignee.displayName}`
+      )],
       standDowns: [],
     };
     await persist([...jobs, job]);
-    notifyJobDispatch({
-      jobId: job.id,
-      loginName: assignee.loginName,
-      role: "patrolman",
-      title: `New job — ${job.jobNumber}`,
-      body: `${job.siteName} — tap Acknowledge to confirm receipt.`,
-    }).then((result) => {
-      if (!result.ok) {
-        showToast(`Job dispatched, but push notifications are down: ${result.error || "unknown error"}`, "error");
-      } else if (result.total === 0) {
-        showToast("Job dispatched, but that patrolman hasn't turned on job alerts.", "error");
-      } else if (result.sent === 0) {
-        showToast("Job dispatched, but the push alert failed to deliver.", "error");
-      }
-    });
+    if (isScheduled) {
+      showToast(`Job scheduled — it'll pop up for Control Room and ${assignee.displayName} at ${fmtDateTime(scheduledForIso)}.`);
+    } else {
+      notifyJobDispatch({
+        jobId: job.id,
+        loginName: assignee.loginName,
+        role: "patrolman",
+        title: `New job — ${job.jobNumber}`,
+        body: `${job.siteName} — tap Acknowledge to confirm receipt.`,
+      }).then((result) => {
+        if (!result.ok) {
+          showToast(`Job dispatched, but push notifications are down: ${result.error || "unknown error"}`, "error");
+        } else if (result.total === 0) {
+          showToast("Job dispatched, but that patrolman hasn't turned on job alerts.", "error");
+        } else if (result.sent === 0) {
+          showToast("Job dispatched, but the push alert failed to deliver.", "error");
+        }
+      });
+    }
     setSiteId(""); setSiteQuery(""); setDescription(""); setAssigneeId(""); setKeyInfo(""); setAlarmCode(""); setOrderNo("");
     setDueByTime(""); setPatrolsRequired(1); setPatrolDurationHours(1);
+    setIsScheduled(false); setScheduledForInput(""); setAttendanceTimeInput("");
     setJobNumber(`JB-${String(jobs.length + 2).padStart(4, "0")}`);
     onCreated(job.id);
   }
@@ -2378,8 +2439,33 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
         </select>
       </Field>
 
+      <div style={{ padding: 12, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel-alt)", marginBottom: 14 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+          <input type="checkbox" checked={isScheduled} onChange={(e) => setIsScheduled(e.target.checked)} />
+          <Clock size={14} color="#0EA5E9" /> Schedule this for later instead of dispatching now
+        </label>
+        {isScheduled && (
+          <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+            <Field label="Pop up on board/dashboard at" style={{ flex: "1 1 220px", marginBottom: 0 }}>
+              <input type="datetime-local" value={scheduledForInput} onChange={(e) => setScheduledForInput(e.target.value)} style={selectStyle} />
+            </Field>
+            <Field label="Attendance due at" style={{ flex: "1 1 220px", marginBottom: 0 }}>
+              <input type="datetime-local" value={attendanceTimeInput} onChange={(e) => setAttendanceTimeInput(e.target.value)} style={selectStyle} />
+            </Field>
+          </div>
+        )}
+        {isScheduled && (
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 8 }}>
+            Stays out of the live board, Scheduled jobs tab aside, and off {assigneeId ? "the patrolman's" : "their"} dashboard — no alert goes out — until the pop-up time above arrives.
+          </div>
+        )}
+      </div>
+
       <button disabled={!canDispatch || dispatching} onClick={dispatch} style={{ ...primaryBtn, width: "100%", marginTop: 6, opacity: canDispatch && !dispatching ? 1 : 0.4, cursor: canDispatch && !dispatching ? "pointer" : "not-allowed" }}>
-        <Send size={14} /> {dispatching ? "Dispatching…" : jobType === "response" ? "Dispatch job" : `Dispatch ${jobTypeLabel(jobType).toLowerCase()}`}
+        <Send size={14} /> {dispatching
+          ? (isScheduled ? "Scheduling…" : "Dispatching…")
+          : isScheduled ? "Schedule job"
+          : jobType === "response" ? "Dispatch job" : `Dispatch ${jobTypeLabel(jobType).toLowerCase()}`}
       </button>
     </div>
   );
@@ -2954,6 +3040,17 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   // longer has a matching entry, so edits would silently go nowhere.
   const isArchived = !jobs.some((j) => j.id === job.id);
 
+  // A scheduled job hasn't actually dispatched yet — none of the above
+  // (reassign-with-push, onsite/offsite, review, email, the live cancel
+  // flow) applies before it pops, so this gets its own small, self-
+  // contained view instead of branching dozens of places through the
+  // rest of this component.
+  if (job.status === "scheduled") {
+    return (
+      <ScheduledJobView job={job} jobs={jobs} patrolmen={patrolmen} roster={roster} session={session} persist={persist} onBack={onBack} />
+    );
+  }
+
   return (
     <div style={{ maxWidth: 640 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
@@ -3340,6 +3437,183 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
           }}
         />
       )}
+    </div>
+  );
+}
+
+// The detail view for a job still in "scheduled" state — before it pops
+// (see promote-scheduled-jobs.js), none of JobDetailOperator's live-job
+// machinery (reassign-with-push, onsite/offsite, review, email, archive)
+// applies, so this is a small, self-contained view rather than another
+// branch threaded through that component. Reassigning or rescheduling
+// here never pushes anything to the patrolman — that only ever happens
+// once the job actually dispatches, exactly once, at the pop-up time (or
+// immediately, via "Dispatch now" below).
+function ScheduledJobView({ job, jobs, patrolmen, roster, session, persist, onBack }) {
+  const showToast = useToast();
+  const [assigneeId, setAssigneeId] = useState(job.assigneeId || "");
+  const [scheduledForInput, setScheduledForInput] = useState(toLocalInputValue(job.scheduledFor));
+  const [attendanceTimeInput, setAttendanceTimeInput] = useState(toLocalInputValue(job.attendanceTime));
+  const [description, setDescription] = useState(job.description || "");
+  const [showCancelForm, setShowCancelForm] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  function update(patch) {
+    const updated = jobs.map((j) => (j.id === job.id ? { ...j, ...patch } : j));
+    return persist(updated);
+  }
+  function logAction(action, detail, patch = {}) {
+    return update({ ...patch, activityLog: [...(job.activityLog || []), logEntry(session, action, detail)] });
+  }
+
+  const patrolmenByRun = [...patrolmen].sort(compareByRunThenName);
+  const assignee = patrolmen.find((p) => p.loginName === assigneeId);
+  const scheduledForIso = fromLocalInputValue(scheduledForInput);
+  const attendanceTimeIso = fromLocalInputValue(attendanceTimeInput);
+  const canSave = assigneeId && scheduledForIso && attendanceTimeIso && description.trim();
+  // Compared via the same "local" string form the inputs themselves hold
+  // (see toLocalInputValue/fromLocalInputValue's own comment and
+  // saveTimes()'s onsiteChanged/offsiteChanged above) rather than two ISO
+  // strings, so a value that round-trips through the date picker without
+  // actually changing can never register as "changed".
+  const assigneeChanged = assigneeId !== (job.assigneeId || "");
+  const scheduledForChanged = scheduledForInput !== toLocalInputValue(job.scheduledFor);
+  const attendanceTimeChanged = attendanceTimeInput !== toLocalInputValue(job.attendanceTime);
+  const descriptionChanged = description.trim() !== (job.description || "");
+  const hasChanges = assigneeChanged || scheduledForChanged || attendanceTimeChanged || descriptionChanged;
+
+  async function saveChanges() {
+    if (!canSave || busy || !hasChanges) return;
+    const changes = [];
+    const patch = {};
+    if (assigneeChanged) {
+      changes.push(`Reassigned to ${assignee?.displayName || assigneeId}`);
+      patch.assigneeId = assignee.loginName;
+      patch.assigneeName = assignee.displayName;
+      patch.run = assignee.run || job.run;
+    }
+    if (scheduledForChanged) {
+      changes.push(`Pop-up time ${fmtDateTime(job.scheduledFor)} → ${fmtDateTime(scheduledForIso)}`);
+      patch.scheduledFor = scheduledForIso;
+      patch.dispatchTime = scheduledForIso;
+    }
+    if (attendanceTimeChanged) {
+      changes.push(`Attendance time ${fmtTime(job.attendanceTime)} → ${fmtTime(attendanceTimeIso)}`);
+      patch.attendanceTime = attendanceTimeIso;
+    }
+    if (descriptionChanged) {
+      changes.push("Description updated");
+      patch.description = description.trim();
+    }
+    if (!changes.length) return;
+    setBusy(true);
+    await logAction("Scheduled job edited", changes.join(" · "), patch);
+    setBusy(false);
+    showToast("Scheduled job updated.");
+  }
+
+  // Pops it immediately instead of waiting for promote-scheduled-jobs.js's
+  // cron — same persist-then-notify ordering as reassign() above, so the
+  // push can't land against a stale pre-dispatch snapshot.
+  async function dispatchNow() {
+    if (busy) return;
+    setBusy(true);
+    const nowIso = new Date().toISOString();
+    await logAction("Dispatched", "Dispatched now, ahead of its scheduled pop-up time", { status: "dispatched", dispatchTime: nowIso });
+    const result = await notifyJobDispatch({
+      jobId: job.id,
+      loginName: job.assigneeId,
+      role: "patrolman",
+      title: `New job — ${job.jobNumber}`,
+      body: `${job.siteName} — tap Acknowledge to confirm receipt.`,
+    });
+    if (!result.ok) {
+      showToast(`Dispatched, but push notifications are down: ${result.error || "unknown error"}`, "error");
+    } else if (result.total === 0) {
+      showToast("Dispatched, but that patrolman hasn't turned on job alerts.", "error");
+    } else if (result.sent === 0) {
+      showToast("Dispatched, but the push alert failed to deliver.", "error");
+    } else {
+      showToast("Dispatched now.");
+    }
+    setBusy(false);
+  }
+
+  async function confirmCancel() {
+    if (busy) return;
+    setBusy(true);
+    const reason = cancelReason.trim() || "Cancelled before its scheduled dispatch time";
+    await logAction("Cancelled", reason, {
+      status: "cancelled", cancelReason: reason, cancelledAt: new Date().toISOString(),
+      cancelledByLoginName: session.loginName, cancelledByName: session.displayName,
+    });
+    setBusy(false);
+    setShowCancelForm(false);
+    showToast("Scheduled job cancelled.");
+  }
+
+  return (
+    <div style={{ maxWidth: 560 }}>
+      <button onClick={onBack} style={backBtn}><ArrowLeft size={13} /> Back to board</button>
+      <JobHeader job={job} />
+
+      <div style={{ marginTop: 16, padding: 12, borderRadius: 8, border: "1px solid #0EA5E955", background: "#0EA5E918", fontSize: 12.5, color: "#0EA5E9", fontWeight: 600, display: "flex", alignItems: "center", gap: 7 }}>
+        <Clock size={14} /> Not dispatched yet — pops up on the board and {assignee?.displayName || job.assigneeName || "the assigned patrolman"}'s dashboard at {fmtDateTime(job.scheduledFor)}
+      </div>
+
+      <div style={{ marginTop: 14, fontSize: 12.5, color: "var(--text-dim)" }}>
+        {job.jobType && job.jobType !== "response" ? `${jobTypeLabel(job.jobType)} · ` : ""}{job.monitoringCo}{job.orderNo ? ` · Order No ${job.orderNo}` : ""}
+      </div>
+
+      <Field label="Description / instructions" style={{ marginTop: 14 }}>
+        <UpperTextarea rows={3} value={description} onChange={setDescription} style={{ ...selectStyle, resize: "vertical", fontFamily: "var(--sans)" }} />
+      </Field>
+
+      <div style={{ display: "flex", gap: 12 }}>
+        <Field label="Pop up at" style={{ flex: 1 }}>
+          <input type="datetime-local" value={scheduledForInput} onChange={(e) => setScheduledForInput(e.target.value)} style={selectStyle} />
+        </Field>
+        <Field label="Attendance due at" style={{ flex: 1 }}>
+          <input type="datetime-local" value={attendanceTimeInput} onChange={(e) => setAttendanceTimeInput(e.target.value)} style={selectStyle} />
+        </Field>
+      </div>
+
+      <Field label="Assigned patrolman">
+        <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} style={selectStyle}>
+          <option value="">Select patrolman…</option>
+          {patrolmenByRun.map((r) => <option key={r.loginName} value={r.loginName}>{r.run} · {r.displayName}{r.contactNumber ? ` · ${r.contactNumber}` : ""}</option>)}
+        </select>
+      </Field>
+
+      <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+        <button onClick={saveChanges} disabled={!canSave || !hasChanges || busy} style={{ ...primaryBtn, opacity: canSave && hasChanges && !busy ? 1 : 0.4, cursor: canSave && hasChanges && !busy ? "pointer" : "not-allowed" }}>
+          <CheckCircle2 size={14} /> Save changes
+        </button>
+        <button onClick={dispatchNow} disabled={busy} style={{ ...secondaryBtn, opacity: busy ? 0.6 : 1, cursor: busy ? "not-allowed" : "pointer" }}>
+          <Send size={14} /> Dispatch now
+        </button>
+        <button onClick={() => setShowCancelForm((v) => !v)} disabled={busy} style={{ ...secondaryBtn, color: "var(--breach)", borderColor: "var(--breach)66" }}>
+          <Ban size={14} /> Cancel scheduled job
+        </button>
+      </div>
+
+      {showCancelForm && (
+        <div style={{ marginTop: 12, padding: 14, borderRadius: 8, border: "1px solid var(--breach)", background: "#FEF2F2" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#B91C1C", fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>
+            <Ban size={14} /> Cancel this scheduled job — it never goes out to the patrolman
+          </div>
+          <UpperTextarea rows={2} value={cancelReason} onChange={setCancelReason} placeholder="e.g. No longer required — client cancelled the booking" style={{ ...selectStyle, resize: "vertical" }} />
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button onClick={confirmCancel} disabled={busy} style={{ ...primaryBtn, background: "var(--breach)", opacity: busy ? 0.6 : 1, cursor: busy ? "not-allowed" : "pointer" }}>
+              <Ban size={14} /> {busy ? "Cancelling…" : "Confirm cancel"}
+            </button>
+            <button onClick={() => setShowCancelForm(false)} disabled={busy} style={secondaryBtn}>Never mind</button>
+          </div>
+        </div>
+      )}
+
+      <ActivityLogSection log={job.activityLog} />
     </div>
   );
 }
@@ -4448,7 +4722,11 @@ function StandDownNotices({ jobs, session, persist }) {
 
 function PatrolmanView({ session, roster, jobs, persist, outcomePhrases, now }) {
   const [selectedId, setSelectedId] = useState(null);
-  const mine = jobs.filter((j) => j.assigneeId === session.id).sort((a, b) => new Date(b.dispatchTime) - new Date(a.dispatchTime));
+  // Excludes "scheduled" jobs — they're assigned already (Control Room
+  // picks the patrolman up front), but shouldn't appear here, beep, or
+  // bank a push notification until promote-scheduled-jobs.js's cron pops
+  // them to "dispatched" at their scheduled time (see ScheduledJobView).
+  const mine = jobs.filter((j) => j.assigneeId === session.id && j.status !== "scheduled").sort((a, b) => new Date(b.dispatchTime) - new Date(a.dispatchTime));
   const selected = mine.find((j) => j.id === selectedId);
   const todaysRun = roster?.find((r) => r.date === rosterDateISO() && r.patrolmanLoginName === session.loginName)?.run || session.run;
   const isRosteredToday = roster?.some((r) => r.date === rosterDateISO() && r.patrolmanLoginName === session.loginName);
@@ -4951,7 +5229,7 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
         {tab === "clients" && <ClientListsManager monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} />}
         {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} />}
-        {tab === "logs" && <Logs jobs={jobs} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} roster={roster} responseRate={responseRate} bureauRates={bureauRates} monitoringRates={monitoringRates} />}
+        {tab === "logs" && <Logs jobs={jobs.filter((j) => j.status !== "scheduled")} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} roster={roster} responseRate={responseRate} bureauRates={bureauRates} monitoringRates={monitoringRates} />}
       </div>
     </div>
   );

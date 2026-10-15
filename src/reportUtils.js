@@ -26,6 +26,7 @@ export function isResponseJob(job) {
 }
 
 export const STATUS_META = {
+  scheduled: { label: "Scheduled", color: "#0EA5E9" },
   dispatched: { label: "Dispatched", color: "var(--info)" },
   submitted: { label: "Awaiting review", color: "var(--warn)" },
   needsAction: { label: "Needs further action", color: "var(--breach)" },

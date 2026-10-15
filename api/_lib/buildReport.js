@@ -27,6 +27,12 @@ export async function gatherReportData({ timeZone, now }) {
   const roster = rosterRaw ? JSON.parse(rosterRaw) : [];
 
   const filteredJobs = allJobs.filter((j) => {
+    // A job scheduled for later (see NewJobForm's "Schedule this for
+    // later") hasn't actually dispatched yet even if its scheduledFor
+    // falls inside today's window — e.g. promote-scheduled-jobs.js's cron
+    // running late. It has no business in today's report until it's
+    // actually popped to "dispatched".
+    if (j.status === "scheduled") return false;
     if (!j.dispatchTime) return false;
     return j.dispatchTime >= window.startISO && j.dispatchTime < window.endISO;
   });

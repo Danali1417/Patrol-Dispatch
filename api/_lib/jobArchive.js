@@ -19,10 +19,12 @@
 // once a day is plenty for a size problem that grows over weeks, not
 // minutes.
 
+import crypto from "node:crypto";
 import { isMailConfigured, getMailFrom, createMailTransporter } from "./mail.js";
 import { kvGet, kvSet, kvSetSearchable, kvGetPrefixMissingSearch, kvQueryPrefix, kvDelete } from "./supabase.js";
 import { deleteAllUnderPrefix } from "./storage.js";
-import { fmtDateTime } from "../../src/reportUtils.js";
+import { sendPushToPatrolman } from "./push.js";
+import { fmtDateTime, fmtTime } from "../../src/reportUtils.js";
 import { JOB_ARCHIVE_PREFIX, JOB_PHOTOS_PREFIX, JOB_CHAT_PREFIX } from "./keyPrefixes.js";
 
 // Re-exported so existing importers (daily-report.js) don't need to
@@ -397,4 +399,61 @@ async function backfillSearchFields() {
     await kvSetSearchable(r.key, r.value, searchFieldsFor(job));
   });
   return rows.length;
+}
+
+// Run every few minutes from api/promote-scheduled-jobs.js — flips any job
+// Control Room scheduled for later (status "scheduled", see NewJobForm's
+// "Schedule this for later" option) over to "dispatched" once its
+// scheduledFor time arrives, exactly like an immediate dispatch: the board
+// and the patrolman's dashboard pick it up on their next poll, and the
+// patrolman gets the same push notification a fresh dispatch sends (see
+// notify-job.js) — just sent directly here instead of over HTTP, since
+// this already runs server-side in the same deployment.
+//
+// A single read-modify-write against ops:jobs, same as archiveOldJobs
+// above — acceptable for the same reason: scheduled jobs aren't being
+// actively edited by a patrolman (they can't even see them yet), so the
+// window for a concurrent write to collide with is small, and Control
+// Room's own edits here go through the normal persist path if this
+// function hasn't already run first.
+export async function promoteScheduledJobs(now = new Date()) {
+  const raw = await kvGet(JOBS_KEY);
+  if (!raw) return { promoted: 0 };
+  let jobs;
+  try { jobs = JSON.parse(raw); } catch (e) { return { promoted: 0 }; }
+  if (!Array.isArray(jobs)) return { promoted: 0 };
+
+  const nowIso = now.toISOString();
+  const due = jobs.filter((j) => j.status === "scheduled" && j.scheduledFor && j.scheduledFor <= nowIso);
+  if (!due.length) return { promoted: 0 };
+
+  for (const j of due) {
+    j.status = "dispatched";
+    j.dispatchTime = nowIso;
+    j.ackToken = crypto.randomBytes(16).toString("hex");
+    j.activityLog = [
+      ...(j.activityLog || []),
+      { ts: nowIso, actorLoginName: "system", actorName: "Scheduled dispatch", action: "Dispatched", detail: "Scheduled job popped automatically at its scheduled pop-up time" },
+    ];
+  }
+  await kvSet(JOBS_KEY, JSON.stringify(jobs));
+
+  const pushResults = {};
+  await mapWithConcurrency(due, 5, async (j) => {
+    try {
+      const result = await sendPushToPatrolman(j.assigneeId, "patrolman", {
+        title: `New job — ${j.jobNumber}`,
+        body: `${j.siteName}${j.attendanceTime ? ` — attendance due ${fmtTime(j.attendanceTime, REPORT_TIMEZONE)}` : ""} — tap Acknowledge to confirm receipt.`,
+        jobId: j.id,
+        ackToken: j.ackToken,
+        url: "/",
+      });
+      pushResults[j.jobNumber || j.id] = result;
+    } catch (err) {
+      console.error(`push notify failed for promoted scheduled job ${j.jobNumber || j.id}:`, err);
+      pushResults[j.jobNumber || j.id] = { error: String(err?.message || err) };
+    }
+  });
+
+  return { promoted: due.length, jobNumbers: due.map((j) => j.jobNumber || j.id), pushResults };
 }

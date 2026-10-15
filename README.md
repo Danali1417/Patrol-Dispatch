@@ -403,6 +403,40 @@ sweep keeps retrying once a day for as long as it takes, and only
 ever deletes right after a send actually succeeds. A failed send can
 never lose the only copy, just delay its backup.
 
+## 12. Scheduling a job for later
+
+No setup needed — this works out of the box (Vercel Cron, same as the
+daily report and archive sweep in section 9), as long as the project is
+on a Vercel plan whose Cron allows more than once-daily schedules (Pro
+or above — `vercel.json` runs this check every 5 minutes).
+
+From **New job**, ticking **"Schedule this for later"** lets Control
+Room fill in a job (site, patrolman, description, etc.) same as always,
+plus two separate times:
+
+- **Pop up on board/dashboard at** — when the job should actually
+  appear on the live Dispatch board and the assigned patrolman's "My
+  jobs" dashboard, and send them the same push notification (section 6)
+  a normal dispatch does.
+- **Attendance due at** — the real time the patrolman needs to be
+  onsite, shown on the job once it pops. These two are deliberately
+  separate: a job due at 15:30 can be scheduled to pop up at 09:00 (or
+  any earlier time), so it's visible and acknowledged well ahead of
+  when attendance is actually required.
+
+Until its pop-up time arrives, a scheduled job sits in its own
+**Scheduled jobs** tab — it's deliberately kept off the main Dispatch
+board, out of Reports/Logs, and off the patrolman's dashboard entirely,
+and sends no push, since none of that should happen before it's
+actually live. From that tab, Control Room can edit any of it (time,
+patrolman, description), cancel it outright, or hit **Dispatch now** to
+pop it immediately instead of waiting.
+
+A Vercel Cron job checks every 5 minutes for anything due and flips it
+over to a normal dispatched job at that point — on the live board, on
+the patrolman's dashboard, and with the same push notification a fresh
+dispatch sends. From then on it behaves exactly like any other job.
+
 ## Updating it later
 
 Whenever you want to change something, edit the files in this project and

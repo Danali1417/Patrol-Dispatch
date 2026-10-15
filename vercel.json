@@ -1,10 +1,12 @@
 {
   "crons": [
-    { "path": "/api/daily-report", "schedule": "30 19 * * *" }
+    { "path": "/api/daily-report", "schedule": "30 19 * * *" },
+    { "path": "/api/promote-scheduled-jobs", "schedule": "*/5 * * * *" }
   ],
   "functions": {
     "api/daily-report.js": { "maxDuration": 300 },
-    "api/send-client-email.js": { "maxDuration": 60 }
+    "api/send-client-email.js": { "maxDuration": 60 },
+    "api/promote-scheduled-jobs.js": { "maxDuration": 60 }
   },
   "headers": [
     {
