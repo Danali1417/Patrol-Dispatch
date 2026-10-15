@@ -410,6 +410,12 @@ daily report and archive sweep in section 9), as long as the project is
 on a Vercel plan whose Cron allows more than once-daily schedules (Pro
 or above — `vercel.json` runs this check every 5 minutes).
 
+Only available for **Random Patrol** and **Key pickup/drop-off** —
+planned work booked ahead of time. A **Response** is by definition an
+alarm reacted to as it happens, so it's never offered the option at
+all; switching the New job tab to Response hides it and drops any
+schedule already filled in.
+
 From **New job**, ticking **"Schedule this for later"** lets Control
 Room fill in a job (site, patrolman, description, etc.) same as always,
 plus two separate times:
