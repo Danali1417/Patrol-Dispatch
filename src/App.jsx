@@ -1993,7 +1993,15 @@ function Board({ jobs, now, onSelect, lockedStatus, roster }) {
 
       {groups.map((g) => {
         const meta = STATUS_META[g.key];
-        const list = filtered.filter((j) => j.status === g.key).sort((a, b) => new Date(b.dispatchTime) - new Date(a.dispatchTime));
+        // Every other group is newest-first (most recent alarm/closure on
+        // top) — but a scheduled job's dispatchTime is a future pop-up
+        // time, not something that already happened, so newest-first
+        // would bury the soonest-due one at the bottom of the list right
+        // when Control Room most needs to find and review it before it
+        // pops. Soonest-first instead, for this group only.
+        const list = filtered.filter((j) => j.status === g.key).sort((a, b) =>
+          g.key === "scheduled" ? new Date(a.dispatchTime) - new Date(b.dispatchTime) : new Date(b.dispatchTime) - new Date(a.dispatchTime)
+        );
         if (!list.length) return null;
         return (
           <div key={g.key} style={{ marginBottom: 22 }}>
