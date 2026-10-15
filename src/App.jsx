@@ -2205,10 +2205,23 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
     jobType === "randomPatrol" ? patrolsRequired > 0 && patrolDurationHours > 0
     : jobType === "keyPickup" || jobType === "keyDropoff" ? !!dueByTime
     : true;
-  const scheduledForIso = isScheduled ? fromLocalInputValue(scheduledForInput) : null;
-  const attendanceTimeIso = isScheduled ? fromLocalInputValue(attendanceTimeInput) : null;
+  // Scheduling only makes sense for planned work (Random Patrol, Key
+  // pickup/drop-off) — a Response is by definition an alarm reacted to as
+  // it happens, never something booked ahead of time.
+  const canSchedule = jobType !== "response";
+  // Switching to Response drops any in-progress schedule rather than
+  // silently carrying it over — the checkbox and its fields aren't even
+  // shown for that type (see the "Schedule this for later" block below),
+  // so a stale isScheduled=true from a previous tab must not survive.
+  useEffect(() => {
+    if (!canSchedule) { setIsScheduled(false); setScheduledForInput(""); setAttendanceTimeInput(""); }
+    // eslint-disable-next-line
+  }, [canSchedule]);
+  const scheduledForIso = isScheduled && canSchedule ? fromLocalInputValue(scheduledForInput) : null;
+  const attendanceTimeIso = isScheduled && canSchedule ? fromLocalInputValue(attendanceTimeInput) : null;
+  const isActuallyScheduled = isScheduled && canSchedule;
   const canDispatch = site && description.trim() && assigneeId && jobNumber.trim() && typeReady
-    && (!isScheduled || (scheduledForIso && attendanceTimeIso));
+    && (!isActuallyScheduled || (scheduledForIso && attendanceTimeIso));
 
   // Guards against a double-click (or a slow network making someone tap
   // "Dispatch" again, thinking the first tap didn't register) creating
@@ -2268,8 +2281,8 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       handlingLoginName: session.loginName,
       handlingName: session.displayName,
       dispatchTime: referenceTimeIso,
-      status: isScheduled ? "scheduled" : "dispatched",
-      ...(isScheduled ? { scheduledFor: scheduledForIso, attendanceTime: attendanceTimeIso } : {}),
+      status: isActuallyScheduled ? "scheduled" : "dispatched",
+      ...(isActuallyScheduled ? { scheduledFor: scheduledForIso, attendanceTime: attendanceTimeIso } : {}),
       outcomeNotes: "",
       docketNo: "",
       photos: [],
@@ -2286,15 +2299,15 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       offsiteLocationName: null,
       activityLog: [logEntry(
         session,
-        isScheduled ? "Scheduled" : "Dispatched",
-        isScheduled
+        isActuallyScheduled ? "Scheduled" : "Dispatched",
+        isActuallyScheduled
           ? `Scheduled for ${fmtDateTime(scheduledForIso)} — attendance due ${fmtTime(attendanceTimeIso)} — assigned to ${assignee.displayName}`
           : jobType === "response" ? `Assigned to ${assignee.displayName}` : `${jobTypeLabel(jobType)} — assigned to ${assignee.displayName}`
       )],
       standDowns: [],
     };
     await persist([...jobs, job]);
-    if (isScheduled) {
+    if (isActuallyScheduled) {
       showToast(`Job scheduled — it'll pop up for Control Room and ${assignee.displayName} at ${fmtDateTime(scheduledForIso)}.`);
     } else {
       notifyJobDispatch({
@@ -2439,32 +2452,34 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
         </select>
       </Field>
 
-      <div style={{ padding: 12, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel-alt)", marginBottom: 14 }}>
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
-          <input type="checkbox" checked={isScheduled} onChange={(e) => setIsScheduled(e.target.checked)} />
-          <Clock size={14} color="#0EA5E9" /> Schedule this for later instead of dispatching now
-        </label>
-        {isScheduled && (
-          <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
-            <Field label="Pop up on board/dashboard at" style={{ flex: "1 1 220px", marginBottom: 0 }}>
-              <input type="datetime-local" value={scheduledForInput} onChange={(e) => setScheduledForInput(e.target.value)} style={selectStyle} />
-            </Field>
-            <Field label="Attendance due at" style={{ flex: "1 1 220px", marginBottom: 0 }}>
-              <input type="datetime-local" value={attendanceTimeInput} onChange={(e) => setAttendanceTimeInput(e.target.value)} style={selectStyle} />
-            </Field>
-          </div>
-        )}
-        {isScheduled && (
-          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 8 }}>
-            Stays out of the live board, Scheduled jobs tab aside, and off {assigneeId ? "the patrolman's" : "their"} dashboard — no alert goes out — until the pop-up time above arrives.
-          </div>
-        )}
-      </div>
+      {canSchedule && (
+        <div style={{ padding: 12, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel-alt)", marginBottom: 14 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+            <input type="checkbox" checked={isActuallyScheduled} onChange={(e) => setIsScheduled(e.target.checked)} />
+            <Clock size={14} color="#0EA5E9" /> Schedule this for later instead of dispatching now
+          </label>
+          {isActuallyScheduled && (
+            <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+              <Field label="Pop up on board/dashboard at" style={{ flex: "1 1 220px", marginBottom: 0 }}>
+                <input type="datetime-local" value={scheduledForInput} onChange={(e) => setScheduledForInput(e.target.value)} style={selectStyle} />
+              </Field>
+              <Field label="Attendance due at" style={{ flex: "1 1 220px", marginBottom: 0 }}>
+                <input type="datetime-local" value={attendanceTimeInput} onChange={(e) => setAttendanceTimeInput(e.target.value)} style={selectStyle} />
+              </Field>
+            </div>
+          )}
+          {isActuallyScheduled && (
+            <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 8 }}>
+              Stays out of the live board, Scheduled jobs tab aside, and off {assigneeId ? "the patrolman's" : "their"} dashboard — no alert goes out — until the pop-up time above arrives.
+            </div>
+          )}
+        </div>
+      )}
 
       <button disabled={!canDispatch || dispatching} onClick={dispatch} style={{ ...primaryBtn, width: "100%", marginTop: 6, opacity: canDispatch && !dispatching ? 1 : 0.4, cursor: canDispatch && !dispatching ? "pointer" : "not-allowed" }}>
         <Send size={14} /> {dispatching
-          ? (isScheduled ? "Scheduling…" : "Dispatching…")
-          : isScheduled ? "Schedule job"
+          ? (isActuallyScheduled ? "Scheduling…" : "Dispatching…")
+          : isActuallyScheduled ? "Schedule job"
           : jobType === "response" ? "Dispatch job" : `Dispatch ${jobTypeLabel(jobType).toLowerCase()}`}
       </button>
     </div>
