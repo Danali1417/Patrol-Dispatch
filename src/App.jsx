@@ -2116,6 +2116,13 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
   const [isScheduled, setIsScheduled] = useState(false);
   const [scheduledForInput, setScheduledForInput] = useState("");
   const [attendanceTimeInput, setAttendanceTimeInput] = useState("");
+  // Extra occurrences for the same job repeated on other dates — "Add
+  // another date" below. Each gets its own pop-up/attendance time (seeded
+  // from the previous occurrence, so only the date usually needs
+  // changing) and its own job number, since a client's monitoring/bureau
+  // reference is often different per visit even though everything else
+  // about the job is identical.
+  const [extraOccurrences, setExtraOccurrences] = useState([]);
 
   const site = sites.find((s) => s.id === siteId);
 
@@ -2214,14 +2221,46 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
   // shown for that type (see the "Schedule this for later" block below),
   // so a stale isScheduled=true from a previous tab must not survive.
   useEffect(() => {
-    if (!canSchedule) { setIsScheduled(false); setScheduledForInput(""); setAttendanceTimeInput(""); }
+    if (!canSchedule) { setIsScheduled(false); setScheduledForInput(""); setAttendanceTimeInput(""); setExtraOccurrences([]); }
     // eslint-disable-next-line
   }, [canSchedule]);
   const scheduledForIso = isScheduled && canSchedule ? fromLocalInputValue(scheduledForInput) : null;
   const attendanceTimeIso = isScheduled && canSchedule ? fromLocalInputValue(attendanceTimeInput) : null;
   const isActuallyScheduled = isScheduled && canSchedule;
+
+  function addOccurrence() {
+    const last = extraOccurrences.length ? extraOccurrences[extraOccurrences.length - 1] : { jobNumber, scheduledForInput, attendanceTimeInput };
+    const suggestedNumber = `JB-${String(jobs.length + 2 + extraOccurrences.length).padStart(4, "0")}`;
+    setExtraOccurrences((prev) => [...prev, {
+      id: `occ_${Date.now()}_${prev.length}`,
+      jobNumber: suggestedNumber,
+      scheduledForInput: last.scheduledForInput,
+      attendanceTimeInput: last.attendanceTimeInput,
+    }]);
+  }
+  function removeOccurrence(id) {
+    setExtraOccurrences((prev) => prev.filter((o) => o.id !== id));
+  }
+  function updateOccurrence(id, patch) {
+    setExtraOccurrences((prev) => prev.map((o) => (o.id === id ? { ...o, ...patch } : o)));
+  }
+
+  const extraParsed = extraOccurrences.map((o) => ({
+    ...o,
+    scheduledForIso: fromLocalInputValue(o.scheduledForInput),
+    attendanceTimeIso: fromLocalInputValue(o.attendanceTimeInput),
+  }));
+  const extraOccurrencesValid = extraParsed.every((o) => o.jobNumber.trim() && o.scheduledForIso && o.attendanceTimeIso);
+  // Within this one batch only — not checked against the rest of the live
+  // board or archive, which would need a server round trip for what's
+  // really just a guard against an obvious copy-paste slip while filling
+  // in several rows at once.
+  const allJobNumbersInBatch = [jobNumber.trim(), ...extraParsed.map((o) => o.jobNumber.trim())];
+  const hasDuplicateJobNumbers = new Set(allJobNumbersInBatch.map((n) => n.toUpperCase())).size !== allJobNumbersInBatch.length;
   const canDispatch = site && description.trim() && assigneeId && jobNumber.trim() && typeReady
-    && (!isActuallyScheduled || (scheduledForIso && attendanceTimeIso));
+    && (!isActuallyScheduled || (scheduledForIso && attendanceTimeIso))
+    && (!isActuallyScheduled || extraOccurrencesValid)
+    && !hasDuplicateJobNumbers;
 
   // Guards against a double-click (or a slow network making someone tap
   // "Dispatch" again, thinking the first tap didn't register) creating
@@ -2239,17 +2278,23 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
     }
   }
 
-  async function doDispatch() {
+  // Shared by the primary occurrence and every extra date added below —
+  // everything about the job (site, description, assignee, type-specific
+  // fields) is identical across a batch; only the job number and the
+  // scheduled/attendance times actually differ per occurrence. `idSuffix`
+  // keeps ids unique even when several of these build in the same
+  // Date.now() millisecond.
+  function buildJobRecord({ jobNumberStr, scheduled, scheduledForIsoFor, attendanceTimeIsoFor, idSuffix }) {
     const assignee = assigneeCandidates.find((r) => r.loginName === assigneeId);
-    const dispatchTimeIso = new Date().toISOString();
+    const nowIso = new Date().toISOString();
     // A scheduled job's "dispatch time" (used everywhere else for sorting/
     // filtering/SLA-reference purposes) is the moment it's due to pop, not
     // the moment Control Room filled in this form — promote-scheduled-jobs.js
     // overwrites this with the real pop time once it actually fires.
-    const referenceTimeIso = scheduledForIso || dispatchTimeIso;
-    const job = {
-      id: `job_${Date.now()}`,
-      jobNumber: jobNumber.trim(),
+    const referenceTimeIso = scheduledForIsoFor || nowIso;
+    return {
+      id: `job_${Date.now()}_${idSuffix}`,
+      jobNumber: jobNumberStr.trim(),
       orderNo: orderNo.trim(),
       siteId: site.id,
       siteName: site.name,
@@ -2281,8 +2326,8 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       handlingLoginName: session.loginName,
       handlingName: session.displayName,
       dispatchTime: referenceTimeIso,
-      status: isActuallyScheduled ? "scheduled" : "dispatched",
-      ...(isActuallyScheduled ? { scheduledFor: scheduledForIso, attendanceTime: attendanceTimeIso } : {}),
+      status: scheduled ? "scheduled" : "dispatched",
+      ...(scheduled ? { scheduledFor: scheduledForIsoFor, attendanceTime: attendanceTimeIsoFor } : {}),
       outcomeNotes: "",
       docketNo: "",
       photos: [],
@@ -2299,23 +2344,50 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       offsiteLocationName: null,
       activityLog: [logEntry(
         session,
-        isActuallyScheduled ? "Scheduled" : "Dispatched",
-        isActuallyScheduled
-          ? `Scheduled for ${fmtDateTime(scheduledForIso)} — attendance due ${fmtTime(attendanceTimeIso)} — assigned to ${assignee.displayName}`
+        scheduled ? "Scheduled" : "Dispatched",
+        scheduled
+          ? `Scheduled for ${fmtDateTime(scheduledForIsoFor)} — attendance due ${fmtTime(attendanceTimeIsoFor)} — assigned to ${assignee.displayName}`
           : jobType === "response" ? `Assigned to ${assignee.displayName}` : `${jobTypeLabel(jobType)} — assigned to ${assignee.displayName}`
       )],
       standDowns: [],
     };
-    await persist([...jobs, job]);
+  }
+
+  async function doDispatch() {
+    const primaryJob = buildJobRecord({
+      jobNumberStr: jobNumber,
+      scheduled: isActuallyScheduled,
+      scheduledForIsoFor: scheduledForIso,
+      attendanceTimeIsoFor: attendanceTimeIso,
+      idSuffix: 0,
+    });
+    // Extra dates only ever exist alongside a scheduled primary — the
+    // "Add another date" UI is itself nested inside the scheduling block
+    // (see below) — so every one of these is also `scheduled: true`.
+    const extraJobs = isActuallyScheduled
+      ? extraParsed.map((o, i) => buildJobRecord({
+          jobNumberStr: o.jobNumber,
+          scheduled: true,
+          scheduledForIsoFor: o.scheduledForIso,
+          attendanceTimeIsoFor: o.attendanceTimeIso,
+          idSuffix: i + 1,
+        }))
+      : [];
+    const newJobs = [primaryJob, ...extraJobs];
+    await persist([...jobs, ...newJobs]);
     if (isActuallyScheduled) {
-      showToast(`Job scheduled — it'll pop up for Control Room and ${assignee.displayName} at ${fmtDateTime(scheduledForIso)}.`);
+      showToast(
+        newJobs.length > 1
+          ? `${newJobs.length} jobs scheduled for ${primaryJob.assigneeName} — see the Scheduled jobs tab.`
+          : `Job scheduled — it'll pop up for Control Room and ${primaryJob.assigneeName} at ${fmtDateTime(scheduledForIso)}.`
+      );
     } else {
       notifyJobDispatch({
-        jobId: job.id,
-        loginName: assignee.loginName,
+        jobId: primaryJob.id,
+        loginName: primaryJob.assigneeId,
         role: "patrolman",
-        title: `New job — ${job.jobNumber}`,
-        body: `${job.siteName} — tap Acknowledge to confirm receipt.`,
+        title: `New job — ${primaryJob.jobNumber}`,
+        body: `${primaryJob.siteName} — tap Acknowledge to confirm receipt.`,
       }).then((result) => {
         if (!result.ok) {
           showToast(`Job dispatched, but push notifications are down: ${result.error || "unknown error"}`, "error");
@@ -2328,9 +2400,9 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
     }
     setSiteId(""); setSiteQuery(""); setDescription(""); setAssigneeId(""); setKeyInfo(""); setAlarmCode(""); setOrderNo("");
     setDueByTime(""); setPatrolsRequired(1); setPatrolDurationHours(1);
-    setIsScheduled(false); setScheduledForInput(""); setAttendanceTimeInput("");
-    setJobNumber(`JB-${String(jobs.length + 2).padStart(4, "0")}`);
-    onCreated(job.id);
+    setIsScheduled(false); setScheduledForInput(""); setAttendanceTimeInput(""); setExtraOccurrences([]);
+    setJobNumber(`JB-${String(jobs.length + 1 + newJobs.length).padStart(4, "0")}`);
+    onCreated(primaryJob.id);
   }
 
   const sectionTitle =
@@ -2459,7 +2531,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
             <Clock size={14} color="#0EA5E9" /> Schedule this for later instead of dispatching now
           </label>
           {isActuallyScheduled && (
-            <div style={{ display: "flex", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
               <Field label="Pop up on board/dashboard at" style={{ flex: "1 1 220px", marginBottom: 0 }}>
                 <input type="datetime-local" value={scheduledForInput} onChange={(e) => setScheduledForInput(e.target.value)} style={selectStyle} />
               </Field>
@@ -2468,9 +2540,39 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
               </Field>
             </div>
           )}
+
+          {isActuallyScheduled && extraOccurrences.map((o) => (
+            <div key={o.id} style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <Field label="Job number" style={{ flex: "0 1 130px", marginBottom: 0 }}>
+                <UpperInput value={o.jobNumber} onChange={(v) => updateOccurrence(o.id, { jobNumber: v })} style={selectStyle} />
+              </Field>
+              <Field label="Pop up at" style={{ flex: "1 1 220px", marginBottom: 0 }}>
+                <input type="datetime-local" value={o.scheduledForInput} onChange={(e) => updateOccurrence(o.id, { scheduledForInput: e.target.value })} style={selectStyle} />
+              </Field>
+              <Field label="Attendance due at" style={{ flex: "1 1 220px", marginBottom: 0 }}>
+                <input type="datetime-local" value={o.attendanceTimeInput} onChange={(e) => updateOccurrence(o.id, { attendanceTimeInput: e.target.value })} style={selectStyle} />
+              </Field>
+              <button type="button" onClick={() => removeOccurrence(o.id)} title="Remove this date" style={{ ...iconBtn, marginBottom: 0 }}>
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+
+          {isActuallyScheduled && (
+            <button type="button" onClick={addOccurrence} style={{ ...secondaryBtn, marginTop: 10, fontSize: 12 }}>
+              <CalendarDays size={13} /> Add another date
+            </button>
+          )}
+
+          {isActuallyScheduled && hasDuplicateJobNumbers && (
+            <div style={{ fontSize: 11, color: "var(--breach)", marginTop: 8, fontWeight: 600 }}>
+              Two or more dates above share the same job number — give each one its own before scheduling.
+            </div>
+          )}
+
           {isActuallyScheduled && (
             <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 8 }}>
-              Stays out of the live board, Scheduled jobs tab aside, and off {assigneeId ? "the patrolman's" : "their"} dashboard — no alert goes out — until the pop-up time above arrives.
+              {extraOccurrences.length > 0 ? `All ${extraOccurrences.length + 1} jobs stay` : "Stays"} out of the live board, Scheduled jobs tab aside, and off {assigneeId ? "the patrolman's" : "their"} dashboard — no alert goes out — until each one's own pop-up time arrives.
             </div>
           )}
         </div>
@@ -2479,7 +2581,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       <button disabled={!canDispatch || dispatching} onClick={dispatch} style={{ ...primaryBtn, width: "100%", marginTop: 6, opacity: canDispatch && !dispatching ? 1 : 0.4, cursor: canDispatch && !dispatching ? "pointer" : "not-allowed" }}>
         <Send size={14} /> {dispatching
           ? (isActuallyScheduled ? "Scheduling…" : "Dispatching…")
-          : isActuallyScheduled ? "Schedule job"
+          : isActuallyScheduled ? (extraOccurrences.length > 0 ? `Schedule ${extraOccurrences.length + 1} jobs` : "Schedule job")
           : jobType === "response" ? "Dispatch job" : `Dispatch ${jobTypeLabel(jobType).toLowerCase()}`}
       </button>
     </div>

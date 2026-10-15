@@ -443,6 +443,17 @@ over to a normal dispatched job at that point — on the live board, on
 the patrolman's dashboard, and with the same push notification a fresh
 dispatch sends. From then on it behaves exactly like any other job.
 
+**Scheduling the same job on several dates at once:** click **"Add
+another date"** (shown once scheduling is ticked on) as many times as
+needed — each one gets its own pop-up time, attendance time, and job
+number (seeded with the next number in sequence, but freely editable,
+since a client's own reference number is often different per visit
+even though the site/patrolman/description are identical). One
+"Dispatch" click then creates all of them as separate scheduled jobs
+in one go, each popping up and tracked completely independently from
+then on. Two rows can't share the same job number — the button stays
+disabled with a warning until each one is unique.
+
 ## Updating it later
 
 Whenever you want to change something, edit the files in this project and
