@@ -25,6 +25,22 @@ export function isResponseJob(job) {
   return (job.jobType || "response") === "response";
 }
 
+// Every job has exactly one free-text field for "what this job is about"
+// (`description`), but what it actually contains depends on the job type —
+// the alarm/area in zone for a Response, plain instructions for a Random
+// Patrol or Key pickup/drop-off. Labeling it "Alarm / area" regardless of
+// type (as every display of it used to, independently, and inconsistently
+// with NewJobForm's own type-aware label) reads as wrong for the other
+// three types — e.g. a patrol instruction like "1x unlock at 1530, the
+// pedestrian gate" has nothing to do with an alarm or an area. Used
+// anywhere `job.description` is shown with a label, so every one of those
+// places — the New job form, the job detail views, and the attendance
+// PDF/report — agrees on what to call it.
+export function descriptionFieldLabel(job, { short = false } = {}) {
+  if (isResponseJob(job)) return short ? "Alarm / area" : "Alarm description / area(s) in alarm";
+  return short ? "Description" : "Instructions / description";
+}
+
 export const STATUS_META = {
   scheduled: { label: "Scheduled", color: "#0EA5E9" },
   dispatched: { label: "Dispatched", color: "var(--info)" },
@@ -132,7 +148,11 @@ export function resolveJobRoster(job, roster, timeZone) {
 }
 
 export const REPORT_COLUMNS_BRIEF = ["Job #", "Type", "Date", "Time", "Site", "Run", "Patrolman attended", "Operator (dispatched)", "Finalized by", "Status"];
-export const REPORT_COLUMNS_DETAILED = [...REPORT_COLUMNS_BRIEF, "Onsite time", "Offsite time", "Results", "Alarm description"];
+// "Description" rather than "Alarm description" — this one column is
+// shared across every row regardless of job type (see
+// descriptionFieldLabel's own comment), and a detailed report routinely
+// mixes Response rows with Random Patrol/Key pickup/drop-off ones.
+export const REPORT_COLUMNS_DETAILED = [...REPORT_COLUMNS_BRIEF, "Onsite time", "Offsite time", "Results", "Description"];
 
 export function reportRow(job, reportType, timeZone, roster) {
   const rosterEntry = resolveRosterEntry(job, roster, timeZone);
