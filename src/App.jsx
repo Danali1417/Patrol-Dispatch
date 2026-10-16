@@ -10,7 +10,7 @@ import {
   STATUS_META, fmtTime, fmtDateTime, isoDateOnly, isoTimeOnly,
   reportStatusLabel, REPORT_COLUMNS_BRIEF, REPORT_COLUMNS_DETAILED,
   reportRow, patrolmanRunSummary, operatorSummary, cancelledJobCount,
-  JOB_TYPES, jobTypeLabel, isResponseJob, jobTypeCounts, rosterDateFor, resolveJobRoster,
+  JOB_TYPES, jobTypeLabel, isResponseJob, descriptionFieldLabel, jobTypeCounts, rosterDateFor, resolveJobRoster,
   jobCharge, formatCharge, DEFAULT_RESPONSE_RATE,
 } from "./reportUtils.js";
 import { restoreSession, login as apiLogin, logout as apiLogout, setOnUnauthorized } from "./auth.js";
@@ -2418,7 +2418,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
     : jobType === "keyPickup" ? "Dispatch a key pickup"
     : jobType === "keyDropoff" ? "Dispatch a key drop off"
     : "Dispatch a new alarm response";
-  const descriptionLabel = jobType === "response" ? "Alarm description / area(s) in alarm" : "Instructions / description";
+  const descriptionLabel = descriptionFieldLabel({ jobType });
   const descriptionPlaceholder =
     jobType === "randomPatrol" ? "e.g. Patrol perimeter and car park — check for signs of forced entry"
     : jobType === "keyPickup" ? "e.g. Collect master key from site manager's office"
@@ -3049,7 +3049,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
     diff("Address", "address", editAddress);
     diff("Monitoring company", "monitoringCo", editMonitoringCo);
     diff("Bureau", "bureau", editBureau);
-    diff("Alarm / area", "description", editDescription);
+    diff(descriptionFieldLabel(job, { short: true }), "description", editDescription);
     setShowEditJob(false);
     if (!changes.length) return;
     logAction("Job details edited", changes.join(" · "), patch);
@@ -3198,7 +3198,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
         <DetailRow icon={Building2} label="Bureau" value={job.bureau} />
         <DetailRow icon={KeyRound} label="Key info" value={job.keyInfo} />
         <DetailRow icon={KeyRound} label="Alarm code" value={job.alarmCode} />
-        <DetailRow icon={FileText} label="Alarm description" value={job.description} />
+        <DetailRow icon={FileText} label={descriptionFieldLabel(job)} value={job.description} />
         {(job.jobType === "keyPickup" || job.jobType === "keyDropoff") && job.dueBy && (
           <DetailRow icon={Clock} label="Due by" value={fmtDateTime(job.dueBy)} />
         )}
@@ -3235,7 +3235,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
               <UpperInput value={editBureau} onChange={setEditBureau} style={selectStyle} />
             </Field>
           </div>
-          <Field label="Alarm description / area(s) in alarm">
+          <Field label={descriptionFieldLabel(job)}>
             <UpperTextarea rows={2} value={editDescription} onChange={setEditDescription} style={{ ...selectStyle, resize: "vertical", fontFamily: "var(--sans)" }} />
           </Field>
           <div style={{ display: "flex", gap: 8 }}>
@@ -4109,7 +4109,7 @@ async function buildJobAttendancePdfDoc(job, companyName, now, logoUrl, roster, 
     ["Monitoring company", job.monitoringCo || "—"],
     ["Order No", job.orderNo || "—"],
     ["Docket No", job.docketNo || "—"],
-    ["Alarm / area", job.description || "—"],
+    [descriptionFieldLabel(job, { short: true }), job.description || "—"],
     ["Status", STATUS_META[job.status]?.label || job.status],
     ["Attending patrolman", [resolvedPatrolman, resolvedRun].filter(Boolean).join(" — ") || "—"],
     ["Security licence no.", licenceNumber || "—"],
@@ -5148,7 +5148,7 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
 
       <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10, fontSize: 13 }}>
         <AddressRow address={job.address} />
-        <DetailRow icon={AlertTriangle} label="Alarm / area" value={job.description} />
+        <DetailRow icon={AlertTriangle} label={descriptionFieldLabel(job, { short: true })} value={job.description} />
         <DetailRow icon={KeyRound} label="Key info" value={job.keyInfo} />
         <DetailRow icon={KeyRound} label="Alarm code" value={job.alarmCode} />
       </div>
