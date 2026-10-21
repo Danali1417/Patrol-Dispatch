@@ -269,6 +269,63 @@ function rosterDateISO() {
   return rosterDateFor(new Date().toISOString());
 }
 
+// Calendar-date arithmetic (local time, midnight) for the next-week
+// roster reminder below — deliberately separate from rosterDateISO's own
+// 6am-rollover logic above, which is about which shift a job belongs to,
+// not which calendar week a roster upload covers.
+function mondayOfWeek(d) {
+  const daysSinceMonday = (d.getDay() + 6) % 7; // Mon=0 ... Sun=6
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - daysSinceMonday);
+}
+// Preserves time-of-day (via setDate, not a reconstructed y/m/d Date,
+// which would silently reset hours/minutes to midnight) — nextWeekRosterGap
+// below shifts a 1pm deadline by ±7 days and depends on it staying 1pm.
+function addDays(d, n) {
+  const copy = new Date(d);
+  copy.setDate(copy.getDate() + n);
+  return copy;
+}
+function dateOnlyISO(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Next week's Monday-Sunday roster is supposed to be uploaded by Friday
+// 1pm — this app has repeatedly gone into a week with the roster never
+// uploaded at all, noticed only once jobs start dispatching with no one
+// rostered. Returns the date range to nag about once that deadline has
+// passed and no roster entries exist yet for any day in it; null
+// otherwise (including once it's been uploaded, or once we're more than
+// a week past the deadline — by then it's that week's own problem to
+// notice, not this reminder's).
+function nextWeekRosterGap(now, roster) {
+  // Anchored to the most recently passed Friday-1pm checkpoint, not to
+  // "this calendar week's Monday" — anchoring to the week would make the
+  // target window jump forward the instant that week actually starts,
+  // going quiet for several days right as an unrostered week goes live
+  // (exactly when this is supposed to help most). Walking back to
+  // whichever Friday's deadline we're still inside keeps the same target
+  // week in view continuously from that Friday through the following one.
+  let fridayDeadline = addDays(mondayOfWeek(now), 4);
+  fridayDeadline.setHours(13, 0, 0, 0);
+  if (now < fridayDeadline) fridayDeadline = addDays(fridayDeadline, -7);
+  const targetMonday = addDays(fridayDeadline, 3);
+  const targetSunday = addDays(targetMonday, 6);
+  const stopNaggingAt = addDays(fridayDeadline, 7); // the next Friday's own checkpoint
+  if (now >= stopNaggingAt) return null;
+
+  const targetMondayISO = dateOnlyISO(targetMonday);
+  const targetSundayISO = dateOnlyISO(targetSunday);
+  const hasAnyEntry = roster.some((r) => r.date >= targetMondayISO && r.date <= targetSundayISO);
+  if (hasAnyEntry) return null;
+
+  const fmt = (d) => d.toLocaleDateString("en-AU", { day: "2-digit", month: "short" });
+  // Compared as plain calendar dates, not full timestamps — targetMonday
+  // carries fridayDeadline's 1pm time-of-day (addDays preserves it), which
+  // would otherwise leave "overdue" false for the first 13 hours of the
+  // very week it's supposed to flag as already underway.
+  return { mondayLabel: fmt(targetMonday), sundayLabel: fmt(targetSunday), overdue: dateOnlyISO(now) >= targetMondayISO };
+}
+
 /* ---------------------------------------------------------------
    HELPERS
 ---------------------------------------------------------------- */
@@ -1252,6 +1309,13 @@ export default function SentrylinePrototype() {
     return () => clearTimeout(t);
   }, [banner]);
 
+  // Only Control Room roles can actually upload a roster, so there's
+  // nothing for a patrolman to do with this — and recomputed on every
+  // 15s clock tick (`now`) the same way everything else time-sensitive
+  // in this component already is, so it appears/disappears on its own
+  // without needing a refresh.
+  const rosterGap = session && session.role !== "patrolman" ? nextWeekRosterGap(new Date(now), roster) : null;
+
   if (!session) {
     return (
       <ToastContext.Provider value={showToast}>
@@ -1278,6 +1342,7 @@ export default function SentrylinePrototype() {
         <Shell>
           <TopBar session={session} roster={roster} onSignOut={handleSignOut} onOpenSettings={() => setShowSettings(true)} now={now} logoUrl={logoUrl} companyName={companyName} />
           {updateAvailable && <UpdateAvailableBanner />}
+          {rosterGap && <RosterUploadBanner mondayLabel={rosterGap.mondayLabel} sundayLabel={rosterGap.sundayLabel} overdue={rosterGap.overdue} />}
           {banner && <NotifBanner banner={banner} onDismiss={() => setBanner(null)} />}
           {showSettings && (
             <SettingsModal session={session} onClose={() => setShowSettings(false)} />
@@ -1618,6 +1683,25 @@ function UpdateAvailableBanner() {
       <button onClick={() => window.location.reload()} style={{ background: "var(--info)", border: "none", borderRadius: 6, padding: "6px 12px", color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
         Refresh now
       </button>
+    </div>
+  );
+}
+
+// Shown to Control Room (manager/operator — whoever can actually upload
+// a roster) once nextWeekRosterGap's Friday-1pm deadline has passed with
+// nothing on the roster yet for next week. Self-resolving: the moment
+// any entry for that week is added, roster updates and this stops being
+// rendered on the next tick — no dismiss button, nothing to remember to
+// clear.
+function RosterUploadBanner({ mondayLabel, sundayLabel, overdue }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 20px", background: overdue ? "#FEF2F2" : "#FFFBEB", borderBottom: `1px solid ${overdue ? "var(--breach)" : "var(--warn)"}`, color: overdue ? "#B91C1C" : "#92400E", fontSize: 12.5 }}>
+      <CalendarDays size={15} />
+      <span style={{ flex: 1 }}>
+        {overdue
+          ? `This week's roster (${mondayLabel} – ${sundayLabel}) still hasn't been uploaded — add it now.`
+          : `Next week's roster (${mondayLabel} – ${sundayLabel}) hasn't been uploaded yet.`}
+      </span>
     </div>
   );
 }
