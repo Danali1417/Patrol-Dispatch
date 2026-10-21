@@ -25,6 +25,7 @@ import { fetchJobPhotos, persistJobPhotos, uploadOriginalPhoto, fetchOriginalPho
 import { loadJobDraft, saveJobDraft, clearJobDraft } from "./jobDraft.js";
 import { fetchJobChat, sendJobChatMessage } from "./jobChat.js";
 import { searchArchivedJobs, fetchArchivedJobsInRange, resetArchiveAndPhotos, previewSiteRecovery } from "./jobArchive.js";
+import { notifyLongAttendance } from "./longAttendanceAlert.js";
 
 /* ---------------------------------------------------------------
    SEED / REFERENCE DATA
@@ -2974,8 +2975,11 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   const { run: resolvedRun, patrolmanName: resolvedPatrolman } = resolveJobRoster(job, roster);
 
   function update(patch) {
-    const updated = jobs.map((j) => (j.id === job.id ? { ...j, ...patch } : j));
-    return persist(updated);
+    const merged = { ...job, ...patch };
+    const updated = jobs.map((j) => (j.id === job.id ? merged : j));
+    const result = persist(updated);
+    maybeAlertLongAttendance(patch, merged, result);
+    return result;
   }
 
   // Merges a new entry into the job's activity log alongside whatever
@@ -2983,6 +2987,34 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   // persisted update rather than a separate round trip.
   function logAction(action, detail, patch = {}) {
     return update({ ...patch, activityLog: [...(job.activityLog || []), logEntry(session, action, detail)] });
+  }
+
+  // A Response job reaching a closed-with-results state — "Mark reviewed",
+  // or going straight from "submitted" to "emailed" via "Prepare client
+  // email" (both routes exist, see the buttons below) — is the one moment
+  // the onsite/offsite times and the result are all final. If the
+  // patrolman spent longer than usual actually on site, managers get a
+  // heads-up email then and there rather than buried in tomorrow's daily
+  // report. Fire-and-forget, after the persist it depends on; never
+  // awaited by `update` itself so closing out a job is never held up
+  // waiting on an email to send. `longAttendanceAlertedAt` (set once this
+  // succeeds) keeps a job that's reviewed more than once — or corrected
+  // after the fact — from alerting twice.
+  function maybeAlertLongAttendance(patch, merged, afterPersist) {
+    if (patch.status !== "reviewed" && patch.status !== "emailed") return;
+    if (!isResponseJob(merged) || !merged.onsiteTime || !merged.offsiteTime || merged.longAttendanceAlertedAt) return;
+    const minutesOnsite = Math.round((new Date(merged.offsiteTime).getTime() - new Date(merged.onsiteTime).getTime()) / 60000);
+    if (minutesOnsite <= 25) return;
+    afterPersist
+      .then(() => notifyLongAttendance(merged.id))
+      .then((r) => {
+        if (r.ok && r.sent) {
+          update({ longAttendanceAlertedAt: new Date().toISOString() });
+        } else if (!r.ok) {
+          showToast(`Long-attendance alert for ${merged.jobNumber} couldn't be sent: ${r.error || "unknown error"}`, "error");
+        }
+      })
+      .catch(() => {});
   }
 
   // A job with status "dispatched" is never an archived one (only
