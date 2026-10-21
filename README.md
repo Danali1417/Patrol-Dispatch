@@ -454,6 +454,36 @@ in one go, each popping up and tracked completely independently from
 then on. Two rows can't share the same job number — the button stays
 disabled with a warning until each one is unique.
 
+## 13. Long-attendance alert for managers (optional)
+
+For a **Response** job only, if the gap between onsite and offsite comes
+in over 25 minutes, managers get a short heads-up email the moment the
+job is closed out — whether that's Control Room clicking "Mark
+reviewed", or going straight from "submitted" to sending the client
+email (both routes close a job out; either one checks). No photos
+attached — just enough to decide whether it's worth a follow-up:
+
+- Job number and site name
+- Patrolman attended
+- Dispatched / onsite / offsite times, and the actual minutes onsite
+- The result/outcome notes recorded on the job
+
+It fires once per job — reviewing or correcting it again afterwards
+won't send a second copy. Random Patrol and Key pickup/drop-off jobs
+are never checked (they don't have the same "response, attend, done"
+shape a drawn-out Response job does).
+
+To turn it on, add in Vercel → **Settings → Environment Variables**:
+
+| Name | Value |
+|---|---|
+| `LONG_ATTENDANCE_RECIPIENTS` | comma-separated manager email address(es) |
+
+Redeploy so the new variable takes effect. Nothing else to set up —
+it reuses the same `RESEND_API_KEY`/`MAIL_FROM` every other email in
+this app already sends through (section 4), and does nothing at all
+if `LONG_ATTENDANCE_RECIPIENTS` is left unset.
+
 ## Updating it later
 
 Whenever you want to change something, edit the files in this project and
