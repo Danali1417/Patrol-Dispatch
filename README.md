@@ -484,6 +484,26 @@ it reuses the same `RESEND_API_KEY`/`MAIL_FROM` every other email in
 this app already sends through (section 4), and does nothing at all
 if `LONG_ATTENDANCE_RECIPIENTS` is left unset.
 
+## 14. Roster reminder banner (no setup needed)
+
+Shown to Control Room (manager/operator — patrolmen don't manage the
+roster, so they never see it) across the top of the app, the same way
+an app-update notice does: **"Next week's roster (Mon date – Sun
+date) hasn't been uploaded yet."**
+
+It checks in every **Friday at 1pm** — if nothing's been added to the
+roster for the coming Monday-Sunday by then, the banner appears and
+stays up until something is. If it's still empty once that week
+actually starts, the wording switches to **"This week's roster ...
+still hasn't been uploaded — add it now"** (a red banner instead of
+amber) rather than going quiet right when it matters most — covering
+the exact failure this was built for: a week going out completely
+unrostered and nobody noticing until jobs are already being
+dispatched with no one assigned.
+
+It clears itself the moment any entry exists for that week — no
+dismiss button, nothing to remember to turn off.
+
 ## Updating it later
 
 Whenever you want to change something, edit the files in this project and
