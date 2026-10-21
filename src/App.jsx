@@ -6601,10 +6601,50 @@ function SitesEditor({ zones, sites, persistSites }) {
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("");
+  const [exportBusy, setExportBusy] = useState(false);
   const showToast = useToast();
   const showConfirm = useConfirm();
 
   function set(field, value) { setForm((f) => ({ ...f, [field]: value })); }
+
+  // Column headers match what SitesImport above recognizes (see
+  // SITE_IMPORT_FIELDS/normalizeHeader) — "Monitoring" is kept ahead of
+  // "Monitoring email" in sheet order so a round-tripped file (download,
+  // edit offline, re-upload) can't have the email column mistaken for the
+  // monitoring company by that header's loose `includes("monitoring")`
+  // match. Always the full list, ignoring the on-screen search filter, so
+  // there's never a question of whether this was a partial export.
+  async function downloadSitesExcel() {
+    if (!sites.length) return;
+    setExportBusy(true);
+    try {
+      const XLSX = await import("xlsx");
+      const rows = sites.map((s) => ({
+        "Site name": s.name || "",
+        "Address": s.address || "",
+        "Run / Zone": s.run || "",
+        "Monitoring": s.monitoringCo || "",
+        "Monitoring email": s.monitoringEmail || "",
+        "Bureau": s.bureau || "",
+        "PO number": s.poNumber || "",
+        "Key / swipe card": s.keyInfo || "",
+        "Alarm code": s.alarmCode || "",
+        "Site contact": s.siteContact || "",
+        "Site notes": s.siteNotes || "",
+      }));
+      const sheet = XLSX.utils.json_to_sheet(rows);
+      sheet["!cols"] = [
+        { wch: 28 }, { wch: 36 }, { wch: 12 }, { wch: 20 }, { wch: 26 },
+        { wch: 20 }, { wch: 14 }, { wch: 20 }, { wch: 12 }, { wch: 20 }, { wch: 30 },
+      ];
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, sheet, "Sites");
+      XLSX.writeFile(workbook, `sites-${todayDDMMYY()}.xlsx`);
+    } catch (e) {
+      showToast("Couldn't generate the file — try again.", "error");
+    }
+    setExportBusy(false);
+  }
 
   function startEdit(site) { setEditingId(site.id); setForm({ ...blank, ...site }); }
   function cancelEdit() { setEditingId(null); setForm(blank); setError(""); }
@@ -6687,11 +6727,18 @@ function SitesEditor({ zones, sites, persistSites }) {
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
         <SectionTitle icon={MapPin} title={`Sites (${sites.length})`} small />
-        {sites.length > 0 && (
-          <button onClick={clearAll} style={{ ...iconBtn, width: "auto", padding: "6px 10px", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--breach)" }}>
-            <Trash2 size={13} /> Clear all sites
-          </button>
-        )}
+        <div style={{ display: "flex", gap: 8 }}>
+          {sites.length > 0 && (
+            <button onClick={downloadSitesExcel} disabled={exportBusy} style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px", opacity: exportBusy ? 0.6 : 1 }}>
+              <Download size={13} /> {exportBusy ? "Preparing…" : "Download sites (Excel)"}
+            </button>
+          )}
+          {sites.length > 0 && (
+            <button onClick={clearAll} style={{ ...iconBtn, width: "auto", padding: "6px 10px", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--breach)" }}>
+              <Trash2 size={13} /> Clear all sites
+            </button>
+          )}
+        </div>
       </div>
       <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search by name, address, monitoring, bureau, PO number…" style={{ ...selectStyle, marginBottom: 10 }} />
       <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 480, overflowY: "auto" }}>
