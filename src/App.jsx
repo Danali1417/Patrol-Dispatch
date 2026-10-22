@@ -4576,31 +4576,38 @@ function Reports({ jobs, companyName, logoUrl, roster, responseRate, bureauRates
     .sort((a, b) => new Date(a.dispatchTime) - new Date(b.dispatchTime));
 
   const columns = reportType === "brief" ? REPORT_COLUMNS_BRIEF : REPORT_COLUMNS_DETAILED;
-  const rows = filtered.map((j) => reportRow(j, reportType, undefined, roster));
-  const summary = patrolmanRunSummary(filtered, roster);
-  const operators = operatorSummary(filtered);
-  const cancelledCount = cancelledJobCount(filtered);
-  const typeCounts = jobTypeCounts(filtered);
-  const totalResponses = summary.reduce((sum, s) => sum + s.count, 0);
-  const totalSummaryCancelled = summary.reduce((sum, s) => sum + (s.cancelled || 0), 0);
-  const totalByType = typeCounts.reduce((sum, t) => sum + t.count, 0);
-  const hasFilter = dateFrom || dateTo || timeFrom || timeTo || tableSearch;
-
+  const dateRangeRows = filtered.map((j) => reportRow(j, reportType, undefined, roster));
   // Manager-only — appended here rather than in reportRow/REPORT_COLUMNS
   // themselves, since those are shared with the automated daily email
   // report (api/_lib/buildReport.js), which this deliberately stays out
   // of. See jobCharge's own comment in reportUtils.js for the rate card.
   const chargeColumns = [...columns, "Charged"];
-  const chargeRows = rows.map((r, i) => [...r, formatCharge(jobCharge(filtered[i], rateConfig))]);
-  const totalCharged = filtered.reduce((sum, j) => sum + (jobCharge(j, rateConfig) || 0), 0);
+  const dateRangeChargeRows = dateRangeRows.map((r, i) => [...r, formatCharge(jobCharge(filtered[i], rateConfig))]);
 
-  // A quick on-screen search across every column (job #, date, time, site,
-  // run, patrolman, operator, status, ...) — separate from the date/time
-  // range above, which decides what's *in* the report at all (and what
-  // the PDF/email include). This only narrows what's shown on screen
-  // right now, useful once a report runs into the hundreds of rows.
+  // The same search box as the Dispatch board's own (job #, date, time,
+  // site, run, patrolman, operator, status, charge, ...) — narrows what
+  // the report actually *is*, including the PDF/preview, not just what's
+  // shown on screen. Searching "Northgate" and downloading gets a report
+  // containing only Northgate's jobs, with its own summary/totals to
+  // match — not the full date range's totals next to a filtered table.
   const q = tableSearch.trim().toLowerCase();
-  const displayRows = q ? chargeRows.filter((r) => r.some((cell) => String(cell ?? "").toLowerCase().includes(q))) : chargeRows;
+  const matchedIdx = q
+    ? dateRangeChargeRows.reduce((acc, r, i) => { if (r.some((cell) => String(cell ?? "").toLowerCase().includes(q))) acc.push(i); return acc; }, [])
+    : filtered.map((_, i) => i);
+  const filteredJobs = matchedIdx.map((i) => filtered[i]);
+  const chargeRows = matchedIdx.map((i) => dateRangeChargeRows[i]);
+  const rows = matchedIdx.map((i) => dateRangeRows[i]);
+  const displayRows = chargeRows;
+
+  const summary = patrolmanRunSummary(filteredJobs, roster);
+  const operators = operatorSummary(filteredJobs);
+  const cancelledCount = cancelledJobCount(filteredJobs);
+  const typeCounts = jobTypeCounts(filteredJobs);
+  const totalResponses = summary.reduce((sum, s) => sum + s.count, 0);
+  const totalSummaryCancelled = summary.reduce((sum, s) => sum + (s.cancelled || 0), 0);
+  const totalByType = typeCounts.reduce((sum, t) => sum + t.count, 0);
+  const totalCharged = filteredJobs.reduce((sum, j) => sum + (jobCharge(j, rateConfig) || 0), 0);
+  const hasFilter = dateFrom || dateTo || timeFrom || timeTo || tableSearch;
 
   function clearFilters() { setDateFrom(""); setDateTo(""); setTimeFrom(""); setTimeTo(""); setTableSearch(""); }
 
@@ -4621,7 +4628,7 @@ function Reports({ jobs, companyName, logoUrl, roster, responseRate, bureauRates
     doc.text(`${name} Alarm Response Dispatch — ${reportType === "brief" ? "Brief" : "Detailed"} Report`, 40, 40);
     doc.setFontSize(9);
     doc.setTextColor(90);
-    doc.text(`Date range: ${dateFrom || "any"} to ${dateTo || "any"}${timeFrom || timeTo ? `  ·  Time: ${timeFrom || "any"} to ${timeTo || "any"}` : ""}`, 40, 58);
+    doc.text(`Date range: ${dateFrom || "any"} to ${dateTo || "any"}${timeFrom || timeTo ? `  ·  Time: ${timeFrom || "any"} to ${timeTo || "any"}` : ""}${tableSearch.trim() ? `  ·  Filtered by "${tableSearch.trim()}"` : ""}`, 40, 58);
     doc.text(`Generated ${fmtDateTime(new Date().toISOString())}`, 40, 72);
     doc.text(`${rows.length} job(s) — ${cancelledCount} cancelled`, 40, 86);
     doc.text(`Total charged: $${totalCharged.toFixed(2)}`, 40, 100);
@@ -4823,9 +4830,8 @@ function Reports({ jobs, companyName, logoUrl, roster, responseRate, bureauRates
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
         <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
           {rows.length} job{rows.length !== 1 ? "s" : ""} in this report — {cancelledCount} cancelled — Total charged <b style={{ color: "var(--accent)" }}>${totalCharged.toFixed(2)}</b>
-          {q && ` — ${displayRows.length} shown`}
         </div>
-        {rows.length > 0 && (
+        {filtered.length > 0 && (
           <input
             value={tableSearch}
             onChange={(e) => setTableSearch(e.target.value)}
@@ -4835,9 +4841,9 @@ function Reports({ jobs, companyName, logoUrl, roster, responseRate, bureauRates
         )}
       </div>
 
-      {rows.length === 0 ? (
+      {filtered.length === 0 ? (
         <Empty text="No jobs match this date/time range." />
-      ) : displayRows.length === 0 ? (
+      ) : rows.length === 0 ? (
         <Empty text="No jobs match this search." />
       ) : (
         <div style={{ overflow: "auto", maxHeight: "65vh", border: "1px solid var(--border)", borderRadius: 8 }}>
