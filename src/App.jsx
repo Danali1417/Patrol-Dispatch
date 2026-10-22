@@ -4726,6 +4726,14 @@ function Reports({ jobs, companyName, logoUrl, roster, responseRate, bureauRates
       </div>
 
       <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap", marginBottom: 18, padding: 12, borderRadius: 8, background: "var(--panel-alt)", border: "1px solid var(--border)" }}>
+        <Field label="Search" style={{ marginBottom: 0, flex: "1 1 200px" }}>
+          <input
+            value={tableSearch}
+            onChange={(e) => setTableSearch(e.target.value)}
+            placeholder="Job #, site, patrolman, operator…"
+            style={{ ...selectStyle, background: "var(--panel)" }}
+          />
+        </Field>
         <Field label="Date from" style={{ marginBottom: 0 }}>
           <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
         </Field>
@@ -4827,18 +4835,8 @@ function Reports({ jobs, companyName, logoUrl, roster, responseRate, bureauRates
         </div>
       )}
 
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
-        <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
-          {rows.length} job{rows.length !== 1 ? "s" : ""} in this report — {cancelledCount} cancelled — Total charged <b style={{ color: "var(--accent)" }}>${totalCharged.toFixed(2)}</b>
-        </div>
-        {filtered.length > 0 && (
-          <input
-            value={tableSearch}
-            onChange={(e) => setTableSearch(e.target.value)}
-            placeholder="Search job #, site, patrolman, operator…"
-            style={{ ...selectStyle, marginLeft: "auto", width: 260, padding: "6px 10px", fontSize: 12 }}
-          />
-        )}
+      <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 8 }}>
+        {rows.length} job{rows.length !== 1 ? "s" : ""} in this report — {cancelledCount} cancelled — Total charged <b style={{ color: "var(--accent)" }}>${totalCharged.toFixed(2)}</b>
       </div>
 
       {filtered.length === 0 ? (
