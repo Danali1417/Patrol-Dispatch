@@ -4542,6 +4542,7 @@ function Reports({ jobs, companyName, logoUrl, roster, responseRate, bureauRates
   const [tableSearch, setTableSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [archived, setArchived] = useState([]);
+  const [archivedMatches, setArchivedMatches] = useState([]);
   const showToast = useToast();
 
   // Only reaches into the archive once a "from" date bounds it below —
@@ -4553,7 +4554,30 @@ function Reports({ jobs, companyName, logoUrl, roster, responseRate, bureauRates
     if (!dateFrom) { setArchived([]); return; }
     fetchArchivedJobsInRange(dateFrom, dateTo || todayISO()).then(setArchived);
   }, [dateFrom, dateTo]);
-  const allJobs = useMemo(() => [...jobs, ...archived], [jobs, archived]);
+
+  // Supplements the date-range fetch above with a server-side job-number/
+  // site-name search once a search term is typed in — see
+  // fetchArchivedJobsInRange's own comment for why: the date-range fetch
+  // alone caps at 300 rows ordered by last-touched, so a site attended
+  // many times over a wide date range can have its older visits silently
+  // cut off before this screen's own search ever gets to filter them.
+  // Debounced the same way the Dispatch board's own archive search is.
+  useEffect(() => {
+    if (!dateFrom || !tableSearch.trim()) { setArchivedMatches([]); return; }
+    let cancelled = false;
+    const t = setTimeout(() => {
+      fetchArchivedJobsInRange(dateFrom, dateTo || todayISO(), tableSearch).then((result) => {
+        if (!cancelled) setArchivedMatches(result);
+      });
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [dateFrom, dateTo, tableSearch]);
+
+  const allJobs = useMemo(() => {
+    const merged = new Map();
+    [...jobs, ...archived, ...archivedMatches].forEach((j) => { if (j && j.id) merged.set(j.id, j); });
+    return [...merged.values()];
+  }, [jobs, archived, archivedMatches]);
 
   // "From"/"To" date+time combine into one continuous window — (dateFrom
   // at timeFrom) through (dateTo at timeTo) — rather than treating the

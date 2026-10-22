@@ -44,10 +44,24 @@ export async function searchArchivedJobs(term) {
 
 // Reports / Logs & analysis pulling in archived jobs for a chosen (or
 // default) date range, in addition to whatever's still on the live board.
-export async function fetchArchivedJobsInRange(fromDateISO, toDateISO) {
+// `term`, when given, is passed straight through as a server-side filter
+// on top of the date range — the archive's search index only covers job #
+// and site name (see searchFieldsFor in api/_lib/jobArchive.js), so this
+// alone can't replace a full client-side search across every report
+// column. What it's for: kvQueryPrefix caps every query at 300 rows
+// (ordered by last-touched, not by date) — a date range spanning more
+// than that silently drops older matches before a client-side search ever
+// sees them. A job-number/site-name search term narrows the row set
+// enough server-side that the one site or job actually being searched for
+// doesn't get cut off. See Reports in App.jsx for how this result gets
+// merged with a plain date-range fetch rather than replacing it, so a
+// search on a non-indexed field (patrolman, operator, status...) isn't
+// made any worse than before.
+export async function fetchArchivedJobsInRange(fromDateISO, toDateISO, term) {
   const params = {};
   if (fromDateISO) params.from = fromDateISO;
   if (toDateISO) params.to = toDateISO;
+  if (term && term.trim()) params.term = term.trim();
   return queryArchive(params);
 }
 
