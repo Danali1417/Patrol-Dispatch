@@ -504,6 +504,40 @@ dispatched with no one assigned.
 It clears itself the moment any entry exists for that week — no
 dismiss button, nothing to remember to turn off.
 
+## 15. Reopening a closed or cancelled job (no setup needed)
+
+Control Room (manager or operator) can reopen a job that's already
+been closed ("emailed" to the client) or cancelled, as long as it's
+still on the live board — within 48 hours, before the daily archive
+sweep moves it off (see section 9). A **"Reopen job"** button appears
+on the job's own page for exactly those two states, with an optional
+note for the activity log on why.
+
+- A **cancelled** job goes back to **dispatched**, as if it were
+  freshly assigned — the cancel button only ever shows before a
+  patrolman has submitted an outcome, so there's nothing else to
+  restore.
+- A **closed/emailed** job goes back to **reviewed** — the onsite/
+  offsite times, result notes and photos become editable again, and
+  "Prepare client email" reappears so a corrected email can be sent.
+
+Once a job has actually been archived (48h+), its attendance photos
+have already been emailed as a backup and deleted from Supabase (see
+section 11) — reopening isn't offered past that point, since there'd
+be no photos left to edit back in.
+
+## 16. Control Room can add its own attendance photos
+
+Next to a job's attendance photos, Control Room can use **"Add
+photo(s)"** to attach photos of their own — e.g. something a
+patrolman sent in by text or email instead of through the app. It
+uses the same pipeline as the patrolman app's own gallery picker: a
+compressed preview is saved to the job, and the untouched original is
+uploaded to Supabase Storage ("View original" — see section 8).
+Unlike a live onsite photo, nothing is stamped with today's date or
+a GPS location, since there's no way to know when or where the
+original photo was actually taken.
+
 ## Updating it later
 
 Whenever you want to change something, edit the files in this project and

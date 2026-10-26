@@ -2995,6 +2995,11 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   const [photosLoaded, setPhotosLoaded] = useState(false);
   const [showEtaDelayModal, setShowEtaDelayModal] = useState(false);
   const [showEditJob, setShowEditJob] = useState(false);
+  const [showReopenForm, setShowReopenForm] = useState(false);
+  const [reopenReason, setReopenReason] = useState("");
+  const [reopenBusy, setReopenBusy] = useState(false);
+  const [photoUploadBusy, setPhotoUploadBusy] = useState(false);
+  const operatorPhotoFileRef = useRef(null);
   const [editJobNumber, setEditJobNumber] = useState(job.jobNumber || "");
   const [editOrderNo, setEditOrderNo] = useState(job.orderNo || "");
   const [editDocketNo, setEditDocketNo] = useState(job.docketNo || "");
@@ -3009,6 +3014,10 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   useEffect(() => {
     setShowActionRequestForm(false);
     setActionRequestText("");
+  }, [job.id]);
+  useEffect(() => {
+    setShowReopenForm(false);
+    setReopenReason("");
   }, [job.id]);
   useEffect(() => {
     setOnsiteEdit(toLocalInputValue(job.onsiteTime));
@@ -3274,6 +3283,62 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
     showToast("You're now handling this job.");
   }
 
+  // Undoes a cancellation (back to "dispatched", exactly as if it were
+  // freshly dispatched — the cancel button only ever shows before a
+  // patrolman submits an outcome, so there's never outcome data to
+  // preserve here) or reopens a closed/emailed job (back to "reviewed", so
+  // the times/notes/result/photos below become editable again and
+  // "Prepare client email" reappears, same as any other reviewed job).
+  // Only offered while the job is still on the live board (see isArchived)
+  // — once a job's 48h sweep runs its photos are already emailed as a
+  // backup and deleted from Supabase, so there'd be nothing left to edit
+  // back into.
+  async function confirmReopen() {
+    setReopenBusy(true);
+    const wasCancelled = job.status === "cancelled";
+    const detail = [
+      wasCancelled ? "Cancellation undone — back to dispatched" : "Closed job reverted to reviewed for corrections",
+      reopenReason.trim() ? `Reason: ${reopenReason.trim()}` : null,
+    ].filter(Boolean).join(" — ");
+    await logAction("Reopened", detail, { status: wasCancelled ? "dispatched" : "reviewed" });
+    setReopenBusy(false);
+    setShowReopenForm(false);
+    setReopenReason("");
+    showToast("Job reopened.");
+  }
+
+  // Lets control room attach photos a patrolman sent through some other
+  // channel (text, WhatsApp, email) straight onto the job record, instead
+  // of only ever being able to view what the patrolman's own app uploaded.
+  // Same compress-then-upload-original pipeline as the patrolman app's own
+  // gallery picker (see handleGalleryFiles in JobDetailPatrolman) — plain,
+  // unwatermarked, since this isn't a live on-site capture either.
+  async function handleOperatorPhotoFiles(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!files.length || isArchived) return;
+    setPhotoUploadBusy(true);
+    const added = [];
+    for (const f of files.slice(0, MAX_ATTENDANCE_PHOTOS - photos.length)) {
+      try {
+        const [photo, originalPath] = await Promise.all([resizePhotoPlain(f), uploadOriginalPhoto(job.id, f)]);
+        added.push(originalPath ? { ...photo, originalPath } : photo);
+      } catch (err) { /* skip bad file */ }
+    }
+    if (added.length) {
+      const merged = [...photos, ...added];
+      try {
+        await persistJobPhotos(job.id, merged);
+        setPhotos(merged);
+        await logAction("Added photo(s)", `${added.length} photo${added.length !== 1 ? "s" : ""} uploaded by ${session.displayName}`, { photoCount: merged.length });
+        showToast(`${added.length} photo${added.length !== 1 ? "s" : ""} added.`);
+      } catch (err) {
+        showToast("Couldn't save the uploaded photo(s) — try again.", "error");
+      }
+    }
+    setPhotoUploadBusy(false);
+  }
+
   const isHandling = job.handlingLoginName === session.loginName;
   // Not in the live `jobs` array means the daily archive sweep already
   // moved it off the board (see jobArchive.js) — still viewable with its
@@ -3366,6 +3431,31 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       {isArchived && (
         <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel-alt)", fontSize: 12, color: "var(--text-dim)", display: "flex", alignItems: "center", gap: 7 }}>
           <Archive size={13} /> Archived — closed 48h+ ago and off the live board. View only; details and photos are still here, but changes on this screen won't be saved.
+        </div>
+      )}
+
+      {!isArchived && (job.status === "cancelled" || job.status === "emailed") && (
+        <div style={{ marginTop: 12 }}>
+          {!showReopenForm ? (
+            <button onClick={() => setShowReopenForm(true)} style={secondaryBtn}>
+              <RotateCcw size={13} /> Reopen job
+            </button>
+          ) : (
+            <div style={{ padding: 14, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel-alt)" }}>
+              <div style={{ fontSize: 12.5, marginBottom: 8 }}>
+                {job.status === "cancelled"
+                  ? "This undoes the cancellation and puts the job back to dispatched, as if it's still active."
+                  : "This reverts the job from closed back to reviewed, so the times, notes, result and photos can be corrected and the client email re-prepared."}
+              </div>
+              <UpperTextarea rows={2} value={reopenReason} onChange={setReopenReason} placeholder="Why is this being reopened? (optional, recorded in the activity log)" style={{ ...selectStyle, resize: "vertical" }} />
+              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button onClick={confirmReopen} disabled={reopenBusy} style={{ ...primaryBtn, opacity: reopenBusy ? 0.6 : 1, cursor: reopenBusy ? "not-allowed" : "pointer" }}>
+                  <RotateCcw size={14} /> {reopenBusy ? "Reopening…" : "Confirm reopen"}
+                </button>
+                <button onClick={() => { setShowReopenForm(false); setReopenReason(""); }} disabled={reopenBusy} style={secondaryBtn}>Never mind</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -3598,6 +3688,18 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
                   )}
                 </div>
               ))}
+            </div>
+          )}
+          {!isArchived && photos.length < MAX_ATTENDANCE_PHOTOS && (
+            <div style={{ marginTop: 10 }}>
+              <button
+                onClick={() => operatorPhotoFileRef.current?.click()}
+                disabled={photoUploadBusy}
+                style={{ ...secondaryBtn, padding: "6px 12px", fontSize: 12, opacity: photoUploadBusy ? 0.6 : 1, cursor: photoUploadBusy ? "not-allowed" : "pointer" }}
+              >
+                <Camera size={13} /> {photoUploadBusy ? "Uploading…" : "Add photo(s)"}
+              </button>
+              <input ref={operatorPhotoFileRef} type="file" accept="image/*" multiple hidden onChange={handleOperatorPhotoFiles} />
             </div>
           )}
           <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
