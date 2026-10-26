@@ -4060,24 +4060,38 @@ function buildAdviceEmail(job, companyName) {
 // the way it did before either.
 const ATTACH_FULL_RES_PHOTOS = true;
 
-// Used by both outgoing emails (client advice email and internal photo
-// backup): attaches each photo at full resolution by pointing the server at
-// its original in Supabase Storage (fetched and attached entirely
-// server-side — see api/send-client-email.js) rather than sending the
-// compressed preview already embedded in the attendance PDF. Photos taken
-// before originalPath capture existed fall back to that preview.
+// Used by the client advice email: attaches each photo at full resolution
+// by pointing the server at its original in Supabase Storage (fetched and
+// attached entirely server-side — see api/send-client-email.js) rather than
+// sending the compressed preview already embedded in the attendance PDF.
+// Photos taken before originalPath capture existed fall back to that
+// preview. The internal backup email deliberately does NOT use this (see
+// compressedPhotoAttachments below) — attaching full-res originals there
+// was filling up the backup inbox's own mailbox storage.
 function fullResPhotoAttachments(job) {
   return (job.photos || []).map((p, i) => {
     if (ATTACH_FULL_RES_PHOTOS && p.originalPath) {
       const ext = (p.originalPath.split(".").pop() || "jpg").toLowerCase();
       return { filename: `${job.jobNumber}-photo-${i + 1}.${ext}`, originalPath: p.originalPath };
     }
-    const match = /^data:([^;]+);base64,(.*)$/.exec(p.dataUrl || "");
-    if (!match) return null;
-    const [, contentType, content] = match;
-    const ext = contentType.split("/")[1] || "jpg";
-    return { filename: `${job.jobNumber}-photo-${i + 1}.${ext}`, content, contentType };
+    return compressedPhotoAttachment(job, p, i);
   }).filter(Boolean);
+}
+
+function compressedPhotoAttachment(job, p, i) {
+  const match = /^data:([^;]+);base64,(.*)$/.exec(p.dataUrl || "");
+  if (!match) return null;
+  const [, contentType, content] = match;
+  const ext = contentType.split("/")[1] || "jpg";
+  return { filename: `${job.jobNumber}-photo-${i + 1}.${ext}`, content, contentType };
+}
+
+// Internal attendance photo backup (JOB_BACKUP_RECIPIENTS) always gets the
+// compressed 480px previews already on the job record, never the
+// full-resolution originals — those are only for the client advice email
+// above. Keeps the backup inbox's own mailbox storage from filling up.
+function compressedPhotoAttachments(job) {
+  return (job.photos || []).map((p, i) => compressedPhotoAttachment(job, p, i)).filter(Boolean);
 }
 
 // Fired the moment a job closes or cancels (confirmCancel, EmailModal's
@@ -4086,13 +4100,13 @@ function fullResPhotoAttachments(job) {
 // failure the archive sweep still catches it later (see
 // backupAndDeletePhotos in api/_lib/jobArchive.js), so a network blip here
 // never loses a photo, just delays its backup. That sweep is a server-side
-// cron with no browser to build a PDF in, so it still falls back to a
-// compressed-photos-only backup — only this client-triggered send (the
-// common path) gets the full attendance PDF. `to` is deliberately never
-// passed: the server fills in JOB_BACKUP_RECIPIENTS itself so that address
-// never has to reach the browser.
+// cron with no browser to build a PDF in, and uses the same compressed
+// previews this does — only this client-triggered send (the common path)
+// gets the full attendance PDF. `to` is deliberately never passed: the
+// server fills in JOB_BACKUP_RECIPIENTS itself so that address never has to
+// reach the browser.
 async function sendPhotoBackupEmail(job, companyName, now, logoUrl, roster, patrolmen) {
-  const attachments = fullResPhotoAttachments(job);
+  const attachments = compressedPhotoAttachments(job);
   if (!attachments.length) return { sent: false };
   const subject = `Attendance photo backup — ${job.jobNumber}${job.siteName ? ` — ${job.siteName}` : ""}`;
   let pdfAttachment = null;
