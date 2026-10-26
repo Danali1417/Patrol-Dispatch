@@ -526,6 +526,13 @@ have already been emailed as a backup and deleted from Supabase (see
 section 11) — reopening isn't offered past that point, since there'd
 be no photos left to edit back in.
 
+Closing or cancelling a reopened job sends another attendance backup
+email and/or client advice email for the same job number — so every
+one of those, from the second time onward, gets **"— UPDATED
+(revision N)"** on its subject line (and a "Revision" line in the
+client email's own body), so it's never mistaken for an unexplained
+duplicate of the one already on file.
+
 ## 16. Control Room can add its own attendance photos
 
 Next to a job's attendance photos, Control Room can use **"Add

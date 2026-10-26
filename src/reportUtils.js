@@ -41,6 +41,22 @@ export function descriptionFieldLabel(job, { short = false } = {}) {
   return short ? "Description" : "Instructions / description";
 }
 
+// A job reopened after being closed/cancelled (see "Reopen job" in
+// JobDetailOperator) goes through the close/cancel flow again, so it can
+// generate a second attendance backup and/or client email for the exact
+// same job number — with no distinction, that second email just looks
+// like an unexplained duplicate of one already filed away. `reopenCount`
+// (stamped on the job each time it's reopened) turns into a plain revision
+// number here, appended to the subject line of every email that's part of
+// that close/cancel flow (see sendPhotoBackupEmail/EmailModal in App.jsx
+// and sendPhotoBackupMail in api/_lib/jobArchive.js) — "" for a job's
+// first time through, "— UPDATED (revision 2)" the first time it's been
+// reopened and closed again, and so on.
+export function jobRevisionLabel(job) {
+  const n = (job.reopenCount || 0) + 1;
+  return n > 1 ? ` — UPDATED (revision ${n})` : "";
+}
+
 export const STATUS_META = {
   scheduled: { label: "Scheduled", color: "#0EA5E9" },
   dispatched: { label: "Dispatched", color: "var(--info)" },
