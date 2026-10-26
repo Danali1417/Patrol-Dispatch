@@ -11,7 +11,7 @@ import {
   reportStatusLabel, REPORT_COLUMNS_BRIEF, REPORT_COLUMNS_DETAILED,
   reportRow, patrolmanRunSummary, operatorSummary, cancelledJobCount,
   JOB_TYPES, jobTypeLabel, isResponseJob, descriptionFieldLabel, jobTypeCounts, rosterDateFor, resolveJobRoster,
-  jobCharge, formatCharge, DEFAULT_RESPONSE_RATE,
+  jobCharge, formatCharge, DEFAULT_RESPONSE_RATE, jobRevisionLabel,
 } from "./reportUtils.js";
 import { restoreSession, login as apiLogin, logout as apiLogout, setOnUnauthorized } from "./auth.js";
 import {
@@ -3293,6 +3293,12 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   // — once a job's 48h sweep runs its photos are already emailed as a
   // backup and deleted from Supabase, so there'd be nothing left to edit
   // back into.
+  //
+  // reopenCount goes up by one every time — it's what jobRevisionLabel
+  // (reportUtils.js) turns into "— UPDATED (revision N)" on every email
+  // this job's close/cancel flow sends from here on (backup email, client
+  // advice email), so a second email for the same job number reads as a
+  // correction rather than an unexplained duplicate of one already filed.
   async function confirmReopen() {
     setReopenBusy(true);
     const wasCancelled = job.status === "cancelled";
@@ -3300,7 +3306,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       wasCancelled ? "Cancellation undone — back to dispatched" : "Closed job reverted to reviewed for corrections",
       reopenReason.trim() ? `Reason: ${reopenReason.trim()}` : null,
     ].filter(Boolean).join(" — ");
-    await logAction("Reopened", detail, { status: wasCancelled ? "dispatched" : "reviewed" });
+    await logAction("Reopened", detail, { status: wasCancelled ? "dispatched" : "reviewed", reopenCount: (job.reopenCount || 0) + 1 });
     setReopenBusy(false);
     setShowReopenForm(false);
     setReopenReason("");
@@ -4115,8 +4121,11 @@ function buildAdviceEmail(job, companyName) {
   const location = [job.siteName, job.address].filter(Boolean).join("<br>");
   const outcome = (job.reviewNotes || job.cancelReason || "").replace(/\n/g, "<br>");
 
+  const revisionNote = (job.reopenCount || 0) > 0 ? `Revision ${job.reopenCount + 1} — supersedes advice sent earlier for this job` : null;
+
   const rows = [
     adviceRow("Advice From:", (companyName || "Ausgroup").toUpperCase() + " SECURITY"),
+    ...(revisionNote ? [adviceRow("Revision:", revisionNote)] : []),
     adviceRow("Customer:", job.bureau || "—"),
     adviceRow("Monitoring:", job.monitoringCo || "—"),
     adviceRow("Job Ref:", job.jobNumber),
@@ -4135,6 +4144,7 @@ function buildAdviceEmail(job, companyName) {
 
   const textLines = [
     ["Advice From", (companyName || "Ausgroup").toUpperCase() + " SECURITY"],
+    ...(revisionNote ? [["Revision", revisionNote]] : []),
     ["Customer", job.bureau || "—"],
     ["Monitoring", job.monitoringCo || "—"],
     ["Job Ref", job.jobNumber],
@@ -4210,7 +4220,7 @@ function compressedPhotoAttachments(job) {
 async function sendPhotoBackupEmail(job, companyName, now, logoUrl, roster, patrolmen) {
   const attachments = compressedPhotoAttachments(job);
   if (!attachments.length) return { sent: false };
-  const subject = `Attendance photo backup — ${job.jobNumber}${job.siteName ? ` — ${job.siteName}` : ""}`;
+  const subject = `Attendance photo backup — ${job.jobNumber}${job.siteName ? ` — ${job.siteName}` : ""}${jobRevisionLabel(job)}`;
   let pdfAttachment = null;
   try {
     const pdfBase64 = await buildJobAttendancePdfBase64(job, companyName, now, logoUrl, roster, patrolmen);
@@ -4220,6 +4230,7 @@ async function sendPhotoBackupEmail(job, companyName, now, logoUrl, roster, patr
   }
   const text = [
     `Job ${job.jobNumber} — ${job.siteName || "—"}`,
+    (job.reopenCount || 0) > 0 ? `This supersedes an earlier backup email for the same job — reopened and corrected since then.` : null,
     `Address: ${job.address || "—"}`,
     `Status: ${job.status === "cancelled" ? "Cancelled" : "Closed"}`,
     `Patrolman: ${job.assigneeName || "—"}`,
@@ -4228,8 +4239,8 @@ async function sendPhotoBackupEmail(job, companyName, now, logoUrl, roster, patr
     `Offsite: ${fmtDateTime(job.offsiteTime)}`,
     `Outcome: ${job.reviewNotes || job.cancelReason || "—"}`,
     ``,
-    `${attachments.length} ${ATTACH_FULL_RES_PHOTOS ? "full-resolution " : ""}attendance photo${attachments.length !== 1 ? "s" : ""} attached${pdfAttachment ? ", plus the attendance report PDF." : "."}`,
-  ].join("\n");
+    `${attachments.length} attendance photo${attachments.length !== 1 ? "s" : ""} attached${pdfAttachment ? ", plus the attendance report PDF." : "."}`,
+  ].filter((l) => l !== null).join("\n");
   try {
     const res = await fetch("/api/send-client-email", {
       method: "POST",
@@ -4453,7 +4464,7 @@ function EmailModal({ job, companyName, now, roster, patrolmen, logoUrl, onClose
   const [error, setError] = useState("");
   const showToast = useToast();
 
-  const subject = `Alarm Response Advice — Job Ref ${job.jobNumber} — ${job.siteName}`;
+  const subject = `Alarm Response Advice — Job Ref ${job.jobNumber} — ${job.siteName}${jobRevisionLabel(job)}`;
   const { html, text } = buildAdviceEmail(job, companyName);
   const emailLooksValid = /\S+@\S+\.\S+/.test(clientEmail.trim());
 

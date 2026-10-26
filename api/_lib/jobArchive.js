@@ -24,7 +24,7 @@ import { isMailConfigured, getMailFrom, createMailTransporter } from "./mail.js"
 import { kvGet, kvSet, kvSetSearchable, kvGetPrefixMissingSearch, kvQueryPrefix, kvDelete } from "./supabase.js";
 import { deleteAllUnderPrefix } from "./storage.js";
 import { sendPushToPatrolman } from "./push.js";
-import { fmtDateTime, fmtTime } from "../../src/reportUtils.js";
+import { fmtDateTime, fmtTime, jobRevisionLabel } from "../../src/reportUtils.js";
 import { JOB_ARCHIVE_PREFIX, JOB_PHOTOS_PREFIX, JOB_CHAT_PREFIX } from "./keyPrefixes.js";
 
 // Re-exported so existing importers (daily-report.js) don't need to
@@ -129,9 +129,10 @@ async function sendPhotoBackupMail(job, photos, { transporter } = {}) {
   const attachments = photoAttachmentsFor(job, photos);
   if (!attachments.length) return "none";
 
-  const subject = `Attendance photo backup — ${job.jobNumber || job.id}${job.siteName ? ` — ${job.siteName}` : ""}`;
+  const subject = `Attendance photo backup — ${job.jobNumber || job.id}${job.siteName ? ` — ${job.siteName}` : ""}${jobRevisionLabel(job)}`;
   const text = [
     `Job ${job.jobNumber || job.id} — ${job.siteName || "—"}`,
+    (job.reopenCount || 0) > 0 ? `This supersedes an earlier backup email for the same job — reopened and corrected since then.` : null,
     `Address: ${job.address || "—"}`,
     `Status: ${job.status === "cancelled" ? "Cancelled" : "Closed"}`,
     `Patrolman: ${job.assigneeName || "—"}`,
@@ -141,7 +142,7 @@ async function sendPhotoBackupMail(job, photos, { transporter } = {}) {
     `Outcome: ${job.reviewNotes || job.cancelReason || "—"}`,
     ``,
     `${attachments.length} attendance photo${attachments.length !== 1 ? "s" : ""} attached — this is the only copy kept once this job is archived.`,
-  ].join("\n");
+  ].filter((l) => l !== null).join("\n");
 
   try {
     const send = transporter || createMailTransporter();
