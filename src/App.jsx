@@ -1444,6 +1444,20 @@ function ConfirmDialog({ confirmState, onClose }) {
    SHELL / THEME
 ---------------------------------------------------------------- */
 
+// index.html caps #root at 880px wide, centered — fine for the app's own
+// content (forms, boards, cards all have their own sensible maxWidth), but
+// a full-bleed colored background (the navy header/sign-in backdrop) would
+// otherwise show plain white gutters on anything wider than that. This is
+// the standard "break out of a centered container" trick: 100vw plus a
+// negative margin computed against the *viewport* width cancels out
+// #root's own centering, independent of how wide #root actually is.
+// boxSizing: border-box is required here — nothing in this app resets it
+// globally, so without it the element's own padding would add on top of
+// the 100vw width instead of being included in it, overflowing the
+// viewport by the padding amount and introducing an unwanted horizontal
+// scrollbar.
+const fullBleedStyle = { width: "100vw", boxSizing: "border-box", marginLeft: "calc(50% - 50vw)", marginRight: "calc(50% - 50vw)" };
+
 function Shell({ children }) {
   return (
     <div
@@ -1636,7 +1650,7 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
 // through here since the logo itself already appears inside each card.
 function LoginCardShell({ maxWidth, children }) {
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, background: "linear-gradient(135deg, var(--navy) 0%, var(--navy-dim) 100%)" }}>
+    <div style={{ ...fullBleedStyle, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, background: "linear-gradient(135deg, var(--navy) 0%, var(--navy-dim) 100%)" }}>
       <div style={{ width: "100%", maxWidth, background: "var(--panel)", borderRadius: 14, padding: "36px 32px", boxShadow: "0 20px 50px rgba(0,0,0,0.25)" }}>
         {children}
       </div>
@@ -1671,7 +1685,7 @@ function TopBar({ session, roster, onSignOut, onOpenSettings, now, logoUrl, comp
   // different run, show that instead so it matches what's on their jobs.
   const todaysRun = roster?.find((r) => r.date === rosterDateISO() && r.patrolmanLoginName === session.loginName)?.run || session.run;
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", rowGap: 10, padding: "12px 20px", background: "linear-gradient(135deg, var(--navy) 0%, var(--navy-dim) 100%)", color: "#fff" }}>
+    <div style={{ ...fullBleedStyle, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", rowGap: 10, padding: "12px 20px", background: "linear-gradient(135deg, var(--navy) 0%, var(--navy-dim) 100%)", color: "#fff" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
         <Logo src={logoUrl} />
         <div style={{ fontSize: 13.5, fontWeight: 700 }}>{companyName} Alarm Response Dispatch</div>
