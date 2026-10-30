@@ -1430,7 +1430,7 @@ function ConfirmDialog({ confirmState, onClose }) {
           <button onClick={onClose} style={secondaryBtn}>Cancel</button>
           <button
             onClick={() => { const cb = onConfirm; onClose(); cb(); }}
-            style={{ ...primaryBtn, background: danger ? "var(--breach)" : "var(--accent)" }}
+            style={{ ...primaryBtn, ...(danger ? { background: "var(--breach)" } : {}) }}
           >
             {confirmLabel}
           </button>
@@ -1631,7 +1631,7 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
 
         {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 12 }}>{error}</div>}
 
-        <button type="button" disabled={busy} onClick={submit} style={{ width: "100%", padding: "12px 0", borderRadius: 7, border: "none", background: "var(--accent)", color: "#0B0E11", fontWeight: 700, cursor: "pointer", fontSize: 13.5, opacity: busy ? 0.6 : 1 }}>
+        <button type="button" disabled={busy} onClick={submit} style={{ width: "100%", padding: "12px 0", borderRadius: 7, border: "none", background: "var(--navy)", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13.5, opacity: busy ? 0.6 : 1 }}>
           {busy ? "Signing in…" : "Sign in"}
         </button>
       </div>
@@ -4255,7 +4255,7 @@ function JobChatPanel({ jobId, session, closed, embeddedChat }) {
   return (
     <div style={{ marginTop: 18, border: "1px solid var(--border)", borderRadius: 9, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 12px", background: "var(--panel-alt)", borderBottom: "1px solid var(--border)", fontSize: 12.5, fontWeight: 700 }}>
-        <MessageSquare size={14} color="var(--accent)" /> Job Chat
+        <MessageSquare size={14} color="var(--navy)" /> Job Chat
       </div>
       <div style={{ fontSize: 10.5, color: "var(--text-dim)", padding: "8px 12px 0" }}>
         Messages here become part of this job's permanent record.
@@ -7542,7 +7542,7 @@ function PublicHolidaysEditor({ publicHolidays, persistPublicHolidays }) {
 function SectionTitle({ icon: Icon, title, small }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: small ? 10 : 16 }}>
-      <Icon size={small ? 14 : 16} color="var(--accent)" />
+      <Icon size={small ? 14 : 16} color="var(--navy)" />
       <div style={{ fontSize: small ? 13 : 15, fontWeight: 700 }}>{title}</div>
     </div>
   );
@@ -7605,7 +7605,7 @@ const selectStyle = {
 
 const primaryBtn = {
   display: "inline-flex", alignItems: "center", gap: 7, padding: "10px 16px", borderRadius: 7,
-  border: "none", background: "var(--accent)", color: "#0B0E11", fontWeight: 700, fontSize: 12.5, cursor: "pointer",
+  border: "none", background: "var(--navy)", color: "#fff", fontWeight: 700, fontSize: 12.5, cursor: "pointer",
 };
 
 const secondaryBtn = {
