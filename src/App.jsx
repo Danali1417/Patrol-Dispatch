@@ -1663,8 +1663,8 @@ function LoginCardShell({ maxWidth, children }) {
 // read as "accented" rather than introducing a new tint just for this.
 function RoleIcon({ Icon }) {
   return (
-    <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--accent-dim)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-      <Icon size={18} color="var(--accent)" />
+    <div style={{ width: 36, height: 36, borderRadius: 8, background: "#E8EDF5", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+      <Icon size={18} color="var(--navy)" />
     </div>
   );
 }
