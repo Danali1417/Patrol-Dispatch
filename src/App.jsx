@@ -1523,12 +1523,12 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
 
   if (!role) {
     return (
-      <div style={{ padding: "48px 32px", maxWidth: 380, margin: "0 auto" }}>
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}><Logo src={logoUrl} /></div>
-        <div style={{ fontSize: 16, fontWeight: 700, textAlign: "center", marginBottom: 4 }}>
+      <LoginCardShell maxWidth={400}>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}><Logo src={logoUrl} /></div>
+        <div style={{ fontSize: 16, fontWeight: 800, textAlign: "center", marginBottom: 4 }}>
           {companyName} Alarm Response Dispatch
         </div>
-        <div style={{ fontSize: 13, color: "var(--text-dim)", textAlign: "center", marginBottom: 32 }}>
+        <div style={{ fontSize: 13, color: "var(--text-dim)", textAlign: "center", marginBottom: 28 }}>
           Choose your sign-in
         </div>
         {logoutReason && (
@@ -1546,7 +1546,7 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
         )}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <button onClick={() => setRole("manager")} style={roleCardStyle}>
-            <Users size={18} color="var(--accent)" />
+            <RoleIcon Icon={Users} />
             <div>
               <div style={{ fontWeight: 700, fontSize: 14 }}>Manager</div>
               <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>Create and manage logins</div>
@@ -1554,7 +1554,7 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
             <ChevronRight size={16} color="var(--text-dim)" style={{ marginLeft: "auto" }} />
           </button>
           <button onClick={() => setRole("operator")} style={roleCardStyle}>
-            <ShieldAlert size={18} color="var(--accent)" />
+            <RoleIcon Icon={ShieldAlert} />
             <div>
               <div style={{ fontWeight: 700, fontSize: 14 }}>Control Room</div>
               <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>Dispatch, review, and report</div>
@@ -1562,7 +1562,7 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
             <ChevronRight size={16} color="var(--text-dim)" style={{ marginLeft: "auto" }} />
           </button>
           <button onClick={() => setRole("patrolman")} style={roleCardStyle}>
-            <Radio size={18} color="var(--accent)" />
+            <RoleIcon Icon={Radio} />
             <div>
               <div style={{ fontWeight: 700, fontSize: 14 }}>Patrolman</div>
               <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>View and attend jobs on your run</div>
@@ -1570,14 +1570,14 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
             <ChevronRight size={16} color="var(--text-dim)" style={{ marginLeft: "auto" }} />
           </button>
         </div>
-      </div>
+      </LoginCardShell>
     );
   }
 
   return (
-    <div style={{ padding: "48px 32px", maxWidth: 340, margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}><Logo src={logoUrl} /></div>
-      <div style={{ fontSize: 15, fontWeight: 700, textAlign: "center", marginBottom: 20 }}>
+    <LoginCardShell maxWidth={360}>
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}><Logo src={logoUrl} /></div>
+      <div style={{ fontSize: 15, fontWeight: 800, textAlign: "center", marginBottom: 20 }}>
         {companyName} Alarm Response Dispatch
       </div>
       <button onClick={() => { setRole(null); setError(""); }} style={backBtn}>
@@ -1622,15 +1622,41 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
         </button>
       </div>
 
-      <div style={{ marginTop: 16, padding: 12, borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
+      <div style={{ marginTop: 16, padding: 12, borderRadius: 7, background: "var(--panel-alt)", border: "1px solid var(--border)", fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
         Forgotten your password? Ask your Manager to reset it from Manage logins — they'll send you a new one.
+      </div>
+    </LoginCardShell>
+  );
+}
+
+// Full-bleed navy backdrop behind the white sign-in card — same brand
+// language as the signed-in app's header (see TopBar) so the very first
+// screen anyone sees looks like part of the same app, not a plain white
+// form bolted on the front of it. `logoUrl`/`companyName` aren't threaded
+// through here since the logo itself already appears inside each card.
+function LoginCardShell({ maxWidth, children }) {
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, background: "linear-gradient(135deg, var(--navy) 0%, var(--navy-dim) 100%)" }}>
+      <div style={{ width: "100%", maxWidth, background: "var(--panel)", borderRadius: 14, padding: "36px 32px", boxShadow: "0 20px 50px rgba(0,0,0,0.25)" }}>
+        {children}
       </div>
     </div>
   );
 }
 
+// Light-amber icon tile for each role option — same accent-dim color the
+// rest of the app already uses for an active/selected state, so these
+// read as "accented" rather than introducing a new tint just for this.
+function RoleIcon({ Icon }) {
+  return (
+    <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--accent-dim)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+      <Icon size={18} color="var(--accent)" />
+    </div>
+  );
+}
+
 const roleCardStyle = {
-  display: "flex", alignItems: "center", gap: 12, padding: "14px 14px", borderRadius: 9,
+  display: "flex", alignItems: "center", gap: 12, padding: "14px 14px", borderRadius: 10,
   border: "1px solid var(--border)", background: "var(--panel)", cursor: "pointer", textAlign: "left",
   color: "var(--text)", font: "inherit",
 };
