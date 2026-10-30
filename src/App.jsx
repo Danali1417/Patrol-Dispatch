@@ -4,7 +4,7 @@ import {
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
   ShieldAlert, ArrowLeft, Building2, Settings, Lock, Eye, EyeOff,
   Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone, CalendarDays, Ban,
-  FileText, Download, Archive, Pencil, MessageSquare, Navigation, RefreshCw, Image as ImageIcon, CreditCard
+  FileText, Download, Archive, Pencil, MessageSquare, Navigation, RefreshCw, Image as ImageIcon, CreditCard, LayoutDashboard
 } from "lucide-react";
 import {
   STATUS_META, fmtTime, fmtDateTime, isoDateOnly, isoTimeOnly,
@@ -324,6 +324,18 @@ function nextWeekRosterGap(now, roster) {
   // would otherwise leave "overdue" false for the first 13 hours of the
   // very week it's supposed to flag as already underway.
   return { mondayLabel: fmt(targetMonday), sundayLabel: fmt(targetSunday), overdue: dateOnlyISO(now) >= targetMondayISO };
+}
+
+// Simple yes/no for the Dashboard's "This week's roster" stat card —
+// unlike nextWeekRosterGap above (which nags about next week once a
+// Friday deadline passes), this just checks the current calendar week has
+// at least one entry, with no deadline logic of its own.
+function thisWeekRosterUploaded(now, roster) {
+  const monday = mondayOfWeek(now);
+  const sunday = addDays(monday, 6);
+  const mondayISO = dateOnlyISO(monday);
+  const sundayISO = dateOnlyISO(sunday);
+  return roster.some((r) => r.date >= mondayISO && r.date <= sundayISO);
 }
 
 /* ---------------------------------------------------------------
@@ -1444,6 +1456,8 @@ function Shell({ children }) {
 "--text-dim": "#4B5563",
 "--accent": "#FFB020",
 "--accent-dim": "#FFF1D6",
+"--navy": "#0B2545",
+"--navy-dim": "#13335E",
 "--ok": "#15803D",
 "--warn": "#B45309",
 "--breach": "#DC2626",
@@ -1509,12 +1523,12 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
 
   if (!role) {
     return (
-      <div style={{ padding: "48px 32px", maxWidth: 380, margin: "0 auto" }}>
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}><Logo src={logoUrl} /></div>
-        <div style={{ fontSize: 16, fontWeight: 700, textAlign: "center", marginBottom: 4 }}>
+      <LoginCardShell maxWidth={400}>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}><Logo src={logoUrl} /></div>
+        <div style={{ fontSize: 16, fontWeight: 800, textAlign: "center", marginBottom: 4 }}>
           {companyName} Alarm Response Dispatch
         </div>
-        <div style={{ fontSize: 13, color: "var(--text-dim)", textAlign: "center", marginBottom: 32 }}>
+        <div style={{ fontSize: 13, color: "var(--text-dim)", textAlign: "center", marginBottom: 28 }}>
           Choose your sign-in
         </div>
         {logoutReason && (
@@ -1532,7 +1546,7 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
         )}
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <button onClick={() => setRole("manager")} style={roleCardStyle}>
-            <Users size={18} color="var(--accent)" />
+            <RoleIcon Icon={Users} />
             <div>
               <div style={{ fontWeight: 700, fontSize: 14 }}>Manager</div>
               <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>Create and manage logins</div>
@@ -1540,7 +1554,7 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
             <ChevronRight size={16} color="var(--text-dim)" style={{ marginLeft: "auto" }} />
           </button>
           <button onClick={() => setRole("operator")} style={roleCardStyle}>
-            <ShieldAlert size={18} color="var(--accent)" />
+            <RoleIcon Icon={ShieldAlert} />
             <div>
               <div style={{ fontWeight: 700, fontSize: 14 }}>Control Room</div>
               <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>Dispatch, review, and report</div>
@@ -1548,7 +1562,7 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
             <ChevronRight size={16} color="var(--text-dim)" style={{ marginLeft: "auto" }} />
           </button>
           <button onClick={() => setRole("patrolman")} style={roleCardStyle}>
-            <Radio size={18} color="var(--accent)" />
+            <RoleIcon Icon={Radio} />
             <div>
               <div style={{ fontWeight: 700, fontSize: 14 }}>Patrolman</div>
               <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>View and attend jobs on your run</div>
@@ -1556,14 +1570,14 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
             <ChevronRight size={16} color="var(--text-dim)" style={{ marginLeft: "auto" }} />
           </button>
         </div>
-      </div>
+      </LoginCardShell>
     );
   }
 
   return (
-    <div style={{ padding: "48px 32px", maxWidth: 340, margin: "0 auto" }}>
-      <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}><Logo src={logoUrl} /></div>
-      <div style={{ fontSize: 15, fontWeight: 700, textAlign: "center", marginBottom: 20 }}>
+    <LoginCardShell maxWidth={360}>
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}><Logo src={logoUrl} /></div>
+      <div style={{ fontSize: 15, fontWeight: 800, textAlign: "center", marginBottom: 20 }}>
         {companyName} Alarm Response Dispatch
       </div>
       <button onClick={() => { setRole(null); setError(""); }} style={backBtn}>
@@ -1608,15 +1622,41 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
         </button>
       </div>
 
-      <div style={{ marginTop: 16, padding: 12, borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
+      <div style={{ marginTop: 16, padding: 12, borderRadius: 7, background: "var(--panel-alt)", border: "1px solid var(--border)", fontSize: 11, color: "var(--text-dim)", lineHeight: 1.5 }}>
         Forgotten your password? Ask your Manager to reset it from Manage logins — they'll send you a new one.
+      </div>
+    </LoginCardShell>
+  );
+}
+
+// Full-bleed navy backdrop behind the white sign-in card — same brand
+// language as the signed-in app's header (see TopBar) so the very first
+// screen anyone sees looks like part of the same app, not a plain white
+// form bolted on the front of it. `logoUrl`/`companyName` aren't threaded
+// through here since the logo itself already appears inside each card.
+function LoginCardShell({ maxWidth, children }) {
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, background: "linear-gradient(135deg, var(--navy) 0%, var(--navy-dim) 100%)" }}>
+      <div style={{ width: "100%", maxWidth, background: "var(--panel)", borderRadius: 14, padding: "36px 32px", boxShadow: "0 20px 50px rgba(0,0,0,0.25)" }}>
+        {children}
       </div>
     </div>
   );
 }
 
+// Light-amber icon tile for each role option — same accent-dim color the
+// rest of the app already uses for an active/selected state, so these
+// read as "accented" rather than introducing a new tint just for this.
+function RoleIcon({ Icon }) {
+  return (
+    <div style={{ width: 36, height: 36, borderRadius: 8, background: "var(--accent-dim)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+      <Icon size={18} color="var(--accent)" />
+    </div>
+  );
+}
+
 const roleCardStyle = {
-  display: "flex", alignItems: "center", gap: 12, padding: "14px 14px", borderRadius: 9,
+  display: "flex", alignItems: "center", gap: 12, padding: "14px 14px", borderRadius: 10,
   border: "1px solid var(--border)", background: "var(--panel)", cursor: "pointer", textAlign: "left",
   color: "var(--text)", font: "inherit",
 };
@@ -1631,28 +1671,54 @@ function TopBar({ session, roster, onSignOut, onOpenSettings, now, logoUrl, comp
   // different run, show that instead so it matches what's on their jobs.
   const todaysRun = roster?.find((r) => r.date === rosterDateISO() && r.patrolmanLoginName === session.loginName)?.run || session.run;
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", rowGap: 10, padding: "12px 20px", borderBottom: "1px solid var(--border)", background: "var(--panel)" }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", rowGap: 10, padding: "12px 20px", background: "linear-gradient(135deg, var(--navy) 0%, var(--navy-dim) 100%)", color: "#fff" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
         <Logo src={logoUrl} />
         <div style={{ fontSize: 13.5, fontWeight: 700 }}>{companyName} Alarm Response Dispatch</div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", justifyContent: "flex-end" }}>
-        <div style={{ fontFamily: "var(--mono)", fontSize: 12.5, color: "var(--text-dim)" }}>
+        <div style={{ fontFamily: "var(--mono)", fontSize: 12.5, color: "#B9C4D6" }}>
           {new Date(now).toLocaleTimeString("en-AU", { hour12: false })}
         </div>
         <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 12.5, fontWeight: 600 }}>{session.displayName} <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>({session.loginName})</span></div>
-          <div style={{ fontSize: 10.5, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.5 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 600 }}>{session.displayName} <span style={{ color: "#B9C4D6", fontWeight: 400 }}>({session.loginName})</span></div>
+          <div style={{ fontSize: 10.5, color: "#B9C4D6", textTransform: "uppercase", letterSpacing: 0.5 }}>
             {session.role === "operator" ? "Control Room" : session.role === "manager" ? "Manager" : `Patrolman · ${todaysRun}`}
           </div>
         </div>
-        <button onClick={onOpenSettings} title="Change password" style={{ background: "none", border: "1px solid var(--border)", borderRadius: 6, padding: 7, cursor: "pointer", color: "var(--text-dim)" }}>
+        <button onClick={onOpenSettings} title="Change password" style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 6, padding: 7, cursor: "pointer", color: "#fff" }}>
           <Settings size={14} />
         </button>
-        <button onClick={onSignOut} title="Sign out" style={{ background: "none", border: "1px solid var(--border)", borderRadius: 6, padding: "7px 10px", cursor: "pointer", color: "var(--text-dim)", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600 }}>
+        <button onClick={onSignOut} title="Sign out" style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 6, padding: "7px 10px", cursor: "pointer", color: "#fff", display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 600 }}>
           <LogOut size={14} /> Sign out
         </button>
       </div>
+    </div>
+  );
+}
+
+// Horizontal replacement for the old left sidebar — used by both
+// OperatorView and ManagerView, each passing their own tab list, so the
+// two keep their separate tab sets but share one visual style (active tab
+// underlined in the accent color, same as the rest of the app's accent
+// usage) instead of each hand-rolling its own sidebar.
+function TopNav({ tabs, activeTab, onSelect }) {
+  return (
+    <div style={{ display: "flex", gap: 24, flexWrap: "wrap", padding: "0 20px", borderBottom: "1px solid var(--border)", background: "var(--panel)" }}>
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          onClick={() => onSelect(t.id)}
+          style={{
+            display: "flex", alignItems: "center", gap: 7, padding: "12px 2px", marginBottom: -1,
+            background: "none", border: "none", borderBottom: `2.5px solid ${activeTab === t.id ? "var(--accent)" : "transparent"}`,
+            cursor: "pointer", fontSize: 12.5, fontWeight: 600,
+            color: activeTab === t.id ? "var(--navy)" : "var(--text-dim)",
+          }}
+        >
+          <t.icon size={14} /> {t.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -1911,8 +1977,161 @@ function JobProgressBar({ job, compact }) {
    OPERATOR VIEW
 ---------------------------------------------------------------- */
 
+function dashboardGreeting(now) {
+  const hour = new Date(now).getHours();
+  return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+}
+
+// Landing tab for Control Room — a one-glance summary (today's volume,
+// what's breaching or unacknowledged right now, what's scheduled next)
+// so getting a read on the shift doesn't require opening the Dispatch
+// board and scanning every row first. Everything here is derived from
+// the same `jobs`/`roster` data the rest of OperatorView already has —
+// no separate fetch of its own.
+function OperatorDashboard({ session, jobs, roster, now, onOpenJob, onNavigate }) {
+  const nowDate = new Date(now);
+  const todayISO = dateOnlyISO(nowDate);
+  const firstName = (session.displayName || "").split(" ")[0] || session.displayName;
+
+  const activeJobs = jobs.filter((j) => BOARD_ACTIVE_KEYS.has(j.status));
+  const awaitingAck = jobs.filter((j) => j.status === "dispatched" && !j.acknowledgedAt);
+
+  const dispatchedToday = jobs.filter((j) => j.dispatchTime && dateOnlyISO(new Date(j.dispatchTime)) === todayISO && j.status !== "scheduled");
+  const closedToday = dispatchedToday.filter((j) => j.status === "emailed");
+
+  const respondedToday = dispatchedToday.filter((j) => isResponseJob(j) && j.onsiteTime);
+  const avgResponseMin = respondedToday.length
+    ? Math.round(respondedToday.reduce((sum, j) => sum + (new Date(j.onsiteTime) - new Date(j.dispatchTime)) / 60000, 0) / respondedToday.length)
+    : null;
+
+  const rosterUploaded = thisWeekRosterUploaded(nowDate, roster || []);
+
+  // Breaching Response jobs first (most urgent), then anything still
+  // unacknowledged — capped so a very bad morning doesn't turn this into
+  // another full board to scroll through; the Dispatch board itself is
+  // still there for that.
+  const needsAttention = jobs
+    .filter((j) => j.status === "dispatched" && ((isResponseJob(j) && jobTiming(j, now).level === "breach") || !j.acknowledgedAt))
+    .sort((a, b) => {
+      const aBreach = isResponseJob(a) && jobTiming(a, now).level === "breach";
+      const bBreach = isResponseJob(b) && jobTiming(b, now).level === "breach";
+      if (aBreach !== bBreach) return aBreach ? -1 : 1;
+      return new Date(a.dispatchTime) - new Date(b.dispatchTime);
+    })
+    .slice(0, 6);
+
+  const scheduledToday = jobs
+    .filter((j) => j.status === "scheduled" && j.scheduledFor && dateOnlyISO(new Date(j.scheduledFor)) === todayISO)
+    .sort((a, b) => new Date(a.scheduledFor) - new Date(b.scheduledFor));
+
+  const pendingEmails = jobs.filter((j) => j.status === "reviewed");
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 14, marginBottom: 20 }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 800 }}>{dashboardGreeting(now)}, {firstName}</div>
+          <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginTop: 3 }}>
+            {nowDate.toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "numeric" })}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={() => onNavigate("new")} style={primaryBtn}><Send size={13} /> New job</button>
+          <button onClick={() => onNavigate("scheduled")} style={secondaryBtn}>Scheduled jobs</button>
+          <button onClick={() => onNavigate("logs")} style={secondaryBtn}>Reports</button>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14, marginBottom: 18 }}>
+        <div style={{ borderRadius: 10, padding: "16px 18px", background: "linear-gradient(135deg, var(--navy) 0%, var(--navy-dim) 100%)", color: "#fff" }}>
+          <div style={{ fontSize: 11.5, fontWeight: 600, opacity: 0.85 }}>Active jobs right now</div>
+          <div style={{ fontSize: 24, fontWeight: 800, marginTop: 6 }}>{activeJobs.length}</div>
+          <div style={{ fontSize: 11, opacity: 0.75, marginTop: 4 }}>{awaitingAck.length} awaiting acknowledgement</div>
+        </div>
+        <div style={{ borderRadius: 10, padding: "16px 18px", border: "1px solid var(--border)", background: "var(--panel)" }}>
+          <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-dim)" }}>Dispatched today</div>
+          <div style={{ fontSize: 24, fontWeight: 800, marginTop: 6 }}>{dispatchedToday.length}</div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 4 }}>{closedToday.length} closed out</div>
+        </div>
+        <div style={{ borderRadius: 10, padding: "16px 18px", border: "1px solid var(--border)", background: "var(--panel)" }}>
+          <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-dim)" }}>Avg response time</div>
+          <div style={{ fontSize: 24, fontWeight: 800, marginTop: 6 }}>{avgResponseMin !== null ? `${avgResponseMin}m` : "—"}</div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 4 }}>{respondedToday.length} response job{respondedToday.length !== 1 ? "s" : ""} today</div>
+        </div>
+        <div style={{ borderRadius: 10, padding: "16px 18px", border: "1px solid var(--border)", background: "var(--panel)" }}>
+          <div style={{ fontSize: 11.5, fontWeight: 600, color: "var(--text-dim)" }}>This week's roster</div>
+          <div style={{ marginTop: 8 }}>
+            <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 12, fontSize: 10.5, fontWeight: 700, background: rosterUploaded ? "#DCFCE7" : "#FEF3C7", color: rosterUploaded ? "#166534" : "#92400E" }}>
+              {rosterUploaded ? "Uploaded" : "Not uploaded"}
+            </span>
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 6 }}><a href="#" onClick={(e) => { e.preventDefault(); onNavigate("roster"); }} style={{ color: "var(--info)", textDecoration: "none", fontWeight: 600 }}>Open roster →</a></div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16, alignItems: "start" }}>
+        <div style={{ borderRadius: 10, border: "1px solid var(--border)", background: "var(--panel)", padding: "16px 18px" }}>
+          <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 10 }}>Needs attention</div>
+          {needsAttention.length === 0 ? (
+            <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>Nothing pending — every active job is on track.</div>
+          ) : (
+            <>
+              {needsAttention.map((j) => {
+                const breach = isResponseJob(j) && jobTiming(j, now).level === "breach";
+                return (
+                  <div key={j.id} style={{ padding: "10px 0", borderBottom: "1px solid #F0F2F5" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12.5 }}>
+                      <span>
+                        <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", marginRight: 7, background: breach ? "var(--breach)" : "var(--warn)" }} />
+                        <b>Job #{j.jobNumber}</b> — {j.siteName}
+                      </span>
+                      <a href="#" onClick={(e) => { e.preventDefault(); onOpenJob(j.id); }} style={{ color: "var(--info)", textDecoration: "none", fontWeight: 600, fontSize: 12.5 }}>Open →</a>
+                    </div>
+                    <div style={{ display: "flex", gap: 7, marginTop: 7, flexWrap: "wrap", alignItems: "center" }}>
+                      <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--text-dim)", border: "1px solid var(--border)", padding: "3px 8px", borderRadius: 20 }}>Dispatched {fmtTime(j.dispatchTime)}</span>
+                      <JobUrgencyChip job={j} now={now} />
+                      <EtaChip job={j} now={now} />
+                      {!j.acknowledgedAt && <span style={{ fontSize: 11, fontWeight: 700, color: "var(--text-dim)" }}>Not yet acknowledged</span>}
+                    </div>
+                  </div>
+                );
+              })}
+              <div style={{ marginTop: 10, fontSize: 11.5, color: "var(--text-dim)" }}>{needsAttention.length} item{needsAttention.length !== 1 ? "s" : ""} need a look — everything else is on track.</div>
+            </>
+          )}
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ borderRadius: 10, border: "1px solid var(--border)", background: "var(--panel)", padding: "14px 16px" }}>
+            <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Scheduled today</div>
+            {scheduledToday.length === 0 ? (
+              <div style={{ fontSize: 12, color: "var(--text-dim)" }}>Nothing scheduled for the rest of today.</div>
+            ) : scheduledToday.map((j) => (
+              <div key={j.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "6px 0", borderBottom: "1px solid #F0F2F5" }}>
+                <span>{jobTypeLabel(j.jobType)} — {j.siteName}</span>
+                <b>{fmtTime(j.scheduledFor)}</b>
+              </div>
+            ))}
+          </div>
+          <div style={{ borderRadius: 10, border: "1px solid var(--border)", background: "var(--panel)", padding: "14px 16px" }}>
+            <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 8 }}>Pending client emails</div>
+            {pendingEmails.length === 0 ? (
+              <div style={{ fontSize: 12, color: "var(--text-dim)" }}>None — all reviewed jobs have been sent.</div>
+            ) : pendingEmails.slice(0, 5).map((j) => (
+              <div key={j.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "6px 0", borderBottom: "1px solid #F0F2F5" }}>
+                <span>Job #{j.jobNumber} — {j.siteName}</span>
+                <a href="#" onClick={(e) => { e.preventDefault(); onOpenJob(j.id); }} style={{ color: "var(--info)", textDecoration: "none", fontWeight: 600 }}>Open →</a>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function OperatorView({ session, jobs, accounts, sites, persistSites, zones, roster, persistRoster, persist, now, companyName, logoUrl, monitoringCompanies, bureaus }) {
-  const [tab, setTab] = useState("board");
+  const [tab, setTab] = useState("dashboard");
   const [selectedId, setSelectedId] = useState(null);
   // Jobs closed/cancelled 48h+ ago live off the board (see jobArchive.js).
   // Board fetches archived matches itself as the user searches (never all
@@ -1926,10 +2145,18 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
   }
   const patrolmen = accounts.filter((a) => a.role === "patrolman");
 
+  function goTab(id) {
+    setTab(id);
+    selectJob(null);
+  }
+
   return (
-    <div style={{ display: "flex", minHeight: 560 }}>
-      <div style={{ width: 168, borderRight: "1px solid var(--border)", background: "var(--panel)", padding: "16px 10px" }}>
-        {[
+    <div>
+      <TopNav
+        activeTab={tab}
+        onSelect={goTab}
+        tabs={[
+          { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
           { id: "board", label: "Dispatch board", icon: ShieldAlert },
           { id: "new", label: "New job", icon: Send },
           { id: "scheduled", label: "Scheduled jobs", icon: Clock },
@@ -1937,14 +2164,11 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
           { id: "closed", label: "Closed jobs", icon: CheckCircle2 },
           { id: "roster", label: "Roster", icon: CalendarDays },
           { id: "logs", label: "Logs & analysis", icon: BarChart3 },
-        ].map((t) => (
-          <button key={t.id} onClick={() => { setTab(t.id); selectJob(null); }} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", marginBottom: 4, borderRadius: 7, border: "none", cursor: "pointer", textAlign: "left", fontSize: 12.5, fontWeight: 600, background: tab === t.id ? "var(--accent-dim)" : "transparent", color: tab === t.id ? "var(--accent)" : "var(--text-dim)" }}>
-            <t.icon size={15} /> {t.label}
-          </button>
-        ))}
-      </div>
+        ]}
+      />
 
-      <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
+      <div style={{ padding: 20, maxWidth: 1180, margin: "0 auto" }}>
+        {tab === "dashboard" && <OperatorDashboard session={session} jobs={jobs} roster={roster} now={now} onOpenJob={(id) => { setTab("board"); selectJob(id); }} onNavigate={goTab} />}
         {tab === "board" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} roster={roster} />}
         {tab === "scheduled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="scheduled" roster={roster} />}
         {tab === "cancelled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="cancelled" roster={roster} />}
@@ -5599,27 +5823,27 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
   }
 
   return (
-    <div style={{ display: "flex", minHeight: 560 }}>
-      <div style={{ width: 168, borderRight: "1px solid var(--border)", background: "var(--panel)", padding: "16px 10px", display: "flex", flexDirection: "column" }}>
-        {[
+    <div>
+      <TopNav
+        activeTab={tab}
+        onSelect={setTab}
+        tabs={[
           { id: "accounts", label: "Manage logins", icon: Users },
           { id: "sites", label: "Sites & runs", icon: MapPin },
           { id: "roster", label: "Roster", icon: CalendarDays },
           { id: "phrases", label: "Standard Phrases", icon: FileText },
           { id: "clients", label: "Monitoring & Bureau", icon: Building2 },
           { id: "logs", label: "Logs & analysis", icon: BarChart3 },
-        ].map((t) => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", marginBottom: 4, borderRadius: 7, border: "none", cursor: "pointer", textAlign: "left", fontSize: 12.5, fontWeight: 600, background: tab === t.id ? "var(--accent-dim)" : "transparent", color: tab === t.id ? "var(--accent)" : "var(--text-dim)" }}>
-            <t.icon size={15} /> {t.label}
-          </button>
-        ))}
+        ]}
+      />
+      <div style={{ padding: 20, maxWidth: 1180, margin: "0 auto" }}>
         {isDan && (
-          <button onClick={handleResetJobs} title="Delete every job so the app starts fresh — visible only to this login" style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "9px 10px", marginTop: "auto", borderRadius: 7, border: "1px solid var(--breach)", cursor: "pointer", textAlign: "left", fontSize: 12.5, fontWeight: 600, background: "transparent", color: "var(--breach)" }}>
-            <Trash2 size={15} /> Reset test data
-          </button>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+            <button onClick={handleResetJobs} title="Delete every job so the app starts fresh — visible only to this login" style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 12px", borderRadius: 7, border: "1px solid var(--breach)", cursor: "pointer", fontSize: 12, fontWeight: 600, background: "transparent", color: "var(--breach)" }}>
+              <Trash2 size={14} /> Reset test data
+            </button>
+          </div>
         )}
-      </div>
-      <div style={{ flex: 1, padding: 20, overflowY: "auto" }}>
         {tab === "accounts" && <AccountsManager accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />}
         {tab === "phrases" && <OutcomePhrasesEditor outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} />}
         {tab === "clients" && <ClientListsManager monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} />}
