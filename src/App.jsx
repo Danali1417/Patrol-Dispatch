@@ -2756,7 +2756,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
             key={t.id}
             type="button"
             onClick={() => setJobType(t.id)}
-            style={{ padding: "7px 14px", borderRadius: 20, border: `1px solid ${jobType === t.id ? "var(--accent)" : "var(--border)"}`, background: jobType === t.id ? "var(--accent-dim)" : "var(--panel)", color: jobType === t.id ? "var(--accent)" : "var(--text-dim)", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}
+            style={{ padding: "7px 14px", borderRadius: 20, border: `1px solid ${jobType === t.id ? "var(--navy)" : "var(--border)"}`, background: jobType === t.id ? "var(--navy)" : "var(--panel)", color: jobType === t.id ? "#fff" : "var(--text-dim)", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}
           >
             {t.label}
           </button>
@@ -5107,7 +5107,7 @@ function Reports({ jobs, companyName, logoUrl, roster, responseRate, bureauRates
           <button
             key={t}
             onClick={() => setReportType(t)}
-            style={{ padding: "8px 16px", borderRadius: 7, cursor: "pointer", border: `1px solid ${reportType === t ? "var(--accent)" : "var(--border)"}`, background: reportType === t ? "var(--accent-dim)" : "var(--panel)", color: reportType === t ? "var(--accent)" : "var(--text-dim)", fontWeight: 600, fontSize: 12.5, textTransform: "capitalize" }}
+            style={{ padding: "8px 16px", borderRadius: 7, cursor: "pointer", border: `1px solid ${reportType === t ? "var(--navy)" : "var(--border)"}`, background: reportType === t ? "var(--navy)" : "var(--panel)", color: reportType === t ? "#fff" : "var(--text-dim)", fontWeight: 600, fontSize: 12.5, textTransform: "capitalize" }}
           >
             {t} report
           </button>
@@ -6452,7 +6452,7 @@ function AccountsManager({ accounts, setAccounts, zones, session, logoUrl, persi
       <div style={{ maxWidth: 560, marginBottom: 30 }}>
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
           {["patrolman", "operator", "manager"].map((r) => (
-            <button key={r} onClick={() => setRole(r)} style={{ flex: 1, padding: "8px 0", borderRadius: 7, cursor: "pointer", border: `1px solid ${role === r ? "var(--accent)" : "var(--border)"}`, background: role === r ? "var(--accent-dim)" : "var(--panel)", color: role === r ? "var(--accent)" : "var(--text-dim)", fontWeight: 600, fontSize: 12, textTransform: "capitalize" }}>
+            <button key={r} onClick={() => setRole(r)} style={{ flex: 1, padding: "8px 0", borderRadius: 7, cursor: "pointer", border: `1px solid ${role === r ? "var(--navy)" : "var(--border)"}`, background: role === r ? "var(--navy)" : "var(--panel)", color: role === r ? "#fff" : "var(--text-dim)", fontWeight: 600, fontSize: 12, textTransform: "capitalize" }}>
               {r === "operator" ? "Control Room" : r}
             </button>
           ))}
