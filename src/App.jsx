@@ -1879,7 +1879,7 @@ function EtaChip({ job, now }) {
 function JobTypeBadge({ jobType }) {
   if (!jobType || jobType === "response") return null;
   return (
-    <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: "var(--accent)", border: "1px solid var(--accent)55", background: "var(--accent-dim)", padding: "3px 8px", borderRadius: 20, display: "inline-flex", alignItems: "center", gap: 4 }}>
+    <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4, textTransform: "uppercase", color: "var(--navy)", border: "1px solid var(--navy)55", background: "#E8EDF5", padding: "3px 8px", borderRadius: 20, display: "inline-flex", alignItems: "center", gap: 4 }}>
       <KeyRound size={11} /> {jobTypeLabel(jobType)}
     </span>
   );
