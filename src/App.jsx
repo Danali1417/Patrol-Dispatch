@@ -1718,7 +1718,7 @@ function TopBar({ session, roster, onSignOut, onOpenSettings, now, logoUrl, comp
 // usage) instead of each hand-rolling its own sidebar.
 function TopNav({ tabs, activeTab, onSelect }) {
   return (
-    <div style={{ display: "flex", gap: 24, flexWrap: "wrap", padding: "0 20px", borderBottom: "1px solid var(--border)", background: "var(--panel)" }}>
+    <div style={{ ...fullBleedStyle, display: "flex", gap: 24, flexWrap: "wrap", padding: "0 20px", background: "var(--navy)" }}>
       {tabs.map((t) => (
         <button
           key={t.id}
@@ -1727,7 +1727,7 @@ function TopNav({ tabs, activeTab, onSelect }) {
             display: "flex", alignItems: "center", gap: 7, padding: "12px 2px", marginBottom: -1,
             background: "none", border: "none", borderBottom: `2.5px solid ${activeTab === t.id ? "var(--accent)" : "transparent"}`,
             cursor: "pointer", fontSize: 12.5, fontWeight: 600,
-            color: activeTab === t.id ? "var(--navy)" : "var(--text-dim)",
+            color: activeTab === t.id ? "#fff" : "#9FB0CB",
           }}
         >
           <t.icon size={14} /> {t.label}
