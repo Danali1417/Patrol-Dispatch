@@ -5453,9 +5453,22 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
   const [photos, setPhotos] = useState(initialDraft?.photos ?? []);
   const [busy, setBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  // A failed submit also shows a toast, but that vanishes on its own after
+  // a couple of seconds — easy to miss on a phone in the field, which is
+  // exactly how a patrolman can walk away believing a submission went
+  // through when it never left the device. This banner stays on screen
+  // until the next submit attempt (success or failure) replaces it.
+  const [submitError, setSubmitError] = useState(null);
   const [showEtaModal, setShowEtaModal] = useState(false);
   const cameraFileRef = useRef(null);
   const galleryFileRef = useRef(null);
+  // Original-photo uploads now run in the background (see
+  // addPhotosFromFiles) instead of blocking photo capture — this is what
+  // lets submit() still wait for them specifically, rather than racing
+  // past one that's still in flight and permanently submitting that photo
+  // without its "View original" link (nothing re-patches a photo after
+  // it's already been saved to the server).
+  const pendingUploadsRef = useRef(new Map());
   const showToast = useToast();
   const isOnsite = !!job.onsiteTime;
   const isRandomPatrol = job.jobType === "randomPatrol";
@@ -5503,6 +5516,45 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
     });
   }
 
+  // Builds the compressed preview for each file (fast — local canvas work,
+  // no network) and adds it to `photos` immediately, then kicks off each
+  // file's full-resolution upload to Storage in the background rather than
+  // waiting on it — that upload is a real network round trip (can take
+  // several seconds on a weak connection, the exact scenario field
+  // patrolmen hit) and is purely best-effort to begin with (see
+  // uploadOriginalPhoto's own comment: a failed original upload only
+  // costs the "View original" link, never the attached photo itself). The
+  // old code awaited both together, so a slow upload made every single
+  // photo capture feel stuck even though nothing about it actually needed
+  // waiting on. `localId` is a client-only correlation key so the
+  // background upload can patch originalPath onto the right photo once it
+  // resolves, however `photos` has changed by then — stripped back off
+  // before anything is actually submitted (see submit() below).
+  async function addPhotosFromFiles(files, buildPhoto) {
+    const toAdd = files.slice(0, MAX_ATTENDANCE_PHOTOS - photos.length);
+    if (!toAdd.length) return;
+    setBusy(true);
+    const entries = [];
+    for (const f of toAdd) {
+      try {
+        const photo = await buildPhoto(f);
+        entries.push({ photo: { ...photo, localId: `${Date.now()}-${Math.random().toString(36).slice(2)}` }, file: f });
+      } catch (err) { /* skip bad file */ }
+    }
+    setPhotos((p) => [...p, ...entries.map((e) => e.photo)]);
+    setBusy(false);
+    entries.forEach(({ photo, file }) => {
+      const uploadPromise = uploadOriginalPhoto(job.id, file).then((originalPath) => {
+        if (originalPath) {
+          setPhotos((p) => p.map((ph) => (ph.localId === photo.localId ? { ...ph, originalPath } : ph)));
+        }
+        return originalPath;
+      });
+      pendingUploadsRef.current.set(photo.localId, uploadPromise);
+      uploadPromise.finally(() => pendingUploadsRef.current.delete(photo.localId));
+    });
+  }
+
   // capture="environment" on this input forces the camera app open
   // directly, so anything arriving through it is a fresh, right-now photo
   // — watermarked with the current time and location to prove it.
@@ -5511,23 +5563,7 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
     setBusy(true);
     const location = await getCurrentLocation();
     const locationName = location ? await reverseGeocode(location.lat, location.lon) : null;
-    const results = [];
-    for (const f of files.slice(0, MAX_ATTENDANCE_PHOTOS - photos.length)) {
-      try {
-        // The untouched camera file is uploaded to Storage in parallel with
-        // building the compressed preview — best-effort (see
-        // uploadOriginalPhoto's own comment): a failed original upload just
-        // means no "view original" link on this one photo, never a failed
-        // capture.
-        const [photo, originalPath] = await Promise.all([
-          watermarkPhoto(f, job.jobNumber, location, locationName),
-          uploadOriginalPhoto(job.id, f),
-        ]);
-        results.push(originalPath ? { ...photo, originalPath } : photo);
-      } catch (err) { /* skip bad file */ }
-    }
-    setPhotos((p) => [...p, ...results]);
-    setBusy(false);
+    await addPhotosFromFiles(files, (f) => watermarkPhoto(f, job.jobNumber, location, locationName));
     e.target.value = "";
   }
 
@@ -5537,16 +5573,7 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
   // GPS position, which would misrepresent it as taken right now.
   async function handleGalleryFiles(e) {
     const files = Array.from(e.target.files || []);
-    setBusy(true);
-    const results = [];
-    for (const f of files.slice(0, MAX_ATTENDANCE_PHOTOS - photos.length)) {
-      try {
-        const [photo, originalPath] = await Promise.all([resizePhotoPlain(f), uploadOriginalPhoto(job.id, f)]);
-        results.push(originalPath ? { ...photo, originalPath } : photo);
-      } catch (err) { /* skip bad file */ }
-    }
-    setPhotos((p) => [...p, ...results]);
-    setBusy(false);
+    await addPhotosFromFiles(files, resizePhotoPlain);
     e.target.value = "";
   }
 
@@ -5603,6 +5630,7 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
 
   async function submit() {
     setActionBusy(true);
+    setSubmitError(null);
     try {
       // A resubmission after "needs further action" isn't a new site visit
       // — it's a correction to what was already submitted — so it must not
@@ -5611,11 +5639,25 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
       // record everything else (SLA reporting, the PDF) relies on.
       const location = needsAction ? null : await getCurrentLocation();
       const locationName = location ? await reverseGeocode(location.lat, location.lon) : null;
+      // A photo captured just before tapping submit may still have its
+      // full-resolution original uploading in the background (see
+      // addPhotosFromFiles) — waited out here and merged in directly from
+      // the resolved promise rather than trusting `photos` state to have
+      // caught up by itself, since nothing revisits this job's photos
+      // once persistJobPhotos below has run to patch in one that resolves
+      // a moment too late.
+      const pending = photos.filter((p) => pendingUploadsRef.current.has(p.localId));
+      const resolvedPaths = await Promise.all(pending.map((p) => pendingUploadsRef.current.get(p.localId)));
+      const resolvedById = new Map(pending.map((p, i) => [p.localId, resolvedPaths[i]]));
+      const photosToSave = photos.map(({ localId, originalPath, ...p }) => {
+        const resolved = resolvedById.has(localId) ? resolvedById.get(localId) : originalPath;
+        return resolved ? { ...p, originalPath: resolved } : p;
+      });
       // Photos are saved to their own key first (see jobPhotos.js) — the job
       // record itself only carries the count, so the board's poll never has
       // to move photo bytes. Sequenced so a job is never marked submitted
       // with a photoCount pointing at photos that failed to save.
-      if (photos.length > 0) await persistJobPhotos(job.id, photos);
+      if (photosToSave.length > 0) await persistJobPhotos(job.id, photosToSave);
       const updated = jobs.map((j) => (j.id === job.id ? {
         ...j,
         status: "submitted",
@@ -5644,6 +5686,7 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
       // screen costs nothing; leaving it would make the patrolman think
       // they need to redo the work they've already done.
       showToast("Couldn't save — check your connection and try again.", "error");
+      setSubmitError("Not sent yet — your answer and photos are saved on this phone. Check your signal and tap the button again.");
     } finally {
       setActionBusy(false);
     }
@@ -5768,6 +5811,11 @@ function JobDetailPatrolman({ job, jobs, session, persist, outcomePhrases, now, 
             <input ref={galleryFileRef} type="file" accept="image/*" multiple hidden onChange={handleGalleryFiles} />
           </div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 6 }}>Photos taken with "Take photo" are timestamped and geo-tagged automatically. Photos added from the gallery are not.</div>
+          {submitError && (
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 7, marginTop: 12, padding: 12, borderRadius: 8, border: "1px solid var(--breach)", background: "#FEF2F2", color: "#B91C1C", fontSize: 12.5, fontWeight: 600 }}>
+              <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} /> {submitError}
+            </div>
+          )}
           <button disabled={!outcome.trim() || actionBusy} onClick={submit} style={{ ...primaryBtn, width: "100%", marginTop: 16, justifyContent: "center", opacity: outcome.trim() && !actionBusy ? 1 : 0.4 }}>
             <Send size={14} /> {needsAction ? (actionBusy ? "Submitting…" : "Resubmit for review") : (actionBusy ? "Getting your location…" : "Mark offsite & submit")}
           </button>
