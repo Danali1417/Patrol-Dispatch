@@ -198,10 +198,12 @@ export function reportRow(job, reportType, timeZone, roster) {
 // never responded to, so it doesn't inflate that figure. `cancelled` is
 // tracked alongside it (same patrolman/run) rather than dropped entirely,
 // so a report can still show how many of a patrolman's assigned jobs got
-// called off without counting them as attended.
+// called off without counting them as attended. A provider-assigned job
+// (see providerSummary below) is excluded here — it gets its own separate
+// breakdown instead of being lumped into "Patrolman".
 export function patrolmanRunSummary(filteredJobs, roster, timeZone) {
   const byKey = {};
-  filteredJobs.forEach((j) => {
+  filteredJobs.filter((j) => j.assigneeRole !== "provider").forEach((j) => {
     const { run, patrolmanName: patrolman } = resolveJobRoster(j, roster, timeZone);
     const key = `${patrolman}||${run}`;
     byKey[key] = byKey[key] || { patrolman, run, count: 0, cancelled: 0 };
@@ -209,6 +211,22 @@ export function patrolmanRunSummary(filteredJobs, roster, timeZone) {
     else byKey[key].count++;
   });
   return Object.values(byKey).sort((a, b) => b.count - a.count || a.patrolman.localeCompare(b.patrolman));
+}
+
+// Same shape and counting rules as patrolmanRunSummary, but for jobs
+// dispatched to an external provider company instead of one of our own
+// patrolmen — kept as its own breakdown (not a "Run" column, since
+// providers aren't on a run) so a report can show how many jobs went to
+// each provider without mixing them into the patrolman figures.
+export function providerSummary(filteredJobs) {
+  const byProvider = {};
+  filteredJobs.filter((j) => j.assigneeRole === "provider").forEach((j) => {
+    const provider = j.assigneeName || "Unassigned";
+    byProvider[provider] = byProvider[provider] || { provider, count: 0, cancelled: 0 };
+    if (j.status === "cancelled") byProvider[provider].cancelled++;
+    else byProvider[provider].count++;
+  });
+  return Object.values(byProvider).sort((a, b) => b.count - a.count || a.provider.localeCompare(b.provider));
 }
 
 // One row per Control Room operator who dispatched, finalized or

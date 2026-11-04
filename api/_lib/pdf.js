@@ -13,7 +13,7 @@ const SUMMARY_TABLE_OPTS = {
   tableWidth: 300,
 };
 
-export function buildReportPdf({ reportType, companyName, columns, rows, summary, operators, cancelledCount, typeCounts, windowLabel, generatedLabel }) {
+export function buildReportPdf({ reportType, companyName, columns, rows, summary, providers, operators, cancelledCount, typeCounts, windowLabel, generatedLabel }) {
   const doc = new jsPDF({ orientation: reportType === "detailed" ? "landscape" : "portrait", unit: "pt" });
   const name = companyName || "Ausgroup";
 
@@ -60,6 +60,22 @@ export function buildReportPdf({ reportType, companyName, columns, rows, summary
     foot: [["Total", "", String(totalSummaryCancelled), String(totalResponses)]],
     ...SUMMARY_TABLE_OPTS,
   });
+
+  if (providers && providers.length) {
+    const totalProviderJobs = providers.reduce((sum, p) => sum + p.count, 0);
+    const totalProviderCancelled = providers.reduce((sum, p) => sum + (p.cancelled || 0), 0);
+    const providerStartY = (doc.lastAutoTable?.finalY || summaryStartY) + 26;
+    doc.setFontSize(11);
+    doc.setTextColor(20);
+    doc.text("Provider job summary", 40, providerStartY);
+    autoTable(doc, {
+      startY: providerStartY + 8,
+      head: [["Provider", "Cancelled", "Jobs"]],
+      body: providers.map((p) => [p.provider, String(p.cancelled || 0), String(p.count)]),
+      foot: [["Total", String(totalProviderCancelled), String(totalProviderJobs)]],
+      ...SUMMARY_TABLE_OPTS,
+    });
+  }
 
   const totalDispatched = (operators || []).reduce((sum, o) => sum + o.dispatched, 0);
   const totalFinalized = (operators || []).reduce((sum, o) => sum + o.finalized, 0);
