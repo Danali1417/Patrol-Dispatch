@@ -4,7 +4,7 @@ import {
   BarChart3, MapPin, KeyRound, Radio, ChevronRight, X, Copy, Send,
   ShieldAlert, ArrowLeft, Building2, Settings, Lock, Eye, EyeOff,
   Users, UserPlus, Power, Trash2, RotateCcw, Upload, Phone, CalendarDays, Ban,
-  FileText, Download, Archive, Pencil, MessageSquare, Navigation, RefreshCw, Image as ImageIcon, CreditCard, LayoutDashboard
+  FileText, Download, Archive, Pencil, MessageSquare, Navigation, RefreshCw, Image as ImageIcon, CreditCard, LayoutDashboard, Truck
 } from "lucide-react";
 import {
   STATUS_META, fmtTime, fmtDateTime, isoDateOnly, isoTimeOnly,
@@ -1326,7 +1326,7 @@ export default function SentrylinePrototype() {
   // 15s clock tick (`now`) the same way everything else time-sensitive
   // in this component already is, so it appears/disappears on its own
   // without needing a refresh.
-  const rosterGap = session && session.role !== "patrolman" ? nextWeekRosterGap(new Date(now), roster) : null;
+  const rosterGap = session && session.role !== "patrolman" && session.role !== "provider" ? nextWeekRosterGap(new Date(now), roster) : null;
 
   if (!session) {
     return (
@@ -1365,6 +1365,8 @@ export default function SentrylinePrototype() {
             <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
           ) : session.role === "operator" ? (
             <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} logoUrl={logoUrl} monitoringCompanies={monitoringCompanies} bureaus={bureaus} />
+          ) : session.role === "provider" ? (
+            <ProviderView session={session} jobs={jobs} persist={persistJobs} now={now} />
           ) : (
             <PatrolmanView session={session} roster={roster} jobs={jobs} persist={persistJobs} outcomePhrases={outcomePhrases} now={now} />
           )}
@@ -1583,6 +1585,14 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
             </div>
             <ChevronRight size={16} color="var(--text-dim)" style={{ marginLeft: "auto" }} />
           </button>
+          <button onClick={() => setRole("provider")} style={roleCardStyle}>
+            <RoleIcon Icon={Truck} />
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>Provider</div>
+              <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>View jobs dispatched to your company</div>
+            </div>
+            <ChevronRight size={16} color="var(--text-dim)" style={{ marginLeft: "auto" }} />
+          </button>
         </div>
       </LoginCardShell>
     );
@@ -1598,7 +1608,7 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
         <ArrowLeft size={13} /> Change sign-in type
       </button>
       <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 16, marginTop: 8 }}>
-        {role === "operator" ? "Control Room sign-in" : role === "manager" ? "Manager sign-in" : "Patrolman sign-in"}
+        {role === "operator" ? "Control Room sign-in" : role === "manager" ? "Manager sign-in" : role === "provider" ? "Provider sign-in" : "Patrolman sign-in"}
       </div>
 
       <div>
@@ -1609,7 +1619,7 @@ function Login({ logoutReason, logoUrl, companyName, onLogin }) {
             name="loginName"
             defaultValue=""
             onKeyDown={handleKeyDown}
-            placeholder={role === "operator" ? "e.g. ControlRoom1" : role === "manager" ? "e.g. Manager1" : "e.g. T13"}
+            placeholder={role === "operator" ? "e.g. ControlRoom1" : role === "manager" ? "e.g. Manager1" : role === "provider" ? "e.g. Provider1" : "e.g. T13"}
             style={selectStyle}
           />
         </Field>
@@ -1697,7 +1707,7 @@ function TopBar({ session, roster, onSignOut, onOpenSettings, now, logoUrl, comp
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 12.5, fontWeight: 600 }}>{session.displayName} <span style={{ color: "#B9C4D6", fontWeight: 400 }}>({session.loginName})</span></div>
           <div style={{ fontSize: 10.5, color: "#B9C4D6", textTransform: "uppercase", letterSpacing: 0.5 }}>
-            {session.role === "operator" ? "Control Room" : session.role === "manager" ? "Manager" : `Patrolman · ${todaysRun}`}
+            {session.role === "operator" ? "Control Room" : session.role === "manager" ? "Manager" : session.role === "provider" ? "Provider" : `Patrolman · ${todaysRun}`}
           </div>
         </div>
         <button onClick={onOpenSettings} title="Change password" style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.35)", borderRadius: 6, padding: 7, cursor: "pointer", color: "#fff" }}>
@@ -2158,6 +2168,7 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
     setSelectedArchivedJob(archivedJob || null);
   }
   const patrolmen = accounts.filter((a) => a.role === "patrolman");
+  const providers = accounts.filter((a) => a.role === "provider");
 
   function goTab(id) {
     setTab(id);
@@ -2188,9 +2199,9 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
         {tab === "cancelled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="cancelled" roster={roster} />}
         {tab === "closed" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="emailed" roster={roster} />}
         {(tab === "board" || tab === "scheduled" || tab === "cancelled" || tab === "closed") && selected && (
-          <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} roster={roster} persist={persist} now={now} session={session} companyName={companyName} logoUrl={logoUrl} onBack={() => selectJob(null)} />
+          <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} providers={providers} roster={roster} persist={persist} now={now} session={session} companyName={companyName} logoUrl={logoUrl} onBack={() => selectJob(null)} />
         )}
-        {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} roster={roster} session={session} persist={persist} monitoringCompanies={monitoringCompanies} bureaus={bureaus} onCreated={(id) => { setTab("board"); selectJob(id); }} />}
+        {tab === "new" && <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} providers={providers} roster={roster} session={session} persist={persist} monitoringCompanies={monitoringCompanies} bureaus={bureaus} onCreated={(id) => { setTab("board"); selectJob(id); }} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} />}
         {tab === "logs" && <Logs jobs={jobs.filter((j) => j.status !== "scheduled")} now={now} role="operator" />}
       </div>
@@ -2420,7 +2431,7 @@ function compareByRunThenName(a, b) {
 
 /* ---------------------- New job form ---------------------- */
 
-function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, session, persist, monitoringCompanies, bureaus, onCreated }) {
+function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, providers, roster, session, persist, monitoringCompanies, bureaus, onCreated }) {
   const showToast = useToast();
   // Response is the default the moment this screen opens, and dispatching
   // never resets it back — an operator sending several Key pickups (or
@@ -2488,8 +2499,10 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
   const recommended = rosteredOnThisRun.length ? rosteredOnThisRun : fallbackOnThisRun;
   // Same order as the "Dispatch to" dropdown below — roster-corrected
   // entries (today's actual run) take priority over the raw account, so
-  // dispatch() resolves the same run the dropdown actually showed.
-  const assigneeCandidates = [...rosteredOnThisRun, ...fallbackOnThisRun, ...rosteredElsewhereToday, ...patrolmen];
+  // dispatch() resolves the same run the dropdown actually showed. Providers
+  // come last — they're only ever picked explicitly (never recommended),
+  // since they're not on anyone's roster or run.
+  const assigneeCandidates = [...rosteredOnThisRun, ...fallbackOnThisRun, ...rosteredElsewhereToday, ...patrolmen, ...providers];
 
   const siteLabel = (s) => `${s.name} — ${s.address}`;
 
@@ -2652,6 +2665,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
         : {}),
       assigneeId: assignee.loginName,
       assigneeName: assignee.displayName,
+      assigneeRole: assignee.role,
       dispatchedByLoginName: session.loginName,
       dispatchedByName: session.displayName,
       handlingLoginName: session.loginName,
@@ -2716,14 +2730,14 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
       notifyJobDispatch({
         jobId: primaryJob.id,
         loginName: primaryJob.assigneeId,
-        role: "patrolman",
+        role: primaryJob.assigneeRole || "patrolman",
         title: `New job — ${primaryJob.jobNumber}`,
         body: `${primaryJob.siteName} — tap Acknowledge to confirm receipt.`,
       }).then((result) => {
         if (!result.ok) {
           showToast(`Job dispatched, but push notifications are down: ${result.error || "unknown error"}`, "error");
         } else if (result.total === 0) {
-          showToast("Job dispatched, but that patrolman hasn't turned on job alerts.", "error");
+          showToast(`Job dispatched, but that ${primaryJob.assigneeRole === "provider" ? "provider" : "patrolman"} hasn't turned on job alerts.`, "error");
         } else if (result.sent === 0) {
           showToast("Job dispatched, but the push alert failed to deliver.", "error");
         }
@@ -2852,6 +2866,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, roster, sessi
           {fallbackOnThisRun.length > 0 && <optgroup label="On this run">{fallbackOnThisRun.map((r) => <option key={r.loginName} value={r.loginName}>{r.displayName}{r.contactNumber ? ` · ${r.contactNumber}` : ""}</option>)}</optgroup>}
           {rosteredElsewhereToday.length > 0 && <optgroup label="Rostered today (other runs)">{rosteredElsewhereToday.map((r) => <option key={r.loginName} value={r.loginName}>{r.run} · {r.displayName}{r.contactNumber ? ` · ${r.contactNumber}` : ""}</option>)}</optgroup>}
           <optgroup label="All patrolmen">{patrolmenByRun.map((r) => <option key={r.loginName} value={r.loginName}>{r.run} · {r.displayName}{r.contactNumber ? ` · ${r.contactNumber}` : ""}</option>)}</optgroup>
+          {providers.length > 0 && <optgroup label="Providers">{providers.map((p) => <option key={p.loginName} value={p.loginName}>{p.displayName}{p.contactNumber ? ` · ${p.contactNumber}` : ""}</option>)}</optgroup>}
         </select>
       </Field>
 
@@ -3217,7 +3232,7 @@ function EtaDelayModal({ etaMinutes, slaMin, onAcknowledge, onDismiss }) {
 
 /* ---------------------- Operator job detail ---------------------- */
 
-function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now, onBack, companyName, logoUrl }) {
+function JobDetailOperator({ job, jobs, patrolmen, providers, roster, session, persist, now, onBack, companyName, logoUrl }) {
   const [notes, setNotes] = useState(job.reviewNotes || job.outcomeNotes);
   const [showActionRequestForm, setShowActionRequestForm] = useState(false);
   const [actionRequestText, setActionRequestText] = useState("");
@@ -3426,27 +3441,28 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   // persist let a stale read from one silently overwrite the others'
   // change, sometimes reverting the reassignment entirely.
   async function reassign(loginName) {
-    const p = patrolmen.find((a) => a.loginName === loginName);
+    const p = patrolmen.find((a) => a.loginName === loginName) || providers.find((a) => a.loginName === loginName);
     if (!p || p.loginName === job.assigneeId) return;
     const previousLoginName = job.assigneeId;
     const previousName = job.assigneeName;
+    const previousRole = job.assigneeRole;
     const todaysEntry = roster.find((r) => r.date === rosterDateISO() && r.patrolmanLoginName === loginName);
     await logAction(
       "Reassigned",
       previousName ? `From ${previousName} to ${p.displayName}` : `To ${p.displayName}`,
-      { assigneeId: p.loginName, assigneeName: p.displayName, run: (todaysEntry ? todaysEntry.run : p.run) || job.run }
+      { assigneeId: p.loginName, assigneeName: p.displayName, assigneeRole: p.role, run: (todaysEntry ? todaysEntry.run : p.run) || job.run }
     );
     const dispatchResult = await notifyJobDispatch({
       jobId: job.id,
       loginName: p.loginName,
-      role: "patrolman",
+      role: p.role,
       title: `Job reassigned to you — ${job.jobNumber}`,
       body: `${job.siteName} — tap Acknowledge to confirm receipt.`,
     });
     if (!dispatchResult.ok) {
       showToast(`Reassigned, but push notifications are down: ${dispatchResult.error || "unknown error"}`, "error");
     } else if (dispatchResult.total === 0) {
-      showToast("Reassigned, but that patrolman hasn't turned on job alerts.", "error");
+      showToast(`Reassigned, but that ${p.role === "provider" ? "provider" : "patrolman"} hasn't turned on job alerts.`, "error");
     } else if (dispatchResult.sent === 0) {
       showToast("Reassigned, but the push alert failed to deliver.", "error");
     }
@@ -3454,6 +3470,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
       const standDownResult = await notifyStandDown({
         jobId: job.id,
         loginName: previousLoginName,
+        role: previousRole,
         patrolmanName: previousName,
         reassignedToName: p.displayName,
       });
@@ -3489,7 +3506,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
     const result = await notifyJobDispatch({
       jobId: job.id,
       loginName: job.assigneeId,
-      role: "patrolman",
+      role: job.assigneeRole || "patrolman",
       title: `Further action needed — ${job.jobNumber}`,
       body: text,
     });
@@ -3597,7 +3614,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
   // rest of this component.
   if (job.status === "scheduled") {
     return (
-      <ScheduledJobView job={job} jobs={jobs} patrolmen={patrolmen} roster={roster} session={session} persist={persist} onBack={onBack} />
+      <ScheduledJobView job={job} jobs={jobs} patrolmen={patrolmen} providers={providers} roster={roster} session={session} persist={persist} onBack={onBack} />
     );
   }
 
@@ -3740,7 +3757,8 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
           <span style={{ fontSize: 12.5 }}>{resolvedPatrolman}</span>
         ) : (
           <select value={job.assigneeId} onChange={(e) => reassign(e.target.value)} style={{ ...selectStyle, width: "auto", padding: "6px 10px", fontSize: 12.5 }}>
-            {patrolmen.map((p) => <option key={p.loginName} value={p.loginName}>{p.displayName} · {p.loginName}</option>)}
+            <optgroup label="Patrolmen">{patrolmen.map((p) => <option key={p.loginName} value={p.loginName}>{p.displayName} · {p.loginName}</option>)}</optgroup>
+            {providers.length > 0 && <optgroup label="Providers">{providers.map((p) => <option key={p.loginName} value={p.loginName}>{p.displayName} · {p.loginName}</option>)}</optgroup>}
           </select>
         )}
         {job.status === "dispatched" && !isArchived && (
@@ -4036,7 +4054,7 @@ function JobDetailOperator({ job, jobs, patrolmen, roster, session, persist, now
 // here never pushes anything to the patrolman — that only ever happens
 // once the job actually dispatches, exactly once, at the pop-up time (or
 // immediately, via "Dispatch now" below).
-function ScheduledJobView({ job, jobs, patrolmen, roster, session, persist, onBack }) {
+function ScheduledJobView({ job, jobs, patrolmen, providers, roster, session, persist, onBack }) {
   const showToast = useToast();
   const [assigneeId, setAssigneeId] = useState(job.assigneeId || "");
   const [scheduledForInput, setScheduledForInput] = useState(toLocalInputValue(job.scheduledFor));
@@ -4055,7 +4073,7 @@ function ScheduledJobView({ job, jobs, patrolmen, roster, session, persist, onBa
   }
 
   const patrolmenByRun = [...patrolmen].sort(compareByRunThenName);
-  const assignee = patrolmen.find((p) => p.loginName === assigneeId);
+  const assignee = patrolmen.find((p) => p.loginName === assigneeId) || providers.find((p) => p.loginName === assigneeId);
   const scheduledForIso = fromLocalInputValue(scheduledForInput);
   const attendanceTimeIso = fromLocalInputValue(attendanceTimeInput);
   const canSave = assigneeId && scheduledForIso && attendanceTimeIso && description.trim();
@@ -4078,6 +4096,7 @@ function ScheduledJobView({ job, jobs, patrolmen, roster, session, persist, onBa
       changes.push(`Reassigned to ${assignee?.displayName || assigneeId}`);
       patch.assigneeId = assignee.loginName;
       patch.assigneeName = assignee.displayName;
+      patch.assigneeRole = assignee.role;
       patch.run = assignee.run || job.run;
     }
     if (scheduledForChanged) {
@@ -4111,14 +4130,14 @@ function ScheduledJobView({ job, jobs, patrolmen, roster, session, persist, onBa
     const result = await notifyJobDispatch({
       jobId: job.id,
       loginName: job.assigneeId,
-      role: "patrolman",
+      role: job.assigneeRole || "patrolman",
       title: `New job — ${job.jobNumber}`,
       body: `${job.siteName} — tap Acknowledge to confirm receipt.`,
     });
     if (!result.ok) {
       showToast(`Dispatched, but push notifications are down: ${result.error || "unknown error"}`, "error");
     } else if (result.total === 0) {
-      showToast("Dispatched, but that patrolman hasn't turned on job alerts.", "error");
+      showToast(`Dispatched, but that ${job.assigneeRole === "provider" ? "provider" : "patrolman"} hasn't turned on job alerts.`, "error");
     } else if (result.sent === 0) {
       showToast("Dispatched, but the push alert failed to deliver.", "error");
     } else {
@@ -4170,6 +4189,7 @@ function ScheduledJobView({ job, jobs, patrolmen, roster, session, persist, onBa
         <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} style={selectStyle}>
           <option value="">Select patrolman…</option>
           {patrolmenByRun.map((r) => <option key={r.loginName} value={r.loginName}>{r.run} · {r.displayName}{r.contactNumber ? ` · ${r.contactNumber}` : ""}</option>)}
+          {providers.length > 0 && <optgroup label="Providers">{providers.map((p) => <option key={p.loginName} value={p.loginName}>{p.displayName}{p.contactNumber ? ` · ${p.contactNumber}` : ""}</option>)}</optgroup>}
         </select>
       </Field>
 
@@ -5861,6 +5881,287 @@ function DetailRow({ icon: Icon, label, value }) {
 }
 
 /* ---------------------------------------------------------------
+   PROVIDER VIEW — external provider companies dispatched jobs
+   Control Room can't send to their own patrolmen (busy/unavailable)
+---------------------------------------------------------------- */
+
+function ProviderView({ session, jobs, persist, now }) {
+  const [selectedId, setSelectedId] = useState(null);
+  const mine = jobs.filter((j) => j.assigneeId === session.id && j.status !== "scheduled").sort((a, b) => new Date(b.dispatchTime) - new Date(a.dispatchTime));
+  const selected = mine.find((j) => j.id === selectedId);
+
+  if (selected) {
+    return <div style={{ padding: 20, maxWidth: 520 }}><JobDetailProvider job={selected} jobs={jobs} session={session} persist={persist} now={now} onBack={() => setSelectedId(null)} /></div>;
+  }
+
+  return (
+    <div style={{ padding: 20 }}>
+      <StandDownNotices jobs={jobs} session={session} persist={persist} />
+      <JobAlertsBanner />
+      <SectionTitle icon={Truck} title="My jobs" />
+      {mine.length === 0 ? (
+        <Empty text="No jobs dispatched to you yet. New jobs will alert this device the moment control room sends one." />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 520 }}>
+          {mine.map((j) => <JobCard key={j.id} job={j} now={now} onClick={() => setSelectedId(j.id)} roster={[]} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A job field a provider taps to copy, so it can be relayed to their own
+// patrol by phone/WhatsApp/etc without retyping it — see Login's "Provider"
+// role and the feature's own PR description for the full flow.
+function CopyableRow({ icon: Icon, label, value }) {
+  const [copied, setCopied] = useState(false);
+  if (!value) return null;
+  return (
+    <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+      <Icon size={14} color="var(--text-dim)" style={{ marginTop: 2, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 10.5, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.4 }}>{label}</div>
+        <div>{value}</div>
+      </div>
+      <button
+        onClick={() => { navigator.clipboard?.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+        title={`Copy ${label.toLowerCase()}`}
+        style={{ ...iconBtn, flexShrink: 0 }}
+      >
+        {copied ? <CheckCircle2 size={13} color="var(--ok)" /> : <Copy size={13} />}
+      </button>
+    </div>
+  );
+}
+
+function JobDetailProvider({ job, jobs, session, persist, now, onBack }) {
+  const isCancelled = job.status === "cancelled";
+  // Same "sent back for correction" semantics as JobDetailPatrolman — see
+  // that component's own comment.
+  const needsAction = job.status === "needsAction";
+  const submitted = job.status !== "dispatched" && !needsAction && !isCancelled;
+  const initialDraft = !submitted && !isCancelled ? loadJobDraft(job.id) : null;
+  const [outcome, setOutcome] = useState(initialDraft?.outcome ?? job.outcomeNotes ?? "");
+  const [docketNo, setDocketNo] = useState(initialDraft?.docketNo ?? job.docketNo ?? "");
+  const [photos, setPhotos] = useState(initialDraft?.photos ?? []);
+  // No GPS here — the provider isn't physically onsite, so both times are
+  // whatever their own patrol reports back, typed in by hand.
+  const [onsiteInput, setOnsiteInput] = useState(initialDraft?.onsiteInput ?? (job.onsiteTime ? toLocalInputValue(job.onsiteTime) : ""));
+  const [offsiteInput, setOffsiteInput] = useState(initialDraft?.offsiteInput ?? (job.offsiteTime ? toLocalInputValue(job.offsiteTime) : ""));
+  const [busy, setBusy] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [submitError, setSubmitError] = useState(null);
+  const [showEtaModal, setShowEtaModal] = useState(false);
+  const fileRef = useRef(null);
+  const pendingUploadsRef = useRef(new Map());
+  const showToast = useToast();
+
+  useEffect(() => {
+    if (job.photoCount > 0) fetchJobPhotos(job.id).then(setPhotos);
+  }, [job.id, job.photoCount]);
+
+  useEffect(() => {
+    if (submitted || isCancelled) {
+      clearJobDraft(job.id);
+      return;
+    }
+    const t = setTimeout(() => saveJobDraft(job.id, { outcome, docketNo, photos, onsiteInput, offsiteInput }), 400);
+    return () => clearTimeout(t);
+  }, [job.id, submitted, isCancelled, outcome, docketNo, photos, onsiteInput, offsiteInput]);
+
+  // Plain file picker only — these are photos already taken by the
+  // provider's own patrol and relayed back, not a fresh live capture, so
+  // there's nothing here to watermark with this device's time/location.
+  async function addPhotosFromFiles(files) {
+    const toAdd = files.slice(0, MAX_ATTENDANCE_PHOTOS - photos.length);
+    if (!toAdd.length) return;
+    setBusy(true);
+    const entries = [];
+    for (const f of toAdd) {
+      try {
+        const photo = await resizePhotoPlain(f);
+        entries.push({ photo: { ...photo, localId: `${Date.now()}-${Math.random().toString(36).slice(2)}` }, file: f });
+      } catch (err) { /* skip bad file */ }
+    }
+    setPhotos((p) => [...p, ...entries.map((e) => e.photo)]);
+    setBusy(false);
+    entries.forEach(({ photo, file }) => {
+      const uploadPromise = uploadOriginalPhoto(job.id, file).then((originalPath) => {
+        if (originalPath) setPhotos((p) => p.map((ph) => (ph.localId === photo.localId ? { ...ph, originalPath } : ph)));
+        return originalPath;
+      });
+      pendingUploadsRef.current.set(photo.localId, uploadPromise);
+      uploadPromise.finally(() => pendingUploadsRef.current.delete(photo.localId));
+    });
+  }
+
+  async function handleFiles(e) {
+    const files = Array.from(e.target.files || []);
+    await addPhotosFromFiles(files);
+    e.target.value = "";
+  }
+
+  async function acknowledgeJob(eta) {
+    const etaText = eta.label === "Other" ? eta.detail : eta.label;
+    const updated = jobs.map((j) => (j.id === job.id ? {
+      ...j,
+      acknowledgedAt: new Date().toISOString(),
+      eta,
+      activityLog: [...(j.activityLog || []), logEntry(session, "Acknowledged", `ETA: ${etaText}`)],
+    } : j));
+    await persist(updated);
+    setShowEtaModal(false);
+    showToast(`Job acknowledged — ETA ${etaText} sent to control room.`);
+  }
+
+  const canSubmit = outcome.trim() && onsiteInput && offsiteInput;
+
+  async function submit() {
+    if (!canSubmit) return;
+    setActionBusy(true);
+    setSubmitError(null);
+    try {
+      const pending = photos.filter((p) => pendingUploadsRef.current.has(p.localId));
+      const resolvedPaths = await Promise.all(pending.map((p) => pendingUploadsRef.current.get(p.localId)));
+      const resolvedById = new Map(pending.map((p, i) => [p.localId, resolvedPaths[i]]));
+      const photosToSave = photos.map(({ localId, originalPath, ...p }) => {
+        const resolved = resolvedById.has(localId) ? resolvedById.get(localId) : originalPath;
+        return resolved ? { ...p, originalPath: resolved } : p;
+      });
+      if (photosToSave.length > 0) await persistJobPhotos(job.id, photosToSave);
+      const updated = jobs.map((j) => (j.id === job.id ? {
+        ...j,
+        status: "submitted",
+        outcomeNotes: outcome.trim(),
+        docketNo: docketNo.trim(),
+        photoCount: photos.length,
+        onsiteTime: fromLocalInputValue(onsiteInput),
+        offsiteTime: fromLocalInputValue(offsiteInput),
+        ...(needsAction
+          ? { activityLog: [...(j.activityLog || []), logEntry(session, "Resubmitted after further action", outcome.trim())] }
+          : {}),
+      } : j));
+      await persist(updated, { throwOnError: true });
+      clearJobDraft(job.id);
+      onBack();
+    } catch (err) {
+      showToast("Couldn't save — check your connection and try again.", "error");
+      setSubmitError("Not sent yet — your answer and photos are saved on this device. Check your signal and tap the button again.");
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <button onClick={onBack} style={backBtn}><ArrowLeft size={13} /> Back to my jobs</button>
+      <JobHeader job={job} />
+      {job.status === "dispatched" && <div style={{ margin: "10px 0 4px" }}><JobUrgencyChip job={job} now={now} /></div>}
+
+      <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10, fontSize: 13 }}>
+        <CopyableRow icon={FileText} label="Job number" value={job.jobNumber} />
+        <CopyableRow icon={Building2} label="Site name" value={job.siteName} />
+        <CopyableRow icon={MapPin} label="Address" value={job.address} />
+        <CopyableRow icon={AlertTriangle} label={descriptionFieldLabel(job, { short: true })} value={job.description} />
+        <CopyableRow icon={KeyRound} label="Key info" value={job.keyInfo} />
+        <CopyableRow icon={KeyRound} label="Alarm code" value={job.alarmCode} />
+      </div>
+
+      {isCancelled && (
+        <div style={{ marginTop: 20, padding: 14, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, color: "var(--breach)", fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}><Ban size={14} /> Job cancelled — stand down</div>
+          {job.cancelReason && <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>{job.cancelReason}</div>}
+        </div>
+      )}
+
+      {!submitted && !isCancelled && !job.acknowledgedAt && (
+        <div style={{ marginTop: 20 }}>
+          <SectionTitle icon={Bell} title="Acknowledge this job" small />
+          <div style={{ fontSize: 12.5, color: "var(--text-dim)", marginBottom: 12 }}>
+            Confirm your ETA to let control room know you've received this job and when your patrol will arrive.
+          </div>
+          <button onClick={() => setShowEtaModal(true)} style={{ ...primaryBtn, width: "100%", justifyContent: "center" }}>
+            <CheckCircle2 size={14} /> Acknowledge — we've received this job
+          </button>
+        </div>
+      )}
+
+      {showEtaModal && <EtaModal onConfirm={acknowledgeJob} onClose={() => setShowEtaModal(false)} />}
+
+      {!submitted && !isCancelled && job.acknowledgedAt && (
+        <div style={{ fontSize: 11.5, color: "var(--ok)", marginTop: 20, display: "flex", alignItems: "center", gap: 6 }}>
+          <CheckCircle2 size={13} /> Acknowledged at {fmtTime(job.acknowledgedAt)}
+          {job.eta && <> — ETA {job.eta.label === "Other" ? job.eta.detail : job.eta.label}</>}
+        </div>
+      )}
+
+      {!submitted && !isCancelled && job.acknowledgedAt && (
+        <div style={{ marginTop: 20 }}>
+          {needsAction && (
+            <div style={{ padding: 12, borderRadius: 8, border: "1px solid var(--breach)", background: "#FEF2F2", marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#B91C1C", fontWeight: 700, fontSize: 12.5, marginBottom: 4 }}>
+                <AlertTriangle size={14} /> Control room needs more information
+              </div>
+              <div style={{ fontSize: 12.5, color: "var(--text)" }}>{job.actionRequestText}</div>
+              {job.actionRequestedByName && (
+                <div style={{ fontSize: 10.5, color: "var(--text-dim)", marginTop: 4 }}>
+                  — {job.actionRequestedByName}{job.actionRequestedAt ? `, ${fmtDateTime(job.actionRequestedAt)}` : ""}
+                </div>
+              )}
+            </div>
+          )}
+          <SectionTitle icon={CheckCircle2} title={needsAction ? "Update outcome" : "Submit outcome"} small />
+          <div style={{ display: "flex", gap: 12 }}>
+            <Field label="Onsite time" style={{ flex: 1 }}>
+              <input type="datetime-local" value={onsiteInput} onChange={(e) => setOnsiteInput(e.target.value)} style={selectStyle} />
+            </Field>
+            <Field label="Offsite time" style={{ flex: 1 }}>
+              <input type="datetime-local" value={offsiteInput} onChange={(e) => setOffsiteInput(e.target.value)} style={selectStyle} />
+            </Field>
+          </div>
+          <UpperTextarea rows={4} value={outcome} onChange={setOutcome} placeholder="What did your patrol find on attendance? e.g. Premises secure, false alarm — sensor fault suspected." style={{ ...selectStyle, resize: "vertical" }} />
+          <Field label="Docket number (optional)">
+            <input value={docketNo} onChange={(e) => setDocketNo(e.target.value)} placeholder="Your patrol's docket / report number" style={selectStyle} />
+          </Field>
+          <div style={{ fontSize: 12, color: "var(--warn)", fontWeight: 600, marginBottom: 8 }}>Please upload timestamp photos.</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {photos.map((p, i) => (
+              <div key={i} style={{ position: "relative" }}>
+                <img src={p.dataUrl} alt="" style={{ width: 84, height: 84, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }} />
+                <button onClick={() => setPhotos(photos.filter((_, idx) => idx !== i))} style={{ position: "absolute", top: -6, right: -6, background: "var(--breach)", border: "none", borderRadius: "50%", width: 18, height: 18, color: "#fff", cursor: "pointer" }}><X size={11} /></button>
+              </div>
+            ))}
+            {photos.length < MAX_ATTENDANCE_PHOTOS && (
+              <button onClick={() => fileRef.current?.click()} disabled={busy} style={{ width: 84, height: 84, borderRadius: 6, border: "1px dashed var(--border)", background: "var(--panel)", color: "var(--text-dim)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, cursor: "pointer" }}>
+                <ImageIcon size={17} /><span style={{ fontSize: 10 }}>{busy ? "…" : "Add photos"}</span>
+              </button>
+            )}
+            <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={handleFiles} />
+          </div>
+          {submitError && (
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 7, marginTop: 12, padding: 12, borderRadius: 8, border: "1px solid var(--breach)", background: "#FEF2F2", color: "#B91C1C", fontSize: 12.5, fontWeight: 600 }}>
+              <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 1 }} /> {submitError}
+            </div>
+          )}
+          <button disabled={!canSubmit || actionBusy} onClick={submit} style={{ ...primaryBtn, width: "100%", marginTop: 16, justifyContent: "center", opacity: canSubmit && !actionBusy ? 1 : 0.4 }}>
+            <Send size={14} /> {needsAction ? (actionBusy ? "Submitting…" : "Resubmit for review") : (actionBusy ? "Submitting…" : "Submit")}
+          </button>
+        </div>
+      )}
+
+      {submitted && (
+        <div style={{ marginTop: 20, padding: 14, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, color: "var(--ok)", fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}><CheckCircle2 size={14} /> Submitted — onsite {fmtTime(job.onsiteTime)}, offsite {fmtTime(job.offsiteTime)}</div>
+          <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>{job.outcomeNotes}</div>
+        </div>
+      )}
+
+      <JobChatPanel jobId={job.id} session={session} closed={job.status === "emailed" || isCancelled} />
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------
    MANAGER VIEW — create & manage logins
 ---------------------------------------------------------------- */
 
@@ -6490,6 +6791,7 @@ function AccountsManager({ accounts, setAccounts, zones, session, logoUrl, persi
     { key: "manager", title: "Managers" },
     { key: "operator", title: "Control Room" },
     { key: "patrolman", title: "Patrolmen" },
+    { key: "provider", title: "Providers" },
   ];
 
   return (
@@ -6499,7 +6801,7 @@ function AccountsManager({ accounts, setAccounts, zones, session, logoUrl, persi
       <SectionTitle icon={UserPlus} title="Create a login" />
       <div style={{ maxWidth: 560, marginBottom: 30 }}>
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          {["patrolman", "operator", "manager"].map((r) => (
+          {["patrolman", "operator", "manager", "provider"].map((r) => (
             <button key={r} onClick={() => setRole(r)} style={{ flex: 1, padding: "8px 0", borderRadius: 7, cursor: "pointer", border: `1px solid ${role === r ? "var(--navy)" : "var(--border)"}`, background: role === r ? "var(--navy)" : "var(--panel)", color: role === r ? "#fff" : "var(--text-dim)", fontWeight: 600, fontSize: 12, textTransform: "capitalize" }}>
               {r === "operator" ? "Control Room" : r}
             </button>
@@ -6508,7 +6810,7 @@ function AccountsManager({ accounts, setAccounts, zones, session, logoUrl, persi
 
         <div style={{ display: "flex", gap: 12 }}>
           <Field label="Login name" style={{ flex: 1 }}>
-            <input value={loginName} onChange={(e) => setLoginName(e.target.value)} placeholder={role === "patrolman" ? "e.g. T13" : "e.g. ControlRoom3"} style={selectStyle} />
+            <input value={loginName} onChange={(e) => setLoginName(e.target.value)} placeholder={role === "patrolman" ? "e.g. T13" : role === "provider" ? "e.g. AcmeSecurity" : "e.g. ControlRoom3"} style={selectStyle} />
           </Field>
           <Field label="Password" style={{ flex: 1 }}>
             <input value={password} onChange={(e) => setPassword(e.target.value)} style={selectStyle} />
