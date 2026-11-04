@@ -9,7 +9,7 @@ import {
 import {
   STATUS_META, fmtTime, fmtDateTime, isoDateOnly, isoTimeOnly,
   reportStatusLabel, REPORT_COLUMNS_BRIEF, REPORT_COLUMNS_DETAILED,
-  reportRow, patrolmanRunSummary, operatorSummary, cancelledJobCount,
+  reportRow, patrolmanRunSummary, providerSummary, operatorSummary, cancelledJobCount,
   JOB_TYPES, jobTypeLabel, isResponseJob, descriptionFieldLabel, jobTypeCounts, rosterDateFor, resolveJobRoster,
   jobCharge, formatCharge, DEFAULT_RESPONSE_RATE, jobRevisionLabel,
 } from "./reportUtils.js";
@@ -4373,7 +4373,11 @@ function adviceRow(label, value) {
 }
 
 function buildAdviceEmail(job, companyName) {
-  const provider = [job.assigneeName, job.run].filter(Boolean).join(" — ") || "—";
+  // A provider's company name never reaches the client — the point of
+  // using one is that the response still reads as ours.
+  const provider = job.assigneeRole === "provider"
+    ? (companyName || "Ausgroup").toUpperCase() + " SECURITY"
+    : [job.assigneeName, job.run].filter(Boolean).join(" — ") || "—";
   const status = job.status === "cancelled" ? "Cancelled" : "Complete";
   const times = `Dispatched ${fmtTime(job.dispatchTime)} On site ${fmtTime(job.onsiteTime)} Off site ${fmtTime(job.offsiteTime)} Advised ${fmtTime(new Date().toISOString())}`;
   const location = [job.siteName, job.address].filter(Boolean).join("<br>");
@@ -4575,7 +4579,7 @@ function stampPdfFooter(doc) {
   }
 }
 
-async function buildJobAttendancePdfDoc(job, companyName, now, logoUrl, roster, patrolmen) {
+async function buildJobAttendancePdfDoc(job, companyName, now, logoUrl, roster, patrolmen, { redactProvider = false } = {}) {
   const { jsPDF } = await import("jspdf");
   const doc = new jsPDF({ unit: "pt" });
   const pageW = doc.internal.pageSize.getWidth();
@@ -4602,6 +4606,11 @@ async function buildJobAttendancePdfDoc(job, companyName, now, logoUrl, roster, 
   // assignee's own account (e.g. an ad hoc dispatch with no roster entry
   // that day).
   const licenceNumber = rosterLicence || patrolmen?.find((p) => p.loginName === job.assigneeId)?.securityLicenceNumber || "";
+  // Same reasoning as buildAdviceEmail's own redaction — a provider's
+  // company name never reaches the client, only this (internal) copy.
+  const attendedBy = redactProvider && job.assigneeRole === "provider"
+    ? (companyName || "Ausgroup").toUpperCase() + " SECURITY"
+    : [resolvedPatrolman, resolvedRun].filter(Boolean).join(" — ") || "—";
   const fields = [
     ["Job Ref", job.jobNumber],
     ["Site", job.siteName],
@@ -4612,7 +4621,7 @@ async function buildJobAttendancePdfDoc(job, companyName, now, logoUrl, roster, 
     ["Docket No", job.docketNo || "—"],
     [descriptionFieldLabel(job, { short: true }), job.description || "—"],
     ["Status", STATUS_META[job.status]?.label || job.status],
-    ["Attending patrolman", [resolvedPatrolman, resolvedRun].filter(Boolean).join(" — ") || "—"],
+    ["Attending patrolman", attendedBy],
     ["Security licence no.", licenceNumber || "—"],
     ["Dispatched", fmtDateTime(job.dispatchTime)],
     ["Acknowledged", job.acknowledgedAt ? fmtDateTime(job.acknowledgedAt) : "—"],
@@ -4700,6 +4709,8 @@ async function buildJobAttendancePdfDoc(job, companyName, now, logoUrl, roster, 
 }
 
 async function downloadJobAttendancePdf(job, companyName, now, logoUrl, roster, patrolmen) {
+  // Control Room's own copy — never redacted, same as the internal photo
+  // backup below.
   const doc = await buildJobAttendancePdfDoc(job, companyName, now, logoUrl, roster, patrolmen);
   doc.save(`${job.jobNumber}-attendance.pdf`);
 }
@@ -4708,8 +4719,8 @@ async function downloadJobAttendancePdf(job, companyName, now, logoUrl, roster, 
 // browser download — the dataurlstring form jsPDF returns is prefixed with
 // "data:application/pdf;filename=...;base64," so only the trailing part is
 // the actual attachment content.
-async function buildJobAttendancePdfBase64(job, companyName, now, logoUrl, roster, patrolmen) {
-  const doc = await buildJobAttendancePdfDoc(job, companyName, now, logoUrl, roster, patrolmen);
+async function buildJobAttendancePdfBase64(job, companyName, now, logoUrl, roster, patrolmen, opts) {
+  const doc = await buildJobAttendancePdfDoc(job, companyName, now, logoUrl, roster, patrolmen, opts);
   const dataUrl = doc.output("datauristring");
   const match = /;base64,(.*)$/.exec(dataUrl);
   if (!match) throw new Error("Couldn't build the attendance PDF.");
@@ -4730,7 +4741,7 @@ function EmailModal({ job, companyName, now, roster, patrolmen, logoUrl, onClose
     setError("");
     setBusy(true);
     try {
-      const pdfBase64 = await buildJobAttendancePdfBase64(job, companyName, now, logoUrl, roster, patrolmen);
+      const pdfBase64 = await buildJobAttendancePdfBase64(job, companyName, now, logoUrl, roster, patrolmen, { redactProvider: true });
       const attachments = [
         { filename: `${job.jobNumber}-attendance.pdf`, content: pdfBase64, contentType: "application/pdf" },
         ...fullResPhotoAttachments(job),
@@ -5009,6 +5020,7 @@ function Reports({ jobs, companyName, logoUrl, roster, responseRate, bureauRates
   const displayRows = chargeRows;
 
   const summary = patrolmanRunSummary(filteredJobs, roster);
+  const providers = providerSummary(filteredJobs);
   const operators = operatorSummary(filteredJobs);
   const cancelledCount = cancelledJobCount(filteredJobs);
   const typeCounts = jobTypeCounts(filteredJobs);
@@ -5074,6 +5086,22 @@ function Reports({ jobs, companyName, logoUrl, roster, responseRate, bureauRates
       foot: [["Total", "", String(totalSummaryCancelled), String(totalResponses)]],
       ...summaryTableOpts,
     });
+
+    if (providers.length > 0) {
+      const totalProviderJobs = providers.reduce((sum, p) => sum + p.count, 0);
+      const totalProviderCancelled = providers.reduce((sum, p) => sum + (p.cancelled || 0), 0);
+      const providerStartY = (doc.lastAutoTable?.finalY || summaryStartY) + 26;
+      doc.setFontSize(11);
+      doc.setTextColor(20);
+      doc.text("Provider job summary", 40, providerStartY);
+      autoTable(doc, {
+        startY: providerStartY + 8,
+        head: [["Provider", "Cancelled", "Jobs"]],
+        body: providers.map((p) => [p.provider, String(p.cancelled || 0), String(p.count)]),
+        foot: [["Total", String(totalProviderCancelled), String(totalProviderJobs)]],
+        ...summaryTableOpts,
+      });
+    }
 
     const totalDispatched = operators.reduce((sum, o) => sum + o.dispatched, 0);
     const totalFinalized = operators.reduce((sum, o) => sum + o.finalized, 0);
@@ -5222,6 +5250,27 @@ function Reports({ jobs, companyName, logoUrl, roster, responseRate, bureauRates
               <span style={{ fontFamily: "var(--mono)", color: "var(--accent)", marginLeft: totalSummaryCancelled > 0 ? 10 : "auto" }}>{totalResponses}</span>
               <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>job{totalResponses !== 1 ? "s" : ""}</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {providers.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6, color: "var(--text-dim)", marginBottom: 8 }}>Provider job summary</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {providers.map((p) => (
+              <div key={p.provider} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12.5 }}>
+                <span><b>{p.provider}</b></span>
+                {p.cancelled > 0 && (
+                  <>
+                    <span style={{ fontFamily: "var(--mono)", fontWeight: 700, color: "var(--warn)" }}>{p.cancelled}</span>
+                    <span style={{ color: "var(--text-dim)" }}>cancelled,</span>
+                  </>
+                )}
+                <span style={{ fontFamily: "var(--mono)", fontWeight: 700, color: "var(--accent)" }}>{p.count}</span>
+                <span style={{ color: "var(--text-dim)" }}>job{p.count !== 1 ? "s" : ""}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
