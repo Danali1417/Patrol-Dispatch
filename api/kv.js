@@ -381,10 +381,10 @@ async function notifyChatMessage(jobId, session, text) {
   };
 
   const { sendPushToRole, sendPushToPatrolman } = await import("./_lib/push.js");
-  if (session.role === "patrolman") {
+  if (session.role === "patrolman" || session.role === "provider") {
     await sendPushToRole("operator", payload);
   } else if (job.assigneeId) {
-    await sendPushToPatrolman(job.assigneeId, "patrolman", payload);
+    await sendPushToPatrolman(job.assigneeId, job.assigneeRole || "patrolman", payload);
   }
 }
 
@@ -508,7 +508,7 @@ export default async function handler(req, res) {
   // Storage — this just hands back a short-lived, self-authorizing URL to
   // PUT it to. Same role trust as saving the compressed copy alongside it.
   if (req.method === "POST" && req.query?.photoUploadUrl === "1") {
-    const session = await requireRole(req, res, ["manager", "operator", "patrolman"]);
+    const session = await requireRole(req, res, ["manager", "operator", "patrolman", "provider"]);
     if (!session) return;
     const { jobId, ext } = req.body || {};
     if (!jobId) return res.status(400).json({ error: "jobId is required" });
@@ -546,7 +546,7 @@ export default async function handler(req, res) {
   // (any signed-in role), just split into its own key per job so a photo
   // upload never touches the board's polled blob.
   if (typeof key === "string" && key.startsWith(JOB_PHOTOS_PREFIX)) {
-    const session = await requireRole(req, res, ["manager", "operator", "patrolman"]);
+    const session = await requireRole(req, res, ["manager", "operator", "patrolman", "provider"]);
     if (!session) return;
     try {
       if (req.method === "GET") {
@@ -601,7 +601,7 @@ export default async function handler(req, res) {
   // overwrite could (see mergeJobsWrite's comment in this same file for
   // the class of bug this sidesteps).
   if (typeof key === "string" && key.startsWith(JOB_CHAT_PREFIX)) {
-    const session = await requireRole(req, res, ["manager", "operator", "patrolman"]);
+    const session = await requireRole(req, res, ["manager", "operator", "patrolman", "provider"]);
     if (!session) return;
     try {
       if (req.method === "GET") {
@@ -682,7 +682,7 @@ export default async function handler(req, res) {
       ? ["manager"]
       : OPERATOR_UP_WRITE_KEYS.has(key)
       ? ["manager", "operator"]
-      : ["manager", "operator", "patrolman"];
+      : ["manager", "operator", "patrolman", "provider"];
     const session = await requireRole(req, res, roles);
     if (!session) return; // response already sent
 

@@ -24,7 +24,7 @@ export default async function handler(req, res) {
   const body = req.body || {};
 
   if (body.mode === "standdown") {
-    const { jobId, loginName, patrolmanName, reassignedToName } = body;
+    const { jobId, loginName, role, patrolmanName, reassignedToName } = body;
     if (!jobId || !loginName || !patrolmanName || !reassignedToName) {
       return res.status(400).json({ error: "jobId, loginName, patrolmanName, and reassignedToName are required." });
     }
@@ -48,7 +48,7 @@ export default async function handler(req, res) {
       jobs[idx] = { ...job, standDowns: [...(job.standDowns || []), standDown] };
       await kvSet(JOBS_KEY, JSON.stringify(jobs));
 
-      const result = await sendPushToPatrolman(loginName, "patrolman", {
+      const result = await sendPushToPatrolman(loginName, role || "patrolman", {
         title: `Job reassigned — ${job.jobNumber}`,
         body: `${job.siteName} has been given to ${reassignedToName}. Tap Acknowledge to confirm you've seen this.`,
         jobId,
