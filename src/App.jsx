@@ -2365,7 +2365,7 @@ function Board({ jobs, now, onSelect, lockedStatus, roster }) {
   );
 }
 
-function JobCard({ job, now, onClick, roster }) {
+function JobCard({ job, now, onClick, roster, hideMonitoring }) {
   const t = jobTiming(job, now);
   const borderColor = job.status === "dispatched" && isResponseJob(job) ? (t.level === "breach" ? "var(--breach)" : t.level === "warn" ? "var(--warn)" : "var(--border)") : "var(--border)";
   // Resolved against the roster (by this job's own dispatch date and
@@ -2388,7 +2388,7 @@ function JobCard({ job, now, onClick, roster }) {
         <ChevronRight size={15} color="var(--text-dim)" style={{ flexShrink: 0 }} />
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
-        <span style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{run} · {job.monitoringCo} · assigned {patrolmanName}{job.handlingName ? ` · handled by ${job.handlingName}` : ""}</span>
+        <span style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{run}{hideMonitoring ? "" : ` · ${job.monitoringCo}`} · assigned {patrolmanName}{job.handlingName ? ` · handled by ${job.handlingName}` : ""}</span>
         {job.delayReason && <span title={job.delayReason}><AlertTriangle size={14} color="var(--warn)" /></span>}
         {job.status === "dispatched" && !job.onsiteTime && (
           job.acknowledgedAt
@@ -5903,7 +5903,7 @@ function ProviderView({ session, jobs, persist, now }) {
         <Empty text="No jobs dispatched to you yet. New jobs will alert this device the moment control room sends one." />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 520 }}>
-          {mine.map((j) => <JobCard key={j.id} job={j} now={now} onClick={() => setSelectedId(j.id)} roster={[]} />)}
+          {mine.map((j) => <JobCard key={j.id} job={j} now={now} onClick={() => setSelectedId(j.id)} roster={[]} hideMonitoring />)}
         </div>
       )}
     </div>
