@@ -6160,14 +6160,12 @@ function JobDetailProvider({ job, jobs, session, persist, now, onBack }) {
             </div>
           )}
           <SectionTitle icon={CheckCircle2} title={needsAction ? "Update outcome" : "Submit outcome"} small />
-          <div style={{ display: "flex", gap: 12 }}>
-            <Field label="Onsite time" style={{ flex: 1 }}>
-              <input type="datetime-local" value={onsiteInput} onChange={(e) => setOnsiteInput(e.target.value)} style={selectStyle} />
-            </Field>
-            <Field label="Offsite time" style={{ flex: 1 }}>
-              <input type="datetime-local" value={offsiteInput} onChange={(e) => setOffsiteInput(e.target.value)} style={selectStyle} />
-            </Field>
-          </div>
+          <Field label="Onsite time">
+            <input type="datetime-local" value={onsiteInput} onChange={(e) => setOnsiteInput(e.target.value)} style={selectStyle} />
+          </Field>
+          <Field label="Offsite time">
+            <input type="datetime-local" value={offsiteInput} onChange={(e) => setOffsiteInput(e.target.value)} style={selectStyle} />
+          </Field>
           <UpperTextarea rows={4} value={outcome} onChange={setOutcome} placeholder="What did your patrol find on attendance? e.g. Premises secure, false alarm — sensor fault suspected." style={{ ...selectStyle, resize: "vertical" }} />
           <Field label="Docket number (optional)">
             <input value={docketNo} onChange={(e) => setDocketNo(e.target.value)} placeholder="Your patrol's docket / report number" style={selectStyle} />
