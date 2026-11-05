@@ -5959,30 +5959,6 @@ function ProviderView({ session, jobs, persist, now }) {
   );
 }
 
-// A job field a provider taps to copy, so it can be relayed to their own
-// patrol by phone/WhatsApp/etc without retyping it — see Login's "Provider"
-// role and the feature's own PR description for the full flow.
-function CopyableRow({ icon: Icon, label, value }) {
-  const [copied, setCopied] = useState(false);
-  if (!value) return null;
-  return (
-    <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-      <Icon size={14} color="var(--text-dim)" style={{ marginTop: 2, flexShrink: 0 }} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 10.5, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 0.4 }}>{label}</div>
-        <div>{value}</div>
-      </div>
-      <button
-        onClick={() => { navigator.clipboard?.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-        title={`Copy ${label.toLowerCase()}`}
-        style={{ ...iconBtn, flexShrink: 0 }}
-      >
-        {copied ? <CheckCircle2 size={13} color="var(--ok)" /> : <Copy size={13} />}
-      </button>
-    </div>
-  );
-}
-
 function JobDetailProvider({ job, jobs, session, persist, now, onBack }) {
   const isCancelled = job.status === "cancelled";
   // Same "sent back for correction" semantics as JobDetailPatrolman — see
@@ -6108,12 +6084,10 @@ function JobDetailProvider({ job, jobs, session, persist, now, onBack }) {
       {job.status === "dispatched" && <div style={{ margin: "10px 0 4px" }}><JobUrgencyChip job={job} now={now} /></div>}
 
       <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10, fontSize: 13 }}>
-        <CopyableRow icon={FileText} label="Job number" value={job.jobNumber} />
-        <CopyableRow icon={Building2} label="Site name" value={job.siteName} />
-        <CopyableRow icon={MapPin} label="Address" value={job.address} />
-        <CopyableRow icon={AlertTriangle} label={descriptionFieldLabel(job, { short: true })} value={job.description} />
-        <CopyableRow icon={KeyRound} label="Key info" value={job.keyInfo} />
-        <CopyableRow icon={KeyRound} label="Alarm code" value={job.alarmCode} />
+        <AddressRow address={job.address} />
+        <DetailRow icon={AlertTriangle} label={descriptionFieldLabel(job, { short: true })} value={job.description} />
+        <DetailRow icon={KeyRound} label="Key info" value={job.keyInfo} />
+        <DetailRow icon={KeyRound} label="Alarm code" value={job.alarmCode} />
       </div>
 
       {isCancelled && (
