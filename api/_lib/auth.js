@@ -38,20 +38,32 @@ export async function verifyPassword(plain, hash) {
 // is uniquely identified by that pair, not loginName alone); a token whose
 // embedded `sid` no longer matches this stored value belongs to a session
 // that's been superseded by a newer login.
+//
+// Provider is the one exception: a provider login is deliberately shared
+// across a whole outside team (their own dispatcher plus however many of
+// their patrol cars), who need to be signed in at the same time on their
+// own devices — see claimActiveSession and resolveSession below, which
+// both skip this enforcement for that role.
 function activeSessionKey(role, loginName) {
   return `ops:activesession:${role}:${String(loginName).trim().toLowerCase()}`;
 }
 
 export async function claimActiveSession(account) {
   const sid = crypto.randomUUID();
-  await kvSet(activeSessionKey(account.role, account.loginName), sid);
-  // Push subscriptions are device-level and outlive a session on their
-  // own — logging in here is the one moment we know for certain every
-  // previously-subscribed device for this account is no longer "the"
-  // active one, so this is where stale devices actually get cut off
-  // (see clearSubscriptions' own comment for why this matters more than
-  // relying on those devices to unsubscribe themselves on logout).
-  await clearSubscriptions(account.loginName, account.role).catch(() => {});
+  if (account.role !== "provider") {
+    await kvSet(activeSessionKey(account.role, account.loginName), sid);
+    // Push subscriptions are device-level and outlive a session on their
+    // own — logging in here is the one moment we know for certain every
+    // previously-subscribed device for this account is no longer "the"
+    // active one, so this is where stale devices actually get cut off
+    // (see clearSubscriptions' own comment for why this matters more than
+    // relying on those devices to unsubscribe themselves on logout). Skipped
+    // for a provider login precisely because every one of its devices stays
+    // "the" active one — wiping subscriptions here would silently stop job
+    // alerts on a teammate's phone every time anyone else on the team signs
+    // in (addSubscription already supports more than one device per login).
+    await clearSubscriptions(account.loginName, account.role).catch(() => {});
+  }
   return sid;
 }
 
@@ -95,8 +107,12 @@ async function resolveSession(req) {
   if (payload.role === "operator" && payload.iat && Date.now() - payload.iat * 1000 >= OPERATOR_MAX_SESSION_MS) {
     return { session: null, reason: "sessionLimit" };
   }
-  const currentSid = await kvGet(activeSessionKey(payload.role, payload.loginName));
-  if (currentSid !== payload.sid) return { session: null, reason: "superseded" };
+  // See claimActiveSession's comment — a provider login never claims (or
+  // loses) "the" active session, so there's nothing to compare here.
+  if (payload.role !== "provider") {
+    const currentSid = await kvGet(activeSessionKey(payload.role, payload.loginName));
+    if (currentSid !== payload.sid) return { session: null, reason: "superseded" };
+  }
   return { session: payload, reason: null };
 }
 
