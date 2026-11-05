@@ -3322,9 +3322,26 @@ function JobDetailOperator({ job, jobs, patrolmen, providers, roster, session, p
 
   function update(patch) {
     const merged = { ...job, ...patch };
+    // Stamped synchronously, inside the very same persisted object that
+    // carries the triggering status change, rather than via a separate
+    // follow-up update() after the email round-trip finished — see this
+    // block's own comment below for why that gap let two close-together
+    // status changes on the same job (most commonly "Mark reviewed"
+    // immediately followed by "Prepare client email") both read
+    // longAttendanceAlertedAt as still unset and each send their own
+    // email, duplicating the alert for the same job.
+    const shouldAlertLongAttendance = longAttendanceAlertNeeded(patch, merged);
+    if (shouldAlertLongAttendance) merged.longAttendanceAlertedAt = new Date().toISOString();
     const updated = jobs.map((j) => (j.id === job.id ? merged : j));
     const result = persist(updated);
-    maybeAlertLongAttendance(patch, merged, result);
+    if (shouldAlertLongAttendance) {
+      result
+        .then(() => notifyLongAttendance(merged.id))
+        .then((r) => {
+          if (!r.ok) showToast(`Long-attendance alert for ${merged.jobNumber} couldn't be sent: ${r.error || "unknown error"}`, "error");
+        })
+        .catch(() => {});
+    }
     return result;
   }
 
@@ -3341,26 +3358,17 @@ function JobDetailOperator({ job, jobs, patrolmen, providers, roster, session, p
   // the onsite/offsite times and the result are all final. If the
   // patrolman spent longer than usual actually on site, managers get a
   // heads-up email then and there rather than buried in tomorrow's daily
-  // report. Fire-and-forget, after the persist it depends on; never
-  // awaited by `update` itself so closing out a job is never held up
-  // waiting on an email to send. `longAttendanceAlertedAt` (set once this
-  // succeeds) keeps a job that's reviewed more than once — or corrected
-  // after the fact — from alerting twice.
-  function maybeAlertLongAttendance(patch, merged, afterPersist) {
-    if (patch.status !== "reviewed" && patch.status !== "emailed") return;
-    if (!isResponseJob(merged) || !merged.onsiteTime || !merged.offsiteTime || merged.longAttendanceAlertedAt) return;
+  // report. longAttendanceAlertedAt (stamped by update() above the moment
+  // this returns true, not after the email actually sends) keeps a job
+  // that's reviewed more than once — or corrected after the fact — from
+  // alerting twice; the tradeoff is a failed send no longer gets a free
+  // retry off some later status change, same as any other fire-and-forget
+  // notification in this app (the operator still sees the toast below).
+  function longAttendanceAlertNeeded(patch, merged) {
+    if (patch.status !== "reviewed" && patch.status !== "emailed") return false;
+    if (!isResponseJob(merged) || !merged.onsiteTime || !merged.offsiteTime || job.longAttendanceAlertedAt) return false;
     const minutesOnsite = Math.round((new Date(merged.offsiteTime).getTime() - new Date(merged.onsiteTime).getTime()) / 60000);
-    if (minutesOnsite <= 25) return;
-    afterPersist
-      .then(() => notifyLongAttendance(merged.id))
-      .then((r) => {
-        if (r.ok && r.sent) {
-          update({ longAttendanceAlertedAt: new Date().toISOString() });
-        } else if (!r.ok) {
-          showToast(`Long-attendance alert for ${merged.jobNumber} couldn't be sent: ${r.error || "unknown error"}`, "error");
-        }
-      })
-      .catch(() => {});
+    return minutesOnsite > 25;
   }
 
   // A job with status "dispatched" is never an archived one (only
