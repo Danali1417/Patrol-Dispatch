@@ -3320,7 +3320,14 @@ function JobDetailOperator({ job, jobs, patrolmen, providers, roster, session, p
   // dispatch time — see resolveJobRoster's own comment in reportUtils.js.
   const { run: resolvedRun, patrolmanName: resolvedPatrolman } = resolveJobRoster(job, roster);
 
-  function update(patch) {
+  // `opts` forwards straight through to persist() — in particular
+  // `{ throwOnError: true }`, used only by the "mark emailed" write below
+  // (see EmailModal's onSent), where a write that silently fails and gets
+  // optimistically shown as done anyway — the default, right tradeoff for
+  // every other routine edit in this component — is how a job ends up
+  // looking untouched on reopen after the client email has already gone
+  // out, inviting a genuine duplicate send.
+  function update(patch, opts) {
     const merged = { ...job, ...patch };
     // Stamped synchronously, inside the very same persisted object that
     // carries the triggering status change, rather than via a separate
@@ -3333,7 +3340,7 @@ function JobDetailOperator({ job, jobs, patrolmen, providers, roster, session, p
     const shouldAlertLongAttendance = longAttendanceAlertNeeded(patch, merged);
     if (shouldAlertLongAttendance) merged.longAttendanceAlertedAt = new Date().toISOString();
     const updated = jobs.map((j) => (j.id === job.id ? merged : j));
-    const result = persist(updated);
+    const result = persist(updated, opts);
     if (shouldAlertLongAttendance) {
       result
         .then(() => notifyLongAttendance(merged.id))
@@ -3348,8 +3355,8 @@ function JobDetailOperator({ job, jobs, patrolmen, providers, roster, session, p
   // Merges a new entry into the job's activity log alongside whatever
   // else the patch is changing, so every operator action lands in one
   // persisted update rather than a separate round trip.
-  function logAction(action, detail, patch = {}) {
-    return update({ ...patch, activityLog: [...(job.activityLog || []), logEntry(session, action, detail)] });
+  function logAction(action, detail, patch = {}, opts) {
+    return update({ ...patch, activityLog: [...(job.activityLog || []), logEntry(session, action, detail)] }, opts);
   }
 
   // A Response job reaching a closed-with-results state — "Mark reviewed",
@@ -4041,13 +4048,21 @@ function JobDetailOperator({ job, jobs, patrolmen, providers, roster, session, p
           patrolmen={patrolmen}
           logoUrl={logoUrl}
           onClose={() => setShowEmail(false)}
-          onSent={({ clientEmail, emailSentByApp, photosBackedUp }) => {
-            logAction(emailSentByApp ? "Client email sent" : "Client email marked sent", clientEmail, {
+          // Awaited (and throwOnError'd) by EmailModal itself — it's the
+          // one place in this component where a silently-failed write is
+          // unacceptable, since the client email it follows has already,
+          // irreversibly, gone out by the time this runs. See EmailModal's
+          // own sendNow()/markSentWithoutEmail() for how a failure here is
+          // surfaced instead of just closing the modal as if nothing went
+          // wrong.
+          onSent={({ clientEmail, emailSentByApp, photosBackedUp }) => logAction(
+            emailSentByApp ? "Client email sent" : "Client email marked sent", clientEmail,
+            {
               status: "emailed", emailedAt: new Date().toISOString(), reviewNotes: notes, clientEmail, emailSentByApp,
               ...(photosBackedUp ? { photosBackedUpAt: new Date().toISOString() } : {}),
-            });
-            setShowEmail(false);
-          }}
+            },
+            { throwOnError: true }
+          )}
         />
       )}
     </div>
@@ -4739,11 +4754,41 @@ function EmailModal({ job, companyName, now, roster, patrolmen, logoUrl, onClose
   const [clientEmail, setClientEmail] = useState(job.clientEmail || job.monitoringEmail || "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Flips the instant the real client email succeeds, before confirmSent
+  // even runs — disables "Send email now" for the rest of this modal's
+  // life so a confused retry after a "couldn't mark this job as sent"
+  // error can't fire a second, genuinely duplicate email to the client.
+  const [alreadySent, setAlreadySent] = useState(false);
   const showToast = useToast();
 
   const subject = `Alarm Response Advice — Job Ref ${job.jobNumber} — ${job.siteName}${jobRevisionLabel(job)}`;
   const { html, text } = buildAdviceEmail(job, companyName);
   const emailLooksValid = /\S+@\S+\.\S+/.test(clientEmail.trim());
+
+  // Retries onSent (which marks this job "emailed" — see its own comment
+  // where it's wired up) a few times before giving up, since by the point
+  // this is called the real email may already be out the door and a
+  // silent failure here is what used to let the modal close anyway,
+  // leaving the job looking untouched the next time anyone opened it —
+  // and from there, a second, genuinely duplicate send to the client.
+  async function confirmSent(payload) {
+    let lastErr = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 1000 * attempt));
+      try {
+        await onSent(payload);
+        return true;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    setError(
+      payload.emailSentByApp
+        ? `The email was already sent to the client — only marking this job as sent failed (${lastErr?.message || "unknown error"}). Do NOT send it again. Close this, refresh the board, and mark it sent manually if it's still showing as unsent.`
+        : `Couldn't mark this job as sent (${lastErr?.message || "unknown error"}) — try again.`
+    );
+    return false;
+  }
 
   async function sendNow() {
     setError("");
@@ -4762,8 +4807,10 @@ function EmailModal({ job, companyName, now, roster, patrolmen, logoUrl, onClose
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Send failed (${res.status})`);
       showToast("Email sent to client.");
+      setAlreadySent(true);
       const backup = await sendPhotoBackupEmail(job, companyName, now, logoUrl, roster, patrolmen);
-      onSent({ clientEmail: clientEmail.trim(), emailSentByApp: true, photosBackedUp: backup.sent });
+      const marked = await confirmSent({ clientEmail: clientEmail.trim(), emailSentByApp: true, photosBackedUp: backup.sent });
+      if (marked) onClose();
     } catch (e) {
       setError(e.message || "Couldn't send — try again, or copy the text and send it yourself.");
     }
@@ -4773,10 +4820,12 @@ function EmailModal({ job, companyName, now, roster, patrolmen, logoUrl, onClose
   // The client email is skipped here, but the internal backup isn't — this
   // is exactly the path that used to leave photos with no email at all.
   async function markSentWithoutEmail() {
+    setError("");
     setBusy(true);
     const backup = await sendPhotoBackupEmail(job, companyName, now, logoUrl, roster, patrolmen);
+    const marked = await confirmSent({ clientEmail: clientEmail.trim(), emailSentByApp: false, photosBackedUp: backup.sent });
     setBusy(false);
-    onSent({ clientEmail: clientEmail.trim(), emailSentByApp: false, photosBackedUp: backup.sent });
+    if (marked) onClose();
   }
 
   return (
@@ -4804,17 +4853,22 @@ function EmailModal({ job, companyName, now, roster, patrolmen, logoUrl, onClose
           </div>
         )}
         {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 8 }}>{error}</div>}
+        {alreadySent && (
+          <div style={{ color: "var(--ok)", fontSize: 12, marginTop: 8 }}>
+            Email already sent to the client — close this and refresh the board rather than sending again.
+          </div>
+        )}
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
           <button onClick={() => navigator.clipboard?.writeText(text)} style={secondaryBtn}><Copy size={13} /> Copy</button>
-          <button onClick={markSentWithoutEmail} disabled={busy} style={{ ...secondaryBtn, opacity: busy ? 0.6 : 1, cursor: busy ? "not-allowed" : "pointer" }}>
+          <button onClick={markSentWithoutEmail} disabled={busy || alreadySent} style={{ ...secondaryBtn, opacity: busy || alreadySent ? 0.6 : 1, cursor: busy || alreadySent ? "not-allowed" : "pointer" }}>
             <CheckCircle2 size={13} /> {busy ? "Working…" : "Mark as sent / closed"}
           </button>
           <button
             onClick={sendNow}
-            disabled={busy || !emailLooksValid}
-            style={{ ...primaryBtn, flex: 1, justifyContent: "center", opacity: busy || !emailLooksValid ? 0.5 : 1, cursor: busy || !emailLooksValid ? "not-allowed" : "pointer" }}
+            disabled={busy || !emailLooksValid || alreadySent}
+            style={{ ...primaryBtn, flex: 1, justifyContent: "center", opacity: busy || !emailLooksValid || alreadySent ? 0.5 : 1, cursor: busy || !emailLooksValid || alreadySent ? "not-allowed" : "pointer" }}
           >
-            <Send size={13} /> {busy ? "Sending…" : "Send email now"}
+            <Send size={13} /> {alreadySent ? "Already sent" : busy ? "Sending…" : "Send email now"}
           </button>
         </div>
       </div>
