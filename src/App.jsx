@@ -3240,6 +3240,11 @@ function JobDetailOperator({ job, jobs, patrolmen, providers, roster, session, p
   const [showEmail, setShowEmail] = useState(false);
   const [showCancelForm, setShowCancelForm] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
+  const [cancelError, setCancelError] = useState("");
+  // Flips the instant the internal photo-backup email for this cancellation
+  // actually sends — see confirmCancel's own comment for why a retry after
+  // that must never call sendPhotoBackupEmail a second time.
+  const [cancelBackupSent, setCancelBackupSent] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
   const [onsiteEdit, setOnsiteEdit] = useState(toLocalInputValue(job.onsiteTime));
@@ -3536,14 +3541,52 @@ function JobDetailOperator({ job, jobs, patrolmen, providers, roster, session, p
 
   async function confirmCancel() {
     setCancelBusy(true);
+    setCancelError("");
     const patch = {
       status: "cancelled", cancelReason: cancelReason.trim(), cancelledAt: new Date().toISOString(),
       cancelledByLoginName: session.loginName, cancelledByName: session.displayName,
     };
-    const backup = await sendPhotoBackupEmail({ ...jobWithPhotos, ...patch }, companyName, now, logoUrl, roster, patrolmen);
-    if (backup.sent) patch.photosBackedUpAt = new Date().toISOString();
-    await logAction("Cancelled", cancelReason.trim(), patch);
+    // Skipped on a retry after a failed persist below — the backup email
+    // already went out the first time, and sendPhotoBackupEmail has no
+    // idea this is a resend, so calling it again would duplicate it (see
+    // this function's own history: that's exactly how "we received 2
+    // backup emails for the same job" happened on the cancel path — the
+    // persist below used to be fire-and-forget, so a silent failure left
+    // the job looking un-cancelled, and retrying resent the backup email
+    // the user genuinely already had).
+    let backupSent = cancelBackupSent;
+    if (!backupSent) {
+      const backup = await sendPhotoBackupEmail({ ...jobWithPhotos, ...patch }, companyName, now, logoUrl, roster, patrolmen);
+      backupSent = backup.sent;
+      if (backupSent) setCancelBackupSent(true);
+    }
+    if (backupSent) patch.photosBackedUpAt = new Date().toISOString();
+    // throwOnError, retried with backoff, same reasoning and pattern as
+    // EmailModal's onSent/confirmSent — once the backup email is out,
+    // silently claiming "cancelled" without confirming the status write
+    // actually landed is how the job keeps showing as cancellable and
+    // invites exactly that duplicate.
+    let cancelled = false;
+    let lastErr = null;
+    for (let attempt = 0; attempt < 4 && !cancelled; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 1000 * attempt));
+      try {
+        await logAction("Cancelled", cancelReason.trim(), patch, { throwOnError: true });
+        cancelled = true;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
     setCancelBusy(false);
+    if (!cancelled) {
+      // Safe to retry from here — cancelBackupSent (set above) means
+      // pressing "Confirm cancel" again only retries the status write,
+      // never a second backup email.
+      setCancelError(
+        `${backupSent ? "The backup email already went out, but t" : "T"}his job couldn't be marked cancelled (${lastErr?.message || "unknown error"}). Try "Confirm cancel" again — it won't resend the backup email — or refresh the board if it keeps failing.`
+      );
+      return;
+    }
     setShowCancelForm(false);
     showToast("Job cancelled.");
   }
@@ -3803,6 +3846,7 @@ function JobDetailOperator({ job, jobs, patrolmen, providers, roster, session, p
             <Ban size={14} /> Cancel this job — the patrolman will be notified to stand down
           </div>
           <UpperTextarea rows={2} value={cancelReason} onChange={setCancelReason} placeholder="e.g. Monitoring advised stand down — client cancelled the alarm" style={{ ...selectStyle, resize: "vertical" }} />
+          {cancelError && <div style={{ color: "#B91C1C", fontSize: 12, fontWeight: 600, marginTop: 8 }}>{cancelError}</div>}
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <button onClick={confirmCancel} disabled={cancelBusy} style={{ ...primaryBtn, background: "var(--breach)", opacity: cancelBusy ? 0.6 : 1, cursor: cancelBusy ? "not-allowed" : "pointer" }}>
               <Ban size={14} /> {cancelBusy ? "Cancelling…" : "Confirm cancel"}
