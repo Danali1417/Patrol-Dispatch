@@ -3540,6 +3540,10 @@ function JobDetailOperator({ job, jobs, patrolmen, providers, roster, session, p
   }
 
   async function confirmCancel() {
+    // See EmailModal's sendNow for why this is needed on top of the
+    // button's own disabled={cancelBusy} — a fast double-click/double-tap
+    // can invoke this a second time before React disables anything.
+    if (cancelBusy) return;
     setCancelBusy(true);
     setCancelError("");
     const patch = {
@@ -4835,6 +4839,13 @@ function EmailModal({ job, companyName, now, roster, patrolmen, logoUrl, onClose
   }
 
   async function sendNow() {
+    // Belt-and-suspenders alongside the button's own `disabled={busy}` —
+    // that only takes effect once React actually re-renders, which a fast
+    // double-click/double-tap can beat (same race NewJobForm's dispatch()
+    // already guards against for the exact same reason). Without this,
+    // two near-simultaneous calls both run past setBusy(true) before
+    // either disables anything, and both genuinely send the client email.
+    if (busy || alreadySent) return;
     setError("");
     setBusy(true);
     try {
@@ -4864,6 +4875,7 @@ function EmailModal({ job, companyName, now, roster, patrolmen, logoUrl, onClose
   // The client email is skipped here, but the internal backup isn't — this
   // is exactly the path that used to leave photos with no email at all.
   async function markSentWithoutEmail() {
+    if (busy || alreadySent) return; // see sendNow's own comment
     setError("");
     setBusy(true);
     const backup = await sendPhotoBackupEmail(job, companyName, now, logoUrl, roster, patrolmen);

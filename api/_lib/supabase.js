@@ -65,6 +65,27 @@ export async function kvSet(key, value) {
   });
 }
 
+// Atomically claims `key` — true only for whichever call is the first
+// ever to claim it (a fresh row actually gets inserted); false for every
+// other call, concurrent or later, since `ignore-duplicates` silently
+// drops a conflicting insert instead of overwriting, and `return=
+// representation` then only echoes back the rows that were genuinely
+// inserted — an empty response means someone else's insert landed first.
+// Unlike kvSet (an upsert — always "succeeds", never tells two
+// overlapping callers apart), this is for guarding a one-time action
+// against running twice when more than one invocation might ask for it
+// at once — see archiveOldJobs's own comment for why the daily archive
+// sweep needed exactly this.
+export async function claimOnce(key) {
+  const res = await sbFetch("kv_store", {
+    method: "POST",
+    headers: { Prefer: "resolution=ignore-duplicates,return=representation" },
+    body: JSON.stringify([{ key, value: new Date().toISOString(), updated_at: new Date().toISOString() }]),
+  });
+  const rows = await res.json().catch(() => []);
+  return Array.isArray(rows) && rows.length > 0;
+}
+
 // Same as kvSet, plus a small `search` jsonb payload (e.g. {jobNumber,
 // siteName, dispatchDate}) stored alongside the full value — lets
 // archived jobs be filtered server-side (by text or date range) via
