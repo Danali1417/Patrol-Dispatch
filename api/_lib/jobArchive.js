@@ -21,7 +21,7 @@
 
 import crypto from "node:crypto";
 import { isMailConfigured, getMailFrom, createMailTransporter } from "./mail.js";
-import { kvGet, kvSet, kvSetSearchable, kvGetPrefixMissingSearch, kvQueryPrefix, kvDelete } from "./supabase.js";
+import { kvGet, kvSet, kvSetSearchable, kvGetPrefixMissingSearch, kvQueryPrefix, kvDelete, claimOnce } from "./supabase.js";
 import { deleteAllUnderPrefix } from "./storage.js";
 import { sendPushToPatrolman } from "./push.js";
 import { fmtDateTime, fmtTime, jobRevisionLabel } from "../../src/reportUtils.js";
@@ -325,6 +325,19 @@ async function archiveChat(job) {
 }
 
 export async function archiveOldJobs(now = new Date(), { transporter } = {}) {
+  // This is meant to run exactly once a day — see this function's header
+  // comment — but Vercel Cron and the manual retry link sendFailureAlert
+  // prints (daily-report.js) can both end up invoking the whole handler
+  // more than once on the same day, and until now nothing stopped a
+  // second overlapping call from reading the same ops:jobs snapshot a
+  // moment later and resending a just-sent job's photo-backup email: two
+  // genuinely concurrent reads both see photosBackedUpAt still unset.
+  // Claimed atomically before anything else runs, so only the first call
+  // on any given UTC date actually sweeps — every other one bails out
+  // immediately instead of racing it.
+  const claimed = await claimOnce(`ops:archiveSweepClaim:${now.toISOString().slice(0, 10)}`);
+  if (!claimed) return { archived: 0, remaining: null, skipped: "archive sweep already ran today" };
+
   const raw = await kvGet(JOBS_KEY);
   if (!raw) return { archived: 0, remaining: 0 };
   let jobs;
