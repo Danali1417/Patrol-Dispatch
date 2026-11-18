@@ -19,7 +19,7 @@ import { createUploadUrl, createReadUrl } from "./_lib/storage.js";
 
 const RUN_SHEETS_KEY = "ops:runSheets";
 const ZONE_AREAS_KEY = "ops:zoneAreas";
-const PATROL_SITE_DETAILS_KEY = "ops:patrolSiteDetails";
+const PERMANENT_PATROL_SITES_KEY = "ops:permanentPatrolSites";
 
 // Patrol Ops (Regions, Patrol Sites, Run Sheets) is a private pilot for
 // one manager login right now, not every manager — mirrors the client's
@@ -71,23 +71,29 @@ function applyZoneAreasOp(current, op, payload) {
   }
 }
 
-// Upserts by siteId — the patrol-only fields (geofence, schedule) for one
-// existing site, kept out of ops:sites itself (see this key's own
-// comment further down).
-function applyPatrolSiteDetailsOp(current, op, payload) {
+// Full records, same add/update/remove shape as applyRunSheetsOp above —
+// a Permanent Patrol Site (customer, address, notes, region, geofence,
+// schedule) is its own entity, kept entirely separate from ops:sites
+// (alarm-response/ad-hoc dispatch sites — see this key's own comment
+// further down), not metadata bolted onto one of those records.
+function applyPermanentPatrolSitesOp(current, op, payload) {
   switch (op) {
-    case "set": {
-      const detail = payload?.detail;
-      if (!detail?.siteId) throw new Error("detail.siteId is required");
-      const idx = current.findIndex((d) => d.siteId === detail.siteId);
-      return idx === -1 ? [...current, detail] : current.map((d, i) => (i === idx ? detail : d));
+    case "add": {
+      const record = payload?.record;
+      if (!record || !record.id) throw new Error("record is required");
+      return [...current, record];
+    }
+    case "update": {
+      const { id, record } = payload || {};
+      if (!id || !record) throw new Error("id and record are required");
+      return current.map((r) => (r.id === id ? { ...record, id } : r));
     }
     case "remove": {
-      if (!payload?.siteId) throw new Error("siteId is required");
-      return current.filter((d) => d.siteId !== payload.siteId);
+      if (!payload?.id) throw new Error("id is required");
+      return current.filter((r) => r.id !== payload.id);
     }
     default:
-      throw new Error(`Unknown patrol site details op: ${op}`);
+      throw new Error(`Unknown permanent patrol sites op: ${op}`);
   }
 }
 
@@ -98,7 +104,7 @@ function applyPatrolSiteDetailsOp(current, op, payload) {
 const DAN_ONLY_PILOT_KEYS = {
   [RUN_SHEETS_KEY]: applyRunSheetsOp,
   [ZONE_AREAS_KEY]: applyZoneAreasOp,
-  [PATROL_SITE_DETAILS_KEY]: applyPatrolSiteDetailsOp,
+  [PERMANENT_PATROL_SITES_KEY]: applyPermanentPatrolSitesOp,
 };
 
 const PUBLIC_READ_KEYS = new Set(["ops:logo", "ops:companyName"]);

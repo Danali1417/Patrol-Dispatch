@@ -25,10 +25,11 @@ export function loadGoogleMaps() {
       return;
     }
     const script = document.createElement("script");
-    // "drawing" is the freehand-polygon toolbar RegionAreaEditor uses; the
-    // Circle/Marker editors elsewhere don't need it, but loading one combined
-    // script is simpler than juggling two loader promises for one page.
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=drawing`;
+    // "drawing" is the freehand-polygon toolbar RegionAreaEditor uses;
+    // "geometry" is containsLocation(), used to suggest which region a
+    // Permanent Patrol Site's pin falls inside. Loading one combined
+    // script is simpler than juggling separate loader promises per page.
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=drawing,geometry`;
     script.async = true;
     script.dataset.googleMapsLoader = "1";
     script.onload = () => resolve(window.google.maps);
