@@ -25,7 +25,10 @@ export function loadGoogleMaps() {
       return;
     }
     const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}`;
+    // "drawing" is the freehand-polygon toolbar RegionAreaEditor uses; the
+    // Circle/Marker editors elsewhere don't need it, but loading one combined
+    // script is simpler than juggling two loader promises for one page.
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=drawing`;
     script.async = true;
     script.dataset.googleMapsLoader = "1";
     script.onload = () => resolve(window.google.maps);
