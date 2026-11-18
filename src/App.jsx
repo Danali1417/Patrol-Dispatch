@@ -7898,7 +7898,7 @@ function RegionAreaEditor({ zoneName, zoneArea, persistZoneAreas }) {
     loadGoogleMaps().then((maps) => {
       if (cancelled || !mapRef.current) return;
       const center = zoneArea?.center || DEFAULT_MAP_CENTER;
-      const map = new maps.Map(mapRef.current, { center, zoom: zoneArea ? 12 : 10, streetViewControl: false, mapTypeControl: false, fullscreenControl: false });
+      const map = new maps.Map(mapRef.current, { center, zoom: zoneArea ? 12 : 10, streetViewControl: false, mapTypeControl: false, fullscreenControl: true });
       const circle = new maps.Circle({
         map, center, radius: zoneArea?.radiusMeters || 2000,
         editable: true, draggable: true, fillOpacity: 0.12, strokeColor: "#0B2545", fillColor: "#0B2545",
@@ -7949,7 +7949,7 @@ function SiteGeofenceEditor({ site, detail, persistPatrolSiteDetails }) {
     loadGoogleMaps().then((maps) => {
       if (cancelled || !mapRef.current) return;
       const center = detail?.geofence?.center || DEFAULT_MAP_CENTER;
-      const map = new maps.Map(mapRef.current, { center, zoom: detail?.geofence ? 16 : 11, streetViewControl: false, mapTypeControl: false, fullscreenControl: false });
+      const map = new maps.Map(mapRef.current, { center, zoom: detail?.geofence ? 16 : 11, streetViewControl: false, mapTypeControl: false, fullscreenControl: true });
       const marker = new maps.Marker({ map, position: center, draggable: true });
       const circle = new maps.Circle({
         map, center, radius: detail?.geofence?.radiusMeters || 100,
