@@ -17,6 +17,39 @@ import { kvGet, kvGetWithMeta, kvGetUpdatedAt, kvSet, kvQueryPrefix, kvDelete, k
 import { JOB_ARCHIVE_PREFIX, JOB_PHOTOS_PREFIX, JOB_CHAT_PREFIX } from "./_lib/keyPrefixes.js";
 import { createUploadUrl, createReadUrl } from "./_lib/storage.js";
 
+const RUN_SHEETS_KEY = "ops:runSheets";
+
+// Patrol Sites & Run Sheets is a private pilot for one manager login
+// right now, not every manager — mirrors the client's own isDanLogin
+// (see App.jsx). Kept as its own check rather than folded into the
+// MANAGER_ONLY_WRITE_KEYS/OPERATOR_UP_WRITE_KEYS sets below (which gate
+// by role only), so this key is both read- and write-restricted to that
+// one login, and lifting the restriction later is a one-line change.
+function isDanLogin(session) {
+  return session.role === "manager" && session.loginName.trim().toLowerCase() === "dan";
+}
+
+function applyRunSheetsOp(current, op, payload) {
+  switch (op) {
+    case "add": {
+      const runSheet = payload?.runSheet;
+      if (!runSheet || !runSheet.id) throw new Error("runSheet is required");
+      return [...current, runSheet];
+    }
+    case "update": {
+      const { id, runSheet } = payload || {};
+      if (!id || !runSheet) throw new Error("id and runSheet are required");
+      return current.map((r) => (r.id === id ? { ...runSheet, id } : r));
+    }
+    case "remove": {
+      if (!payload?.id) throw new Error("id is required");
+      return current.filter((r) => r.id !== payload.id);
+    }
+    default:
+      throw new Error(`Unknown run sheets op: ${op}`);
+  }
+}
+
 const PUBLIC_READ_KEYS = new Set(["ops:logo", "ops:companyName"]);
 // Only a manager edits the Monitoring/Bureau master lists (Manager >
 // Monitoring & Bureau) — Control Room only reads them (for the New Site
@@ -637,6 +670,39 @@ export default async function handler(req, res) {
     } catch (err) {
       console.error("kv jobchat failed:", err);
       return res.status(500).json({ error: String(err?.message || err) });
+    }
+  }
+
+  // Patrol Sites & Run Sheets — private pilot, restricted to one manager
+  // login (see isDanLogin's own comment above). Handled as its own block,
+  // same as jobphotos/jobchat above, rather than through KNOWN_KEYS/the
+  // role-set machinery below, which only gates by role and is shared by
+  // keys that are meant to stay visible to every manager.
+  if (key === RUN_SHEETS_KEY) {
+    const session = await requireRole(req, res, ["manager"]);
+    if (!session) return;
+    if (!isDanLogin(session)) return res.status(403).json({ error: "Not available on this account yet" });
+    try {
+      if (req.method === "GET") {
+        const row = await kvGetWithMeta(key);
+        return res.status(200).json({ key, value: row ? row.value : "[]", updatedAt: row ? row.updated_at : null });
+      }
+      if (req.method === "POST") {
+        const { op, ...payload } = req.body || {};
+        if (!op) return res.status(400).json({ error: "op is required for this key" });
+        const raw = await kvGet(key);
+        let current;
+        try { current = raw ? JSON.parse(raw) : []; } catch (e) { current = []; }
+        if (!Array.isArray(current)) current = [];
+        const next = applyRunSheetsOp(current, op, payload);
+        const value = JSON.stringify(next);
+        await kvSet(key, value);
+        return res.status(200).json({ key, value });
+      }
+      return res.status(405).json({ error: "Method not allowed" });
+    } catch (err) {
+      console.error("kv runSheets failed:", err);
+      return res.status(400).json({ error: String(err?.message || err) });
     }
   }
 
