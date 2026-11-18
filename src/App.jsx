@@ -26,6 +26,7 @@ import { loadJobDraft, saveJobDraft, clearJobDraft } from "./jobDraft.js";
 import { fetchJobChat, sendJobChatMessage } from "./jobChat.js";
 import { searchArchivedJobs, fetchArchivedJobsInRange, resetArchiveAndPhotos, previewSiteRecovery } from "./jobArchive.js";
 import { notifyLongAttendance } from "./longAttendanceAlert.js";
+import { loadGoogleMaps, DEFAULT_MAP_CENTER } from "./googleMaps.js";
 
 /* ---------------------------------------------------------------
    SEED / REFERENCE DATA
@@ -62,6 +63,19 @@ const SITES_KEY = "ops:sites";
 // Private pilot — see isDanLogin below. Patrol Sites & Run Sheets is only
 // built out for one login right now, not every manager.
 const RUN_SHEETS_KEY = "ops:runSheets";
+// A Google-Maps-drawn area (center + radius) layered onto an existing
+// zone name from `zones` — keyed by that name, not a separate zone list
+// of its own, so "region" and "run/zone" stay the one concept the user
+// asked for. If a zone is renamed via the (shared, non-pilot) Runs/zones
+// editor, its area here goes stale under the old name until re-saved —
+// an accepted gap while this stays a single-login pilot.
+const ZONE_AREAS_KEY = "ops:zoneAreas";
+// Patrol-only fields for an existing site (geofence point/radius, patrol
+// schedule) — kept in their own key rather than added to `ops:sites`
+// itself, which every Control Room/Manager session reads and writes
+// today for ordinary job dispatch; this way the pilot can grow that
+// record's shape freely without touching the shared one.
+const PATROL_SITE_DETAILS_KEY = "ops:patrolSiteDetails";
 const ROSTER_KEY = "ops:roster";
 const LOGO_KEY = "ops:logo";
 const COMPANY_NAME_KEY = "ops:companyName";
@@ -161,6 +175,33 @@ function applyRunSheetsOpLocal(current, op, payload) {
     case "add": return [...current, payload.runSheet];
     case "update": return current.map((r) => (r.id === payload.id ? { ...payload.runSheet, id: payload.id } : r));
     case "remove": return current.filter((r) => r.id !== payload.id);
+    default: return current;
+  }
+}
+
+// Same idea as applyRunSheetsOpLocal, for a zone's mapped area — mirrors
+// applyZoneAreasOp in api/kv.js. Upserts by zoneName since there's at
+// most one area per zone.
+function applyZoneAreasOpLocal(current, op, payload) {
+  switch (op) {
+    case "set": {
+      const idx = current.findIndex((z) => z.zoneName === payload.zoneArea.zoneName);
+      return idx === -1 ? [...current, payload.zoneArea] : current.map((z, i) => (i === idx ? payload.zoneArea : z));
+    }
+    case "remove": return current.filter((z) => z.zoneName !== payload.zoneName);
+    default: return current;
+  }
+}
+
+// Same idea as applyRunSheetsOpLocal, for a site's patrol-only fields —
+// mirrors applyPatrolSiteDetailsOp in api/kv.js. Upserts by siteId.
+function applyPatrolSiteDetailsOpLocal(current, op, payload) {
+  switch (op) {
+    case "set": {
+      const idx = current.findIndex((d) => d.siteId === payload.detail.siteId);
+      return idx === -1 ? [...current, payload.detail] : current.map((d, i) => (i === idx ? payload.detail : d));
+    }
+    case "remove": return current.filter((d) => d.siteId !== payload.siteId);
     default: return current;
   }
 }
@@ -708,6 +749,8 @@ export default function SentrylinePrototype() {
   const [sites, setSites] = useState([]);
   const [sitesLoaded, setSitesLoaded] = useState(false);
   const [runSheets, setRunSheets] = useState([]);
+  const [zoneAreas, setZoneAreas] = useState([]);
+  const [patrolSiteDetails, setPatrolSiteDetails] = useState([]);
   const [roster, setRoster] = useState([]);
   const [outcomePhrases, setOutcomePhrases] = useState([]);
   const [monitoringCompanies, setMonitoringCompanies] = useState([]);
@@ -951,10 +994,10 @@ export default function SentrylinePrototype() {
     })();
   }, [session]);
 
-  // Run Sheets — private pilot (see isDanLogin's own comment), so this
-  // only ever loads for that one login; every other session never
-  // requests ops:runSheets at all, rather than requesting it and just
-  // discarding a 403.
+  // Run Sheets, zone areas, patrol site details — all private pilot (see
+  // isDanLogin's own comment), so these only ever load for that one
+  // login; every other session never requests these keys at all, rather
+  // than requesting them and just discarding a 403.
   useEffect(() => {
     if (!isDanLogin(session)) return;
     (async () => {
@@ -963,6 +1006,22 @@ export default function SentrylinePrototype() {
         setRunSheets(res?.value ? JSON.parse(res.value) : []);
       } catch (e) {
         if (!isMissingKeyError(e)) console.error("Failed to load run sheets.", e);
+      }
+    })();
+    (async () => {
+      try {
+        const res = await window.storage.get(ZONE_AREAS_KEY);
+        setZoneAreas(res?.value ? JSON.parse(res.value) : []);
+      } catch (e) {
+        if (!isMissingKeyError(e)) console.error("Failed to load zone areas.", e);
+      }
+    })();
+    (async () => {
+      try {
+        const res = await window.storage.get(PATROL_SITE_DETAILS_KEY);
+        setPatrolSiteDetails(res?.value ? JSON.parse(res.value) : []);
+      } catch (e) {
+        if (!isMissingKeyError(e)) console.error("Failed to load patrol site details.", e);
       }
     })();
   }, [session]);
@@ -1184,6 +1243,32 @@ export default function SentrylinePrototype() {
     try {
       const res = await window.storage.applyOp(RUN_SHEETS_KEY, op, payload);
       setRunSheets(JSON.parse(res.value));
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
+  }, []);
+
+  // Same op-based pattern as persistRunSheets above.
+  const persistZoneAreas = useCallback(async (op, payload) => {
+    setZoneAreas((prev) => applyZoneAreasOpLocal(prev, op, payload));
+    try {
+      const res = await window.storage.applyOp(ZONE_AREAS_KEY, op, payload);
+      setZoneAreas(JSON.parse(res.value));
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
+  }, []);
+
+  // Same op-based pattern as persistRunSheets above.
+  const persistPatrolSiteDetails = useCallback(async (op, payload) => {
+    setPatrolSiteDetails((prev) => applyPatrolSiteDetailsOpLocal(prev, op, payload));
+    try {
+      const res = await window.storage.applyOp(PATROL_SITE_DETAILS_KEY, op, payload);
+      setPatrolSiteDetails(JSON.parse(res.value));
       return true;
     } catch (e) {
       console.error(e);
@@ -1422,7 +1507,7 @@ export default function SentrylinePrototype() {
           {!accountsLoaded || !sitesLoaded ? (
             <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
           ) : session.role === "manager" ? (
-            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} runSheets={runSheets} persistRunSheets={persistRunSheets} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
+            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} runSheets={runSheets} persistRunSheets={persistRunSheets} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} patrolSiteDetails={patrolSiteDetails} persistPatrolSiteDetails={persistPatrolSiteDetails} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
           ) : session.role === "operator" ? (
             <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} logoUrl={logoUrl} monitoringCompanies={monitoringCompanies} bureaus={bureaus} />
           ) : session.role === "provider" ? (
@@ -6364,7 +6449,7 @@ function JobDetailProvider({ job, jobs, session, persist, now, onBack }) {
    MANAGER VIEW — create & manage logins
 ---------------------------------------------------------------- */
 
-function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, runSheets, persistRunSheets, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, responseRate, persistResponseRate, bureauRates, persistBureauRates, monitoringRates, persistMonitoringRates, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
+function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, patrolSiteDetails, persistPatrolSiteDetails, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, responseRate, persistResponseRate, bureauRates, persistBureauRates, monitoringRates, persistMonitoringRates, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
   const [tab, setTab] = useState("accounts");
   const showConfirm = useConfirm();
   const showToast = useToast();
@@ -6409,7 +6494,7 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
         {tab === "accounts" && <AccountsManager accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />}
         {tab === "phrases" && <OutcomePhrasesEditor outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} />}
         {tab === "clients" && <ClientListsManager monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} />}
-        {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} session={session} runSheets={runSheets} persistRunSheets={persistRunSheets} />}
+        {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} session={session} runSheets={runSheets} persistRunSheets={persistRunSheets} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} patrolSiteDetails={patrolSiteDetails} persistPatrolSiteDetails={persistPatrolSiteDetails} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} />}
         {tab === "logs" && <Logs jobs={jobs.filter((j) => j.status !== "scheduled")} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} roster={roster} responseRate={responseRate} bureauRates={bureauRates} monitoringRates={monitoringRates} />}
       </div>
@@ -7223,7 +7308,7 @@ function AccountRow({ account, setAccounts, zones, isSelf, lastKnownPassword, on
    SITES & RUNS MANAGER
 ---------------------------------------------------------------- */
 
-function SitesManager({ zones, persistZones, sites, persistSites, accounts, setAccounts, session, runSheets, persistRunSheets }) {
+function SitesManager({ zones, persistZones, sites, persistSites, accounts, setAccounts, session, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, patrolSiteDetails, persistPatrolSiteDetails }) {
   return (
     <div>
       <ZonesEditor zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} />
@@ -7232,7 +7317,12 @@ function SitesManager({ zones, persistZones, sites, persistSites, accounts, setA
       {isDanLogin(session) && (
         <>
           <div style={{ height: 30 }} />
-          <RunSheetsManager sites={sites} runSheets={runSheets} persistRunSheets={persistRunSheets} accounts={accounts} />
+          <PatrolOpsManager
+            zones={zones} sites={sites} accounts={accounts}
+            zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas}
+            patrolSiteDetails={patrolSiteDetails} persistPatrolSiteDetails={persistPatrolSiteDetails}
+            runSheets={runSheets} persistRunSheets={persistRunSheets}
+          />
         </>
       )}
     </div>
@@ -7713,14 +7803,318 @@ function makeRunSheetId() {
   return `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-// Patrol Sites & Run Sheets — private pilot, rendered only for isDanLogin
-// (see SitesManager). A run sheet is a named, ordered group of existing
-// sites for one patrol — distinct from the "Runs/zones" above (an area
-// used for job routing). No geofencing or clock-in gate yet; this is just
-// grouping and assignment, same as SitesEditor's own scope above it.
-function RunSheetsManager({ sites, runSheets, persistRunSheets, accounts }) {
+// Patrol Ops — private pilot, rendered only for isDanLogin (see
+// SitesManager). Three pieces: Regions (a Google-Maps-drawn area laid
+// over an existing run/zone name), Patrol Sites (a geofence point + a
+// weekly patrol schedule added to an existing site), and Run Sheets (a
+// named, ordered group of sites for one patrol, optionally bulk-loaded
+// from a region). No clock-in gate or patrolman-side execution yet —
+// this is Control Room grouping/scheduling only.
+function PatrolOpsManager({ zones, sites, accounts, zoneAreas, persistZoneAreas, patrolSiteDetails, persistPatrolSiteDetails, runSheets, persistRunSheets }) {
+  const [subTab, setSubTab] = useState("regions");
+  const tabs = [["regions", "Regions"], ["sites", "Patrol Sites"], ["runs", "Run Sheets"]];
+
+  return (
+    <div>
+      <div style={{ padding: 12, borderRadius: 8, border: "1px dashed var(--border)", background: "var(--panel-alt)", marginBottom: 20, maxWidth: 760, fontSize: 12, color: "var(--text-dim)" }}>
+        <b style={{ color: "var(--text)" }}>Patrol Ops (pilot — visible only to this login).</b> Regions map an area onto an existing run/zone above. Patrol Sites add a geofence point and a patrol schedule to a site. Run Sheets pull a region's sites together for one patrol. Nothing here affects dispatch yet.
+      </div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+        {tabs.map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setSubTab(key)}
+            style={{ ...secondaryBtn, background: subTab === key ? "var(--navy)" : "var(--panel)", color: subTab === key ? "#fff" : "var(--text)", borderColor: subTab === key ? "var(--navy)" : "var(--border)" }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {subTab === "regions" && <RegionsManager zones={zones} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} />}
+      {subTab === "sites" && <PatrolSitesEditor sites={sites} patrolSiteDetails={patrolSiteDetails} persistPatrolSiteDetails={persistPatrolSiteDetails} />}
+      {subTab === "runs" && (
+        <RunSheetsManager zones={zones} sites={sites} accounts={accounts} zoneAreas={zoneAreas} patrolSiteDetails={patrolSiteDetails} runSheets={runSheets} persistRunSheets={persistRunSheets} />
+      )}
+    </div>
+  );
+}
+
+// Maps an area onto an existing run/zone name from the Runs/zones section
+// above — not a separate region list of its own, so this stays the one
+// "run" concept the rest of the app already has, just with a real mapped
+// area layered on for the ones that get patrolled.
+function RegionsManager({ zones, zoneAreas, persistZoneAreas }) {
+  const [expanded, setExpanded] = useState(null);
+  const areaByZone = useMemo(() => new Map(zoneAreas.map((z) => [z.zoneName, z])), [zoneAreas]);
+
+  return (
+    <div>
+      <SectionTitle icon={MapPin} title="Regions — mapped areas for your runs/zones" small />
+      <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, maxWidth: 560 }}>
+        These are the same runs/zones from the section above. Draw an area for one here so Run Sheets can pull in every site that belongs to it.
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 640 }}>
+        {zones.map((z) => {
+          const area = areaByZone.get(z);
+          const isOpen = expanded === z;
+          return (
+            <div key={z} style={{ borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", cursor: "pointer" }} onClick={() => setExpanded(isOpen ? null : z)}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{z}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{area ? `${(area.radiusMeters / 1000).toFixed(2)} km radius mapped` : "No area mapped yet"}</div>
+                </div>
+                <ChevronRight size={16} style={{ transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .15s" }} />
+              </div>
+              {isOpen && (
+                <div style={{ padding: "0 14px 14px" }}>
+                  <RegionAreaEditor zoneName={z} zoneArea={area} persistZoneAreas={persistZoneAreas} />
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {zones.length === 0 && <Empty text="No runs/zones yet — add one in the Runs / zones section above." />}
+      </div>
+    </div>
+  );
+}
+
+// A single draggable, resizable circle on a Google Map standing in for a
+// region's area — simpler than a drawn polygon and enough to answer "is
+// this site/patrolman inside this region" with a plain distance check
+// later. Mounted only while its region is expanded (see RegionsManager),
+// so it only ever loads the Maps script when one is actually opened.
+function RegionAreaEditor({ zoneName, zoneArea, persistZoneAreas }) {
+  const mapRef = useRef(null);
+  const circleRef = useRef(null);
+  const [error, setError] = useState("");
+  const [radius, setRadius] = useState(zoneArea?.radiusMeters || 2000);
+  const [ready, setReady] = useState(false);
+  const showToast = useToast();
+
+  useEffect(() => {
+    let cancelled = false;
+    loadGoogleMaps().then((maps) => {
+      if (cancelled || !mapRef.current) return;
+      const center = zoneArea?.center || DEFAULT_MAP_CENTER;
+      const map = new maps.Map(mapRef.current, { center, zoom: zoneArea ? 12 : 10, streetViewControl: false, mapTypeControl: false, fullscreenControl: false });
+      const circle = new maps.Circle({
+        map, center, radius: zoneArea?.radiusMeters || 2000,
+        editable: true, draggable: true, fillOpacity: 0.12, strokeColor: "#0B2545", fillColor: "#0B2545",
+      });
+      circle.addListener("radius_changed", () => setRadius(Math.round(circle.getRadius())));
+      circleRef.current = circle;
+      setReady(true);
+    }).catch((e) => setError(e.message));
+    return () => { cancelled = true; };
+  }, []);
+
+  function save() {
+    const c = circleRef.current;
+    if (!c) return;
+    const center = c.getCenter();
+    persistZoneAreas("set", { zoneArea: { zoneName, center: { lat: center.lat(), lng: center.lng() }, radiusMeters: Math.round(c.getRadius()) } });
+    showToast(`Area saved for "${zoneName}".`);
+  }
+
+  if (error) {
+    return <div style={{ fontSize: 12, color: "var(--breach)" }}>Couldn't load the map — {error}. Add VITE_GOOGLE_MAPS_API_KEY in Vercel's environment variables and redeploy.</div>;
+  }
+
+  return (
+    <div>
+      <div ref={mapRef} style={{ width: "100%", height: 260, borderRadius: 8, border: "1px solid var(--border)", marginBottom: 8 }} />
+      <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 8 }}>Drag the circle to move it, drag its edge to resize. Radius: {(radius / 1000).toFixed(2)} km</div>
+      <button onClick={save} disabled={!ready} style={{ ...primaryBtn, opacity: ready ? 1 : 0.6 }}>Save area for "{zoneName}"</button>
+    </div>
+  );
+}
+
+// A draggable pin + resizable circle standing in for one site's geofence
+// — center is the pin's own position (the two stay in sync both ways),
+// radius is however wide the circle's dragged to. Mounted only while a
+// site's "Location" panel is open (see PatrolSitesEditor).
+function SiteGeofenceEditor({ site, detail, persistPatrolSiteDetails }) {
+  const mapRef = useRef(null);
+  const markerRef = useRef(null);
+  const circleRef = useRef(null);
+  const [error, setError] = useState("");
+  const [radius, setRadius] = useState(detail?.geofence?.radiusMeters || 100);
+  const [ready, setReady] = useState(false);
+  const showToast = useToast();
+
+  useEffect(() => {
+    let cancelled = false;
+    loadGoogleMaps().then((maps) => {
+      if (cancelled || !mapRef.current) return;
+      const center = detail?.geofence?.center || DEFAULT_MAP_CENTER;
+      const map = new maps.Map(mapRef.current, { center, zoom: detail?.geofence ? 16 : 11, streetViewControl: false, mapTypeControl: false, fullscreenControl: false });
+      const marker = new maps.Marker({ map, position: center, draggable: true });
+      const circle = new maps.Circle({
+        map, center, radius: detail?.geofence?.radiusMeters || 100,
+        editable: true, fillOpacity: 0.15, strokeColor: "#B45309", fillColor: "#B45309",
+      });
+      marker.addListener("drag", () => circle.setCenter(marker.getPosition()));
+      circle.addListener("center_changed", () => marker.setPosition(circle.getCenter()));
+      circle.addListener("radius_changed", () => setRadius(Math.round(circle.getRadius())));
+      markerRef.current = marker;
+      circleRef.current = circle;
+      setReady(true);
+    }).catch((e) => setError(e.message));
+    return () => { cancelled = true; };
+  }, []);
+
+  function save() {
+    const m = markerRef.current;
+    const c = circleRef.current;
+    if (!m || !c) return;
+    const pos = m.getPosition();
+    persistPatrolSiteDetails("set", {
+      detail: { siteId: site.id, geofence: { center: { lat: pos.lat(), lng: pos.lng() }, radiusMeters: Math.round(c.getRadius()) }, schedule: detail?.schedule || null },
+    });
+    showToast(`Location saved for "${site.name}".`);
+  }
+
+  if (error) {
+    return <div style={{ fontSize: 12, color: "var(--breach)" }}>Couldn't load the map — {error}. Add VITE_GOOGLE_MAPS_API_KEY in Vercel's environment variables and redeploy.</div>;
+  }
+
+  return (
+    <div>
+      <div ref={mapRef} style={{ width: "100%", height: 260, borderRadius: 8, border: "1px solid var(--border)", marginBottom: 8 }} />
+      <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 8 }}>Drag the pin to the site's door, drag the circle's edge to size the geofence. Radius: {radius} m</div>
+      <button onClick={save} disabled={!ready} style={{ ...primaryBtn, opacity: ready ? 1 : 0.6 }}>Save location for "{site.name}"</button>
+    </div>
+  );
+}
+
+const PATROL_WEEKDAYS = [
+  { key: "mon", label: "Mon" }, { key: "tue", label: "Tue" }, { key: "wed", label: "Wed" },
+  { key: "thu", label: "Thu" }, { key: "fri", label: "Fri" }, { key: "sat", label: "Sat" }, { key: "sun", label: "Sun" },
+];
+const BLANK_DAY_SCHEDULE = { enabled: false, patrols: 1, anytime: true, start: "", end: "" };
+
+// One line standing in for a site's whole weekly schedule — shows the
+// days it's active and the first active day's pattern as a representative
+// sample; the editor itself (PatrolScheduleEditor) is where every day's
+// own count/window actually shows.
+function scheduleSummaryText(detail) {
+  if (!detail?.schedule) return "No schedule set";
+  const active = PATROL_WEEKDAYS.filter(({ key }) => detail.schedule[key]?.enabled);
+  if (!active.length) return "No days scheduled";
+  const days = active.map((d) => d.label).join(",");
+  const sample = detail.schedule[active[0].key];
+  const timePart = sample.anytime ? "any time" : `${sample.start || "?"}–${sample.end || "?"}`;
+  return `${days} · ${sample.patrols}/day · ${timePart}`;
+}
+
+function PatrolScheduleEditor({ site, detail, persistPatrolSiteDetails }) {
+  const [schedule, setSchedule] = useState(() => {
+    const s = {};
+    PATROL_WEEKDAYS.forEach(({ key }) => { s[key] = { ...BLANK_DAY_SCHEDULE, ...(detail?.schedule?.[key] || {}) }; });
+    return s;
+  });
+  const showToast = useToast();
+
+  function setDay(key, patch) { setSchedule((s) => ({ ...s, [key]: { ...s[key], ...patch } })); }
+
+  function save() {
+    persistPatrolSiteDetails("set", { detail: { siteId: site.id, schedule, geofence: detail?.geofence || null } });
+    showToast(`Schedule saved for "${site.name}".`);
+  }
+
+  return (
+    <div>
+      {PATROL_WEEKDAYS.map(({ key, label }) => {
+        const d = schedule[key];
+        return (
+          <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
+            <label style={{ width: 66, display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600 }}>
+              <input type="checkbox" checked={d.enabled} onChange={(e) => setDay(key, { enabled: e.target.checked })} /> {label}
+            </label>
+            {d.enabled && (
+              <>
+                <select value={d.patrols} onChange={(e) => setDay(key, { patrols: Number(e.target.value) })} style={{ ...selectStyle, width: 130 }}>
+                  {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n} patrol{n > 1 ? "s" : ""}/day</option>)}
+                </select>
+                <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12 }}>
+                  <input type="checkbox" checked={d.anytime} onChange={(e) => setDay(key, { anytime: e.target.checked })} /> Any time
+                </label>
+                {!d.anytime && (
+                  <>
+                    <input type="time" value={d.start} onChange={(e) => setDay(key, { start: e.target.value })} style={{ ...selectStyle, width: 110 }} />
+                    <span style={{ fontSize: 12, color: "var(--text-dim)" }}>to</span>
+                    <input type="time" value={d.end} onChange={(e) => setDay(key, { end: e.target.value })} style={{ ...selectStyle, width: 110 }} />
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
+      <button onClick={save} style={{ ...primaryBtn, marginTop: 12 }}>Save schedule</button>
+    </div>
+  );
+}
+
+// Same sites as the shared Sites section above — this just adds the two
+// patrol-only fields (geofence point, weekly schedule) to the ones that
+// actually get patrolled, rather than duplicating name/address/alarm
+// code/customer into a second site record.
+function PatrolSitesEditor({ sites, patrolSiteDetails, persistPatrolSiteDetails }) {
+  const [expanded, setExpanded] = useState(null); // { siteId, tab: "location" | "schedule" }
+  const [filter, setFilter] = useState("");
+  const detailBySite = useMemo(() => new Map(patrolSiteDetails.map((d) => [d.siteId, d])), [patrolSiteDetails]);
+
+  const q = filter.trim().toLowerCase();
+  const filteredSites = q ? sites.filter((s) => (s.name || "").toLowerCase().includes(q) || (s.address || "").toLowerCase().includes(q)) : sites;
+
+  return (
+    <div>
+      <SectionTitle icon={MapPin} title={`Patrol Sites (${sites.length})`} small />
+      <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, maxWidth: 560 }}>
+        Site name, instructions, alarm code and customer are already on the site record above — this just adds a geofence point and a patrol schedule.
+      </div>
+      <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search sites…" style={{ ...selectStyle, marginBottom: 10, maxWidth: 420 }} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 720 }}>
+        {filteredSites.map((s) => {
+          const detail = detailBySite.get(s.id);
+          const isOpen = expanded?.siteId === s.id;
+          const locationActive = isOpen && expanded.tab === "location";
+          const scheduleActive = isOpen && expanded.tab === "schedule";
+          return (
+            <div key={s.id} style={{ borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px" }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{s.name}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
+                    {s.address} · {detail?.geofence ? "Location set" : "No location yet"} · {scheduleSummaryText(detail)}
+                  </div>
+                </div>
+                <button onClick={() => setExpanded(locationActive ? null : { siteId: s.id, tab: "location" })} style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px", background: locationActive ? "var(--navy)" : "var(--panel)", color: locationActive ? "#fff" : "var(--text)" }}>Location</button>
+                <button onClick={() => setExpanded(scheduleActive ? null : { siteId: s.id, tab: "schedule" })} style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px", background: scheduleActive ? "var(--navy)" : "var(--panel)", color: scheduleActive ? "#fff" : "var(--text)" }}>Schedule</button>
+              </div>
+              {isOpen && (
+                <div style={{ padding: "0 14px 14px" }}>
+                  {locationActive
+                    ? <SiteGeofenceEditor site={s} detail={detail} persistPatrolSiteDetails={persistPatrolSiteDetails} />
+                    : <PatrolScheduleEditor site={s} detail={detail} persistPatrolSiteDetails={persistPatrolSiteDetails} />}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {sites.length === 0 && <Empty text="No sites yet — add one in the Sites section above." />}
+        {sites.length > 0 && filteredSites.length === 0 && <Empty text="No sites match that search." />}
+      </div>
+    </div>
+  );
+}
+
+function RunSheetsManager({ zones, sites, accounts, zoneAreas, patrolSiteDetails, runSheets, persistRunSheets }) {
   const patrolmen = accounts.filter((a) => a.role === "patrolman");
-  const blank = { name: "", area: "", siteIds: [], assigneeLoginName: "" };
+  const blank = { name: "", region: "", siteIds: [], assigneeLoginName: "" };
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState("");
@@ -7728,13 +8122,21 @@ function RunSheetsManager({ sites, runSheets, persistRunSheets, accounts }) {
   const showToast = useToast();
   const showConfirm = useConfirm();
 
+  const areaByZone = useMemo(() => new Map(zoneAreas.map((z) => [z.zoneName, z])), [zoneAreas]);
+  const detailBySite = useMemo(() => new Map(patrolSiteDetails.map((d) => [d.siteId, d])), [patrolSiteDetails]);
+  const siteById = useMemo(() => new Map(sites.map((s) => [s.id, s])), [sites]);
+
   function set(field, value) { setForm((f) => ({ ...f, [field]: value })); }
 
+  function loadSitesInRegion() {
+    if (!form.region) return;
+    const ids = sites.filter((s) => s.run === form.region).map((s) => s.id);
+    setForm((f) => ({ ...f, siteIds: ids, name: f.name.trim() ? f.name : f.region }));
+    showToast(`Loaded ${ids.length} site(s) from "${form.region}".`);
+  }
+
   function toggleSite(id) {
-    setForm((f) => ({
-      ...f,
-      siteIds: f.siteIds.includes(id) ? f.siteIds.filter((x) => x !== id) : [...f.siteIds, id],
-    }));
+    setForm((f) => ({ ...f, siteIds: f.siteIds.includes(id) ? f.siteIds.filter((x) => x !== id) : [...f.siteIds, id] }));
   }
 
   function moveSite(id, dir) {
@@ -7750,7 +8152,7 @@ function RunSheetsManager({ sites, runSheets, persistRunSheets, accounts }) {
 
   function startEdit(rs) {
     setEditingId(rs.id);
-    setForm({ name: rs.name, area: rs.area || "", siteIds: rs.siteIds || [], assigneeLoginName: rs.assigneeLoginName || "" });
+    setForm({ name: rs.name, region: rs.region || "", siteIds: rs.siteIds || [], assigneeLoginName: rs.assigneeLoginName || "" });
     setError("");
   }
   function cancelEdit() { setEditingId(null); setForm(blank); setError(""); }
@@ -7763,7 +8165,7 @@ function RunSheetsManager({ sites, runSheets, persistRunSheets, accounts }) {
     if (runSheets.some((r) => r.id !== editingId && r.name.toLowerCase() === name.toLowerCase())) {
       setError("That run sheet name already exists."); return;
     }
-    const runSheet = { name, area: form.area.trim(), siteIds: form.siteIds, assigneeLoginName: form.assigneeLoginName };
+    const runSheet = { name, region: form.region, siteIds: form.siteIds, assigneeLoginName: form.assigneeLoginName };
     if (editingId) {
       const existing = runSheets.find((r) => r.id === editingId);
       const ok = await persistRunSheets("update", { id: editingId, runSheet: { ...runSheet, createdAt: existing?.createdAt || new Date().toISOString() } });
@@ -7782,20 +8184,21 @@ function RunSheetsManager({ sites, runSheets, persistRunSheets, accounts }) {
     });
   }
 
-  const siteById = useMemo(() => new Map(sites.map((s) => [s.id, s])), [sites]);
   const q = siteQuery.trim().toLowerCase();
   const pickableSites = q ? sites.filter((s) => (s.name || "").toLowerCase().includes(q) || (s.address || "").toLowerCase().includes(q)) : sites;
+  const regionArea = form.region ? areaByZone.get(form.region) : null;
 
   return (
     <div>
-      <div style={{ padding: 12, borderRadius: 8, border: "1px dashed var(--border)", background: "var(--panel-alt)", marginBottom: 20, maxWidth: 720, fontSize: 12, color: "var(--text-dim)" }}>
-        <b style={{ color: "var(--text)" }}>Run Sheets (pilot — visible only to this login).</b> A named, ordered group of sites for one patrol — separate from "Runs/zones" above, which are areas used for job routing. Nothing here affects dispatch yet.
-      </div>
-
       <SectionTitle icon={Navigation} title={editingId ? "Edit run sheet" : "New run sheet"} small />
-      <div style={{ maxWidth: 560, marginBottom: 24 }}>
+      <div style={{ maxWidth: 580, marginBottom: 24 }}>
         <div style={{ display: "flex", gap: 12 }}>
-          <Field label="Run sheet name" style={{ flex: 1 }}><input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Westside Night Run" style={selectStyle} /></Field>
+          <Field label="Region" style={{ flex: 1 }}>
+            <select value={form.region} onChange={(e) => set("region", e.target.value)} style={selectStyle}>
+              <option value="">— none —</option>
+              {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+            </select>
+          </Field>
           <Field label="Assign to" style={{ width: 220 }}>
             <select value={form.assigneeLoginName} onChange={(e) => set("assigneeLoginName", e.target.value)} style={selectStyle}>
               <option value="">Unassigned</option>
@@ -7803,7 +8206,15 @@ function RunSheetsManager({ sites, runSheets, persistRunSheets, accounts }) {
             </select>
           </Field>
         </div>
-        <Field label="Area (optional)"><input value={form.area} onChange={(e) => set("area", e.target.value)} placeholder="Free text for now, e.g. Westside zone" style={selectStyle} /></Field>
+        {form.region && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
+              {regionArea ? `Mapped area: ${(regionArea.radiusMeters / 1000).toFixed(2)} km radius` : "No mapped area yet — set one under Regions"}
+            </span>
+            <button onClick={loadSitesInRegion} style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px" }}><Upload size={13} /> Load sites in this region</button>
+          </div>
+        )}
+        <Field label="Run sheet name"><input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Defaults to the region name" style={selectStyle} /></Field>
 
         <Field label={`Sites in this run (${form.siteIds.length} selected)`}>
           <input value={siteQuery} onChange={(e) => setSiteQuery(e.target.value)} placeholder="Search sites to add…" style={{ ...selectStyle, marginBottom: 8 }} />
@@ -7822,10 +8233,18 @@ function RunSheetsManager({ sites, runSheets, persistRunSheets, accounts }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10, marginBottom: 14 }}>
             {form.siteIds.map((id, i) => {
               const s = siteById.get(id);
+              const detail = detailBySite.get(id);
               return (
-                <div key={id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12.5 }}>
-                  <span style={{ width: 18, height: 18, borderRadius: "50%", background: "var(--navy)", color: "#fff", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{i + 1}</span>
-                  <span style={{ flex: 1, minWidth: 0 }}>{s ? s.name : "(site removed)"}</span>
+                <div key={id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 10px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12.5 }}>
+                  <span style={{ width: 18, height: 18, borderRadius: "50%", background: "var(--navy)", color: "#fff", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 }}>{i + 1}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div>{s ? s.name : "(site removed)"}</div>
+                    {s && (
+                      <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>
+                        {scheduleSummaryText(detail)}{s.alarmCode ? ` · Alarm code: ${s.alarmCode}` : ""}{s.keyInfo ? ` · ${s.keyInfo}` : ""}
+                      </div>
+                    )}
+                  </div>
                   <button onClick={() => moveSite(id, -1)} disabled={i === 0} title="Move up" style={{ ...iconBtn, opacity: i === 0 ? 0.4 : 1 }}>↑</button>
                   <button onClick={() => moveSite(id, 1)} disabled={i === form.siteIds.length - 1} title="Move down" style={{ ...iconBtn, opacity: i === form.siteIds.length - 1 ? 0.4 : 1 }}>↓</button>
                   <button onClick={() => toggleSite(id)} title="Remove" style={iconBtn}><X size={13} /></button>
@@ -7851,7 +8270,7 @@ function RunSheetsManager({ sites, runSheets, persistRunSheets, accounts }) {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>{rs.name}</div>
                 <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
-                  {(rs.siteIds || []).length} site(s){rs.area ? ` · ${rs.area}` : ""} · {assignee ? assignee.displayName : "Unassigned"}
+                  {(rs.siteIds || []).length} site(s){rs.region ? ` · ${rs.region}` : ""} · {assignee ? assignee.displayName : "Unassigned"}
                 </div>
               </div>
               <button onClick={() => startEdit(rs)} title="Edit" style={iconBtn}><RotateCcw size={13} /></button>
@@ -7859,7 +8278,7 @@ function RunSheetsManager({ sites, runSheets, persistRunSheets, accounts }) {
             </div>
           );
         })}
-        {runSheets.length === 0 && <Empty text="No run sheets yet — create one above from your Patrol Sites." />}
+        {runSheets.length === 0 && <Empty text="No run sheets yet — pick a region above, or add sites manually." />}
       </div>
     </div>
   );

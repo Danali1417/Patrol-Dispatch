@@ -18,13 +18,16 @@ import { JOB_ARCHIVE_PREFIX, JOB_PHOTOS_PREFIX, JOB_CHAT_PREFIX } from "./_lib/k
 import { createUploadUrl, createReadUrl } from "./_lib/storage.js";
 
 const RUN_SHEETS_KEY = "ops:runSheets";
+const ZONE_AREAS_KEY = "ops:zoneAreas";
+const PATROL_SITE_DETAILS_KEY = "ops:patrolSiteDetails";
 
-// Patrol Sites & Run Sheets is a private pilot for one manager login
-// right now, not every manager — mirrors the client's own isDanLogin
-// (see App.jsx). Kept as its own check rather than folded into the
-// MANAGER_ONLY_WRITE_KEYS/OPERATOR_UP_WRITE_KEYS sets below (which gate
-// by role only), so this key is both read- and write-restricted to that
-// one login, and lifting the restriction later is a one-line change.
+// Patrol Ops (Regions, Patrol Sites, Run Sheets) is a private pilot for
+// one manager login right now, not every manager — mirrors the client's
+// own isDanLogin (see App.jsx). Kept as its own check rather than folded
+// into the MANAGER_ONLY_WRITE_KEYS/OPERATOR_UP_WRITE_KEYS sets below
+// (which gate by role only), so these keys are both read- and
+// write-restricted to that one login, and lifting the restriction later
+// is a one-line change.
 function isDanLogin(session) {
   return session.role === "manager" && session.loginName.trim().toLowerCase() === "dan";
 }
@@ -49,6 +52,54 @@ function applyRunSheetsOp(current, op, payload) {
       throw new Error(`Unknown run sheets op: ${op}`);
   }
 }
+
+// Upserts by zoneName — there's at most one mapped area per zone.
+function applyZoneAreasOp(current, op, payload) {
+  switch (op) {
+    case "set": {
+      const zoneArea = payload?.zoneArea;
+      if (!zoneArea?.zoneName) throw new Error("zoneArea.zoneName is required");
+      const idx = current.findIndex((z) => z.zoneName === zoneArea.zoneName);
+      return idx === -1 ? [...current, zoneArea] : current.map((z, i) => (i === idx ? zoneArea : z));
+    }
+    case "remove": {
+      if (!payload?.zoneName) throw new Error("zoneName is required");
+      return current.filter((z) => z.zoneName !== payload.zoneName);
+    }
+    default:
+      throw new Error(`Unknown zone areas op: ${op}`);
+  }
+}
+
+// Upserts by siteId — the patrol-only fields (geofence, schedule) for one
+// existing site, kept out of ops:sites itself (see this key's own
+// comment further down).
+function applyPatrolSiteDetailsOp(current, op, payload) {
+  switch (op) {
+    case "set": {
+      const detail = payload?.detail;
+      if (!detail?.siteId) throw new Error("detail.siteId is required");
+      const idx = current.findIndex((d) => d.siteId === detail.siteId);
+      return idx === -1 ? [...current, detail] : current.map((d, i) => (i === idx ? detail : d));
+    }
+    case "remove": {
+      if (!payload?.siteId) throw new Error("siteId is required");
+      return current.filter((d) => d.siteId !== payload.siteId);
+    }
+    default:
+      throw new Error(`Unknown patrol site details op: ${op}`);
+  }
+}
+
+// Every Dan-only pilot key shares the same GET/POST handling (see the
+// dedicated block below) — this is what tells that block which reducer
+// to apply for a given key, so adding a fourth pilot key later is just
+// one more entry here, not another copy of the block itself.
+const DAN_ONLY_PILOT_KEYS = {
+  [RUN_SHEETS_KEY]: applyRunSheetsOp,
+  [ZONE_AREAS_KEY]: applyZoneAreasOp,
+  [PATROL_SITE_DETAILS_KEY]: applyPatrolSiteDetailsOp,
+};
 
 const PUBLIC_READ_KEYS = new Set(["ops:logo", "ops:companyName"]);
 // Only a manager edits the Monitoring/Bureau master lists (Manager >
@@ -673,12 +724,13 @@ export default async function handler(req, res) {
     }
   }
 
-  // Patrol Sites & Run Sheets — private pilot, restricted to one manager
-  // login (see isDanLogin's own comment above). Handled as its own block,
-  // same as jobphotos/jobchat above, rather than through KNOWN_KEYS/the
-  // role-set machinery below, which only gates by role and is shared by
-  // keys that are meant to stay visible to every manager.
-  if (key === RUN_SHEETS_KEY) {
+  // Patrol Ops (Regions, Patrol Sites, Run Sheets) — private pilot,
+  // restricted to one manager login (see isDanLogin's own comment
+  // above). Handled as its own block, same as jobphotos/jobchat above,
+  // rather than through KNOWN_KEYS/the role-set machinery below, which
+  // only gates by role and is shared by keys meant to stay visible to
+  // every manager.
+  if (DAN_ONLY_PILOT_KEYS[key]) {
     const session = await requireRole(req, res, ["manager"]);
     if (!session) return;
     if (!isDanLogin(session)) return res.status(403).json({ error: "Not available on this account yet" });
@@ -694,14 +746,14 @@ export default async function handler(req, res) {
         let current;
         try { current = raw ? JSON.parse(raw) : []; } catch (e) { current = []; }
         if (!Array.isArray(current)) current = [];
-        const next = applyRunSheetsOp(current, op, payload);
+        const next = DAN_ONLY_PILOT_KEYS[key](current, op, payload);
         const value = JSON.stringify(next);
         await kvSet(key, value);
         return res.status(200).json({ key, value });
       }
       return res.status(405).json({ error: "Method not allowed" });
     } catch (err) {
-      console.error("kv runSheets failed:", err);
+      console.error("kv pilot-key failed:", err);
       return res.status(400).json({ error: String(err?.message || err) });
     }
   }
