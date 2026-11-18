@@ -43,7 +43,7 @@ import { kvGet, kvSet } from "./_lib/supabase.js";
 import { gatherReportData } from "./_lib/buildReport.js";
 import { sendReportEmail } from "./_lib/mailer.js";
 import { archiveOldJobs, backfillOrphanedPhotoBackups, forceResendPhotoBackups, listPhotoBackupStatus } from "./_lib/jobArchive.js";
-import { isMailConfigured, getMailFrom, createMailTransporter } from "./_lib/mail.js";
+import { isMailConfigured, getMailFrom, createMailTransporter, fetchResendQuota } from "./_lib/mail.js";
 
 const SENT_DATE_KEY = "ops:dailyReportSentDate";
 
@@ -169,6 +169,21 @@ export default async function handler(req, res) {
       return res.status(200).json({ jobs: result });
     } catch (err) {
       console.error("photo backup status check failed:", err);
+      return res.status(500).json({ error: String(err?.message || err) });
+    }
+  }
+
+  // Read-only — calls Resend's own usage API for the real daily/monthly
+  // quota reset time (see fetchResendQuota's own comment in mail.js for
+  // why this exists: Resend's docs disagree with themselves on whether
+  // the reset is a rolling 24h window or a fixed UTC midnight).
+  // /api/daily-report?checkEmailQuota=1&secret=YOUR_CRON_SECRET
+  if (req.query?.checkEmailQuota === "1") {
+    try {
+      const result = await fetchResendQuota();
+      return res.status(200).json(result);
+    } catch (err) {
+      console.error("email quota check failed:", err);
       return res.status(500).json({ error: String(err?.message || err) });
     }
   }
