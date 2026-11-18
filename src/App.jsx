@@ -7862,7 +7862,7 @@ function RegionsManager({ zones, zoneAreas, persistZoneAreas }) {
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", cursor: "pointer" }} onClick={() => setExpanded(isOpen ? null : z)}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600 }}>{z}</div>
-                  <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{area ? `${(area.radiusMeters / 1000).toFixed(2)} km radius mapped` : "No area mapped yet"}</div>
+                  <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{area?.path?.length ? `Area mapped — ${area.path.length}-point shape` : "No area mapped yet"}</div>
                 </div>
                 <ChevronRight size={16} style={{ transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .15s" }} />
               </div>
@@ -7880,41 +7880,68 @@ function RegionsManager({ zones, zoneAreas, persistZoneAreas }) {
   );
 }
 
-// A single draggable, resizable circle on a Google Map standing in for a
-// region's area — simpler than a drawn polygon and enough to answer "is
-// this site/patrolman inside this region" with a plain distance check
-// later. Mounted only while its region is expanded (see RegionsManager),
-// so it only ever loads the Maps script when one is actually opened.
+// A freehand polygon on a Google Map standing in for a region's area —
+// drawn with the Drawing library's own toolbar (a plain circle was the
+// first cut of this, but regions are rarely circular in practice).
+// Mounted only while its region is expanded (see RegionsManager), so it
+// only ever loads the Maps script when one is actually opened.
 function RegionAreaEditor({ zoneName, zoneArea, persistZoneAreas }) {
   const mapRef = useRef(null);
-  const circleRef = useRef(null);
+  const drawingManagerRef = useRef(null);
+  const polygonRef = useRef(null);
   const [error, setError] = useState("");
-  const [radius, setRadius] = useState(zoneArea?.radiusMeters || 2000);
   const [ready, setReady] = useState(false);
+  const [hasShape, setHasShape] = useState(!!zoneArea?.path?.length);
   const showToast = useToast();
 
   useEffect(() => {
     let cancelled = false;
     loadGoogleMaps().then((maps) => {
       if (cancelled || !mapRef.current) return;
-      const center = zoneArea?.center || DEFAULT_MAP_CENTER;
-      const map = new maps.Map(mapRef.current, { center, zoom: zoneArea ? 12 : 10, streetViewControl: false, mapTypeControl: false, fullscreenControl: true });
-      const circle = new maps.Circle({
-        map, center, radius: zoneArea?.radiusMeters || 2000,
-        editable: true, draggable: true, fillOpacity: 0.12, strokeColor: "#0B2545", fillColor: "#0B2545",
+      const center = zoneArea?.path?.[0] || DEFAULT_MAP_CENTER;
+      const map = new maps.Map(mapRef.current, { center, zoom: zoneArea?.path?.length ? 12 : 10, streetViewControl: false, mapTypeControl: false, fullscreenControl: true });
+
+      if (zoneArea?.path?.length) {
+        const polygon = new maps.Polygon({
+          map, paths: zoneArea.path, editable: true, draggable: true,
+          fillOpacity: 0.12, strokeColor: "#0B2545", fillColor: "#0B2545",
+        });
+        polygonRef.current = polygon;
+        const bounds = new maps.LatLngBounds();
+        zoneArea.path.forEach((p) => bounds.extend(p));
+        map.fitBounds(bounds);
+      }
+
+      const drawingManager = new maps.drawing.DrawingManager({
+        drawingMode: zoneArea?.path?.length ? null : maps.drawing.OverlayType.POLYGON,
+        drawingControl: true,
+        drawingControlOptions: { position: maps.ControlPosition.TOP_CENTER, drawingModes: [maps.drawing.OverlayType.POLYGON] },
+        polygonOptions: { editable: true, draggable: true, fillOpacity: 0.12, strokeColor: "#0B2545", fillColor: "#0B2545" },
       });
-      circle.addListener("radius_changed", () => setRadius(Math.round(circle.getRadius())));
-      circleRef.current = circle;
+      drawingManager.setMap(map);
+      drawingManager.addListener("polygoncomplete", (polygon) => {
+        if (polygonRef.current) polygonRef.current.setMap(null);
+        polygonRef.current = polygon;
+        setHasShape(true);
+        drawingManager.setDrawingMode(null);
+      });
+      drawingManagerRef.current = drawingManager;
       setReady(true);
     }).catch((e) => setError(e.message));
     return () => { cancelled = true; };
   }, []);
 
+  function clearShape() {
+    if (polygonRef.current) { polygonRef.current.setMap(null); polygonRef.current = null; }
+    setHasShape(false);
+  }
+
   function save() {
-    const c = circleRef.current;
-    if (!c) return;
-    const center = c.getCenter();
-    persistZoneAreas("set", { zoneArea: { zoneName, center: { lat: center.lat(), lng: center.lng() }, radiusMeters: Math.round(c.getRadius()) } });
+    const p = polygonRef.current;
+    if (!p) return;
+    const path = p.getPath().getArray().map((ll) => ({ lat: ll.lat(), lng: ll.lng() }));
+    if (path.length < 3) { showToast("Draw a shape with at least 3 points first.", "error"); return; }
+    persistZoneAreas("set", { zoneArea: { zoneName, path } });
     showToast(`Area saved for "${zoneName}".`);
   }
 
@@ -7924,9 +7951,16 @@ function RegionAreaEditor({ zoneName, zoneArea, persistZoneAreas }) {
 
   return (
     <div>
-      <div ref={mapRef} style={{ width: "100%", height: 260, borderRadius: 8, border: "1px solid var(--border)", marginBottom: 8 }} />
-      <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 8 }}>Drag the circle to move it, drag its edge to resize. Radius: {(radius / 1000).toFixed(2)} km</div>
-      <button onClick={save} disabled={!ready} style={{ ...primaryBtn, opacity: ready ? 1 : 0.6 }}>Save area for "{zoneName}"</button>
+      <div ref={mapRef} style={{ width: "100%", height: 320, borderRadius: 8, border: "1px solid var(--border)", marginBottom: 8 }} />
+      <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 8 }}>
+        {hasShape
+          ? "Drag a corner to adjust its shape, or drag an edge to add a point. \"Clear & redraw\" starts over."
+          : "Click the polygon tool above the map, then click each corner of the area — double-click, or click the first point again, to close the shape."}
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button onClick={save} disabled={!ready || !hasShape} style={{ ...primaryBtn, opacity: ready && hasShape ? 1 : 0.6 }}>Save area for "{zoneName}"</button>
+        {hasShape && <button onClick={clearShape} style={secondaryBtn}>Clear &amp; redraw</button>}
+      </div>
     </div>
   );
 }
@@ -8209,7 +8243,7 @@ function RunSheetsManager({ zones, sites, accounts, zoneAreas, patrolSiteDetails
         {form.region && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
             <span style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
-              {regionArea ? `Mapped area: ${(regionArea.radiusMeters / 1000).toFixed(2)} km radius` : "No mapped area yet — set one under Regions"}
+              {regionArea?.path?.length ? `Mapped area: ${regionArea.path.length}-point shape` : "No mapped area yet — set one under Regions"}
             </span>
             <button onClick={loadSitesInRegion} style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px" }}><Upload size={13} /> Load sites in this region</button>
           </div>
