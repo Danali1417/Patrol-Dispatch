@@ -7880,17 +7880,24 @@ function RegionsManager({ zones, zoneAreas, persistZoneAreas }) {
 }
 
 // A freehand polygon on a Google Map standing in for a region's area —
-// drawn with the Drawing library's own toolbar (a plain circle was the
-// first cut of this, but regions are rarely circular in practice).
-// Mounted only while its region is expanded (see RegionsManager), so it
-// only ever loads the Maps script when one is actually opened.
+// drawn by clicking each corner directly, not via the Maps Drawing
+// library's DrawingManager, which Google removed from the Maps
+// JavaScript API as of v3.65 (a plain circle was this editor's first
+// cut; a hand-rolled click-to-place-point flow was its second, after
+// DrawingManager stopped working). Mounted only while its region is
+// expanded (see RegionsManager), so it only ever loads the Maps script
+// when one is actually opened.
 function RegionAreaEditor({ zoneName, zoneArea, persistZoneAreas }) {
   const mapRef = useRef(null);
-  const drawingManagerRef = useRef(null);
+  const mapObjRef = useRef(null);
   const polygonRef = useRef(null);
+  const drawPathRef = useRef([]);
+  const clickListenerRef = useRef(null);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
   const [hasShape, setHasShape] = useState(!!zoneArea?.path?.length);
+  const [drawing, setDrawing] = useState(false);
+  const [pointCount, setPointCount] = useState(0);
   const showToast = useToast();
 
   useEffect(() => {
@@ -7899,6 +7906,7 @@ function RegionAreaEditor({ zoneName, zoneArea, persistZoneAreas }) {
       if (cancelled || !mapRef.current) return;
       const center = zoneArea?.path?.[0] || DEFAULT_MAP_CENTER;
       const map = new maps.Map(mapRef.current, { center, zoom: zoneArea?.path?.length ? 12 : 10, streetViewControl: false, mapTypeControl: false, fullscreenControl: true });
+      mapObjRef.current = map;
 
       if (zoneArea?.path?.length) {
         const polygon = new maps.Polygon({
@@ -7910,28 +7918,53 @@ function RegionAreaEditor({ zoneName, zoneArea, persistZoneAreas }) {
         zoneArea.path.forEach((p) => bounds.extend(p));
         map.fitBounds(bounds);
       }
-
-      const drawingManager = new maps.drawing.DrawingManager({
-        drawingMode: zoneArea?.path?.length ? null : maps.drawing.OverlayType.POLYGON,
-        drawingControl: true,
-        drawingControlOptions: { position: maps.ControlPosition.TOP_CENTER, drawingModes: [maps.drawing.OverlayType.POLYGON] },
-        polygonOptions: { editable: true, draggable: true, fillOpacity: 0.12, strokeColor: "#0B2545", fillColor: "#0B2545" },
-      });
-      drawingManager.setMap(map);
-      drawingManager.addListener("polygoncomplete", (polygon) => {
-        if (polygonRef.current) polygonRef.current.setMap(null);
-        polygonRef.current = polygon;
-        setHasShape(true);
-        drawingManager.setDrawingMode(null);
-      });
-      drawingManagerRef.current = drawingManager;
       setReady(true);
     }).catch((e) => setError(e.message));
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (clickListenerRef.current) clickListenerRef.current.remove();
+    };
   }, []);
 
-  function clearShape() {
+  function startDrawing() {
+    const map = mapObjRef.current;
+    const maps = window.google?.maps;
+    if (!map || !maps) return;
     if (polygonRef.current) { polygonRef.current.setMap(null); polygonRef.current = null; }
+    drawPathRef.current = [];
+    setPointCount(0);
+    setHasShape(false);
+    setDrawing(true);
+
+    if (clickListenerRef.current) clickListenerRef.current.remove();
+    clickListenerRef.current = map.addListener("click", (e) => {
+      drawPathRef.current = [...drawPathRef.current, e.latLng];
+      setPointCount(drawPathRef.current.length);
+      if (!polygonRef.current) {
+        polygonRef.current = new maps.Polygon({
+          map, paths: drawPathRef.current, editable: false, draggable: false,
+          fillOpacity: 0.12, strokeColor: "#0B2545", fillColor: "#0B2545",
+        });
+      } else {
+        polygonRef.current.setPath(drawPathRef.current);
+      }
+    });
+  }
+
+  function finishDrawing() {
+    if (drawPathRef.current.length < 3) { showToast("Click at least 3 points before finishing.", "error"); return; }
+    if (clickListenerRef.current) { clickListenerRef.current.remove(); clickListenerRef.current = null; }
+    if (polygonRef.current) { polygonRef.current.setEditable(true); polygonRef.current.setDraggable(true); }
+    setDrawing(false);
+    setHasShape(true);
+  }
+
+  function clearShape() {
+    if (clickListenerRef.current) { clickListenerRef.current.remove(); clickListenerRef.current = null; }
+    if (polygonRef.current) { polygonRef.current.setMap(null); polygonRef.current = null; }
+    drawPathRef.current = [];
+    setPointCount(0);
+    setDrawing(false);
     setHasShape(false);
   }
 
@@ -7952,13 +7985,17 @@ function RegionAreaEditor({ zoneName, zoneArea, persistZoneAreas }) {
     <div>
       <div ref={mapRef} style={{ width: "100%", height: 320, borderRadius: 8, border: "1px solid var(--border)", marginBottom: 8 }} />
       <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 8 }}>
-        {hasShape
+        {drawing
+          ? `Click each corner of the area on the map (${pointCount} placed so far), then "Finish shape".`
+          : hasShape
           ? "Drag a corner to adjust its shape, or drag an edge to add a point. \"Clear & redraw\" starts over."
-          : "Click the polygon tool above the map, then click each corner of the area — double-click, or click the first point again, to close the shape."}
+          : "Click \"Draw area\", then click each corner of the shape on the map."}
       </div>
       <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={save} disabled={!ready || !hasShape} style={{ ...primaryBtn, opacity: ready && hasShape ? 1 : 0.6 }}>Save area for "{zoneName}"</button>
-        {hasShape && <button onClick={clearShape} style={secondaryBtn}>Clear &amp; redraw</button>}
+        {!drawing && !hasShape && <button onClick={startDrawing} disabled={!ready} style={{ ...primaryBtn, opacity: ready ? 1 : 0.6 }}>Draw area</button>}
+        {drawing && <button onClick={finishDrawing} style={primaryBtn}>Finish shape</button>}
+        {hasShape && !drawing && <button onClick={save} style={primaryBtn}>Save area for "{zoneName}"</button>}
+        {(hasShape || drawing) && <button onClick={clearShape} style={secondaryBtn}>Clear &amp; redraw</button>}
       </div>
     </div>
   );
