@@ -20,7 +20,7 @@ import {
   deleteAccount as apiDeleteAccount, bulkUpdateAccounts as apiBulkUpdateAccounts,
 } from "./accountsApi.js";
 import { getPushStatus, enableJobAlerts, disableJobAlerts, resyncJobAlertsIfEnabled, notifyJobDispatch, notifyStandDown } from "./push.js";
-import { reverseGeocode, fetchStaticMap } from "./geocode.js";
+import { reverseGeocode, fetchStaticMap, forwardGeocode } from "./geocode.js";
 import { fetchJobPhotos, persistJobPhotos, uploadOriginalPhoto, fetchOriginalPhotoUrl } from "./jobPhotos.js";
 import { loadJobDraft, saveJobDraft, clearJobDraft } from "./jobDraft.js";
 import { fetchJobChat, sendJobChatMessage } from "./jobChat.js";
@@ -70,12 +70,13 @@ const RUN_SHEETS_KEY = "ops:runSheets";
 // editor, its area here goes stale under the old name until re-saved —
 // an accepted gap while this stays a single-login pilot.
 const ZONE_AREAS_KEY = "ops:zoneAreas";
-// Patrol-only fields for an existing site (geofence point/radius, patrol
-// schedule) — kept in their own key rather than added to `ops:sites`
-// itself, which every Control Room/Manager session reads and writes
-// today for ordinary job dispatch; this way the pilot can grow that
-// record's shape freely without touching the shared one.
-const PATROL_SITE_DETAILS_KEY = "ops:patrolSiteDetails";
+// The contracted, visited-on-a-recurring-basis sites — their own record
+// (customer, address, notes, region, geofence, patrol schedule), kept
+// entirely separate from `ops:sites` above, which is alarm-response/
+// ad-hoc dispatch sites that every Control Room/Manager session reads
+// and writes today. Two different kinds of "site" with different
+// lifecycles, not one list wearing two hats.
+const PERMANENT_PATROL_SITES_KEY = "ops:permanentPatrolSites";
 const ROSTER_KEY = "ops:roster";
 const LOGO_KEY = "ops:logo";
 const COMPANY_NAME_KEY = "ops:companyName";
@@ -193,15 +194,13 @@ function applyZoneAreasOpLocal(current, op, payload) {
   }
 }
 
-// Same idea as applyRunSheetsOpLocal, for a site's patrol-only fields —
-// mirrors applyPatrolSiteDetailsOp in api/kv.js. Upserts by siteId.
-function applyPatrolSiteDetailsOpLocal(current, op, payload) {
+// Same idea as applyRunSheetsOpLocal, for Permanent Patrol Sites —
+// mirrors applyPermanentPatrolSitesOp in api/kv.js.
+function applyPermanentPatrolSitesOpLocal(current, op, payload) {
   switch (op) {
-    case "set": {
-      const idx = current.findIndex((d) => d.siteId === payload.detail.siteId);
-      return idx === -1 ? [...current, payload.detail] : current.map((d, i) => (i === idx ? payload.detail : d));
-    }
-    case "remove": return current.filter((d) => d.siteId !== payload.siteId);
+    case "add": return [...current, payload.record];
+    case "update": return current.map((r) => (r.id === payload.id ? { ...payload.record, id: payload.id } : r));
+    case "remove": return current.filter((r) => r.id !== payload.id);
     default: return current;
   }
 }
@@ -750,7 +749,7 @@ export default function SentrylinePrototype() {
   const [sitesLoaded, setSitesLoaded] = useState(false);
   const [runSheets, setRunSheets] = useState([]);
   const [zoneAreas, setZoneAreas] = useState([]);
-  const [patrolSiteDetails, setPatrolSiteDetails] = useState([]);
+  const [permanentPatrolSites, setPermanentPatrolSites] = useState([]);
   const [roster, setRoster] = useState([]);
   const [outcomePhrases, setOutcomePhrases] = useState([]);
   const [monitoringCompanies, setMonitoringCompanies] = useState([]);
@@ -1018,10 +1017,10 @@ export default function SentrylinePrototype() {
     })();
     (async () => {
       try {
-        const res = await window.storage.get(PATROL_SITE_DETAILS_KEY);
-        setPatrolSiteDetails(res?.value ? JSON.parse(res.value) : []);
+        const res = await window.storage.get(PERMANENT_PATROL_SITES_KEY);
+        setPermanentPatrolSites(res?.value ? JSON.parse(res.value) : []);
       } catch (e) {
-        if (!isMissingKeyError(e)) console.error("Failed to load patrol site details.", e);
+        if (!isMissingKeyError(e)) console.error("Failed to load permanent patrol sites.", e);
       }
     })();
   }, [session]);
@@ -1264,11 +1263,11 @@ export default function SentrylinePrototype() {
   }, []);
 
   // Same op-based pattern as persistRunSheets above.
-  const persistPatrolSiteDetails = useCallback(async (op, payload) => {
-    setPatrolSiteDetails((prev) => applyPatrolSiteDetailsOpLocal(prev, op, payload));
+  const persistPermanentPatrolSites = useCallback(async (op, payload) => {
+    setPermanentPatrolSites((prev) => applyPermanentPatrolSitesOpLocal(prev, op, payload));
     try {
-      const res = await window.storage.applyOp(PATROL_SITE_DETAILS_KEY, op, payload);
-      setPatrolSiteDetails(JSON.parse(res.value));
+      const res = await window.storage.applyOp(PERMANENT_PATROL_SITES_KEY, op, payload);
+      setPermanentPatrolSites(JSON.parse(res.value));
       return true;
     } catch (e) {
       console.error(e);
@@ -1507,7 +1506,7 @@ export default function SentrylinePrototype() {
           {!accountsLoaded || !sitesLoaded ? (
             <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
           ) : session.role === "manager" ? (
-            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} runSheets={runSheets} persistRunSheets={persistRunSheets} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} patrolSiteDetails={patrolSiteDetails} persistPatrolSiteDetails={persistPatrolSiteDetails} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
+            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} runSheets={runSheets} persistRunSheets={persistRunSheets} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
           ) : session.role === "operator" ? (
             <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} logoUrl={logoUrl} monitoringCompanies={monitoringCompanies} bureaus={bureaus} />
           ) : session.role === "provider" ? (
@@ -6449,7 +6448,7 @@ function JobDetailProvider({ job, jobs, session, persist, now, onBack }) {
    MANAGER VIEW — create & manage logins
 ---------------------------------------------------------------- */
 
-function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, patrolSiteDetails, persistPatrolSiteDetails, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, responseRate, persistResponseRate, bureauRates, persistBureauRates, monitoringRates, persistMonitoringRates, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
+function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, responseRate, persistResponseRate, bureauRates, persistBureauRates, monitoringRates, persistMonitoringRates, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
   const [tab, setTab] = useState("accounts");
   const showConfirm = useConfirm();
   const showToast = useToast();
@@ -6494,7 +6493,7 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
         {tab === "accounts" && <AccountsManager accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />}
         {tab === "phrases" && <OutcomePhrasesEditor outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} />}
         {tab === "clients" && <ClientListsManager monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} />}
-        {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} session={session} runSheets={runSheets} persistRunSheets={persistRunSheets} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} patrolSiteDetails={patrolSiteDetails} persistPatrolSiteDetails={persistPatrolSiteDetails} />}
+        {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} session={session} runSheets={runSheets} persistRunSheets={persistRunSheets} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} />}
         {tab === "logs" && <Logs jobs={jobs.filter((j) => j.status !== "scheduled")} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} roster={roster} responseRate={responseRate} bureauRates={bureauRates} monitoringRates={monitoringRates} />}
       </div>
@@ -7308,7 +7307,7 @@ function AccountRow({ account, setAccounts, zones, isSelf, lastKnownPassword, on
    SITES & RUNS MANAGER
 ---------------------------------------------------------------- */
 
-function SitesManager({ zones, persistZones, sites, persistSites, accounts, setAccounts, session, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, patrolSiteDetails, persistPatrolSiteDetails }) {
+function SitesManager({ zones, persistZones, sites, persistSites, accounts, setAccounts, session, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites }) {
   return (
     <div>
       <ZonesEditor zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} />
@@ -7318,9 +7317,9 @@ function SitesManager({ zones, persistZones, sites, persistSites, accounts, setA
         <>
           <div style={{ height: 30 }} />
           <PatrolOpsManager
-            zones={zones} sites={sites} accounts={accounts}
+            zones={zones} accounts={accounts}
             zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas}
-            patrolSiteDetails={patrolSiteDetails} persistPatrolSiteDetails={persistPatrolSiteDetails}
+            permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites}
             runSheets={runSheets} persistRunSheets={persistRunSheets}
           />
         </>
@@ -7810,14 +7809,14 @@ function makeRunSheetId() {
 // named, ordered group of sites for one patrol, optionally bulk-loaded
 // from a region). No clock-in gate or patrolman-side execution yet —
 // this is Control Room grouping/scheduling only.
-function PatrolOpsManager({ zones, sites, accounts, zoneAreas, persistZoneAreas, patrolSiteDetails, persistPatrolSiteDetails, runSheets, persistRunSheets }) {
+function PatrolOpsManager({ zones, accounts, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, runSheets, persistRunSheets }) {
   const [subTab, setSubTab] = useState("regions");
-  const tabs = [["regions", "Regions"], ["sites", "Patrol Sites"], ["runs", "Run Sheets"]];
+  const tabs = [["regions", "Regions"], ["sites", "Permanent Patrol Sites"], ["runs", "Run Sheets"]];
 
   return (
     <div>
       <div style={{ padding: 12, borderRadius: 8, border: "1px dashed var(--border)", background: "var(--panel-alt)", marginBottom: 20, maxWidth: 760, fontSize: 12, color: "var(--text-dim)" }}>
-        <b style={{ color: "var(--text)" }}>Patrol Ops (pilot — visible only to this login).</b> Regions map an area onto an existing run/zone above. Patrol Sites add a geofence point and a patrol schedule to a site. Run Sheets pull a region's sites together for one patrol. Nothing here affects dispatch yet.
+        <b style={{ color: "var(--text)" }}>Patrol Ops (pilot — visible only to this login).</b> Regions map an area onto an existing run/zone above. Permanent Patrol Sites are the sites you visit on a recurring basis — separate from the alarm-response Sites section above. Run Sheets pull a region's permanent patrol sites together for one patrol. Nothing here affects dispatch yet.
       </div>
       <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
         {tabs.map(([key, label]) => (
@@ -7831,9 +7830,9 @@ function PatrolOpsManager({ zones, sites, accounts, zoneAreas, persistZoneAreas,
         ))}
       </div>
       {subTab === "regions" && <RegionsManager zones={zones} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} />}
-      {subTab === "sites" && <PatrolSitesEditor sites={sites} patrolSiteDetails={patrolSiteDetails} persistPatrolSiteDetails={persistPatrolSiteDetails} />}
+      {subTab === "sites" && <PermanentPatrolSitesEditor zones={zones} zoneAreas={zoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} />}
       {subTab === "runs" && (
-        <RunSheetsManager zones={zones} sites={sites} accounts={accounts} zoneAreas={zoneAreas} patrolSiteDetails={patrolSiteDetails} runSheets={runSheets} persistRunSheets={persistRunSheets} />
+        <RunSheetsManager zones={zones} accounts={accounts} zoneAreas={zoneAreas} permanentPatrolSites={permanentPatrolSites} runSheets={runSheets} persistRunSheets={persistRunSheets} />
       )}
     </div>
   );
@@ -7881,17 +7880,24 @@ function RegionsManager({ zones, zoneAreas, persistZoneAreas }) {
 }
 
 // A freehand polygon on a Google Map standing in for a region's area —
-// drawn with the Drawing library's own toolbar (a plain circle was the
-// first cut of this, but regions are rarely circular in practice).
-// Mounted only while its region is expanded (see RegionsManager), so it
-// only ever loads the Maps script when one is actually opened.
+// drawn by clicking each corner directly, not via the Maps Drawing
+// library's DrawingManager, which Google removed from the Maps
+// JavaScript API as of v3.65 (a plain circle was this editor's first
+// cut; a hand-rolled click-to-place-point flow was its second, after
+// DrawingManager stopped working). Mounted only while its region is
+// expanded (see RegionsManager), so it only ever loads the Maps script
+// when one is actually opened.
 function RegionAreaEditor({ zoneName, zoneArea, persistZoneAreas }) {
   const mapRef = useRef(null);
-  const drawingManagerRef = useRef(null);
+  const mapObjRef = useRef(null);
   const polygonRef = useRef(null);
+  const drawPathRef = useRef([]);
+  const clickListenerRef = useRef(null);
   const [error, setError] = useState("");
   const [ready, setReady] = useState(false);
   const [hasShape, setHasShape] = useState(!!zoneArea?.path?.length);
+  const [drawing, setDrawing] = useState(false);
+  const [pointCount, setPointCount] = useState(0);
   const showToast = useToast();
 
   useEffect(() => {
@@ -7900,6 +7906,7 @@ function RegionAreaEditor({ zoneName, zoneArea, persistZoneAreas }) {
       if (cancelled || !mapRef.current) return;
       const center = zoneArea?.path?.[0] || DEFAULT_MAP_CENTER;
       const map = new maps.Map(mapRef.current, { center, zoom: zoneArea?.path?.length ? 12 : 10, streetViewControl: false, mapTypeControl: false, fullscreenControl: true });
+      mapObjRef.current = map;
 
       if (zoneArea?.path?.length) {
         const polygon = new maps.Polygon({
@@ -7911,28 +7918,53 @@ function RegionAreaEditor({ zoneName, zoneArea, persistZoneAreas }) {
         zoneArea.path.forEach((p) => bounds.extend(p));
         map.fitBounds(bounds);
       }
-
-      const drawingManager = new maps.drawing.DrawingManager({
-        drawingMode: zoneArea?.path?.length ? null : maps.drawing.OverlayType.POLYGON,
-        drawingControl: true,
-        drawingControlOptions: { position: maps.ControlPosition.TOP_CENTER, drawingModes: [maps.drawing.OverlayType.POLYGON] },
-        polygonOptions: { editable: true, draggable: true, fillOpacity: 0.12, strokeColor: "#0B2545", fillColor: "#0B2545" },
-      });
-      drawingManager.setMap(map);
-      drawingManager.addListener("polygoncomplete", (polygon) => {
-        if (polygonRef.current) polygonRef.current.setMap(null);
-        polygonRef.current = polygon;
-        setHasShape(true);
-        drawingManager.setDrawingMode(null);
-      });
-      drawingManagerRef.current = drawingManager;
       setReady(true);
     }).catch((e) => setError(e.message));
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (clickListenerRef.current) clickListenerRef.current.remove();
+    };
   }, []);
 
-  function clearShape() {
+  function startDrawing() {
+    const map = mapObjRef.current;
+    const maps = window.google?.maps;
+    if (!map || !maps) return;
     if (polygonRef.current) { polygonRef.current.setMap(null); polygonRef.current = null; }
+    drawPathRef.current = [];
+    setPointCount(0);
+    setHasShape(false);
+    setDrawing(true);
+
+    if (clickListenerRef.current) clickListenerRef.current.remove();
+    clickListenerRef.current = map.addListener("click", (e) => {
+      drawPathRef.current = [...drawPathRef.current, e.latLng];
+      setPointCount(drawPathRef.current.length);
+      if (!polygonRef.current) {
+        polygonRef.current = new maps.Polygon({
+          map, paths: drawPathRef.current, editable: false, draggable: false,
+          fillOpacity: 0.12, strokeColor: "#0B2545", fillColor: "#0B2545",
+        });
+      } else {
+        polygonRef.current.setPath(drawPathRef.current);
+      }
+    });
+  }
+
+  function finishDrawing() {
+    if (drawPathRef.current.length < 3) { showToast("Click at least 3 points before finishing.", "error"); return; }
+    if (clickListenerRef.current) { clickListenerRef.current.remove(); clickListenerRef.current = null; }
+    if (polygonRef.current) { polygonRef.current.setEditable(true); polygonRef.current.setDraggable(true); }
+    setDrawing(false);
+    setHasShape(true);
+  }
+
+  function clearShape() {
+    if (clickListenerRef.current) { clickListenerRef.current.remove(); clickListenerRef.current = null; }
+    if (polygonRef.current) { polygonRef.current.setMap(null); polygonRef.current = null; }
+    drawPathRef.current = [];
+    setPointCount(0);
+    setDrawing(false);
     setHasShape(false);
   }
 
@@ -7953,61 +7985,98 @@ function RegionAreaEditor({ zoneName, zoneArea, persistZoneAreas }) {
     <div>
       <div ref={mapRef} style={{ width: "100%", height: 320, borderRadius: 8, border: "1px solid var(--border)", marginBottom: 8 }} />
       <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 8 }}>
-        {hasShape
+        {drawing
+          ? `Click each corner of the area on the map (${pointCount} placed so far), then "Finish shape".`
+          : hasShape
           ? "Drag a corner to adjust its shape, or drag an edge to add a point. \"Clear & redraw\" starts over."
-          : "Click the polygon tool above the map, then click each corner of the area — double-click, or click the first point again, to close the shape."}
+          : "Click \"Draw area\", then click each corner of the shape on the map."}
       </div>
       <div style={{ display: "flex", gap: 8 }}>
-        <button onClick={save} disabled={!ready || !hasShape} style={{ ...primaryBtn, opacity: ready && hasShape ? 1 : 0.6 }}>Save area for "{zoneName}"</button>
-        {hasShape && <button onClick={clearShape} style={secondaryBtn}>Clear &amp; redraw</button>}
+        {!drawing && !hasShape && <button onClick={startDrawing} disabled={!ready} style={{ ...primaryBtn, opacity: ready ? 1 : 0.6 }}>Draw area</button>}
+        {drawing && <button onClick={finishDrawing} style={primaryBtn}>Finish shape</button>}
+        {hasShape && !drawing && <button onClick={save} style={primaryBtn}>Save area for "{zoneName}"</button>}
+        {(hasShape || drawing) && <button onClick={clearShape} style={secondaryBtn}>Clear &amp; redraw</button>}
       </div>
     </div>
   );
 }
 
-// A draggable pin + resizable circle standing in for one site's geofence
-// — center is the pin's own position (the two stay in sync both ways),
-// radius is however wide the circle's dragged to. Mounted only while a
-// site's "Location" panel is open (see PatrolSitesEditor).
-function SiteGeofenceEditor({ site, detail, persistPatrolSiteDetails }) {
+function makePermanentPatrolSiteId() {
+  return `pps_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// A draggable pin + resizable circle for one Permanent Patrol Site's
+// geofence. Purely local — commits nothing on its own; the parent
+// (PermanentPatrolSitesEditor) takes the result via onApply and saves it
+// together with the rest of that site's own form. Pre-seeds the pin from
+// the typed address via forward geocoding when no geofence is set yet,
+// and suggests whichever region's drawn area (see RegionAreaEditor)
+// contains the pin — a suggestion only; the Region field stays a plain,
+// freely-editable dropdown the way the user asked for ("it should
+// suggest... but we should have flexibility to change wherever we want").
+function SiteGeofenceEditor({ initialGeofence, initialAddress, zoneAreas, onApply }) {
   const mapRef = useRef(null);
   const markerRef = useRef(null);
   const circleRef = useRef(null);
   const [error, setError] = useState("");
-  const [radius, setRadius] = useState(detail?.geofence?.radiusMeters || 100);
+  const [radius, setRadius] = useState(initialGeofence?.radiusMeters || 100);
   const [ready, setReady] = useState(false);
-  const showToast = useToast();
+  const [suggestedRegion, setSuggestedRegion] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
-    loadGoogleMaps().then((maps) => {
+    (async () => {
+      let maps;
+      try {
+        maps = await loadGoogleMaps();
+      } catch (e) {
+        if (!cancelled) setError(e.message);
+        return;
+      }
       if (cancelled || !mapRef.current) return;
-      const center = detail?.geofence?.center || DEFAULT_MAP_CENTER;
-      const map = new maps.Map(mapRef.current, { center, zoom: detail?.geofence ? 16 : 11, streetViewControl: false, mapTypeControl: false, fullscreenControl: true });
+
+      let center = initialGeofence?.center;
+      if (!center && initialAddress?.trim()) {
+        const geo = await forwardGeocode(initialAddress).catch(() => null);
+        if (geo) center = { lat: geo.lat, lng: geo.lon };
+      }
+      center = center || DEFAULT_MAP_CENTER;
+
+      const map = new maps.Map(mapRef.current, { center, zoom: initialGeofence ? 16 : 14, streetViewControl: false, mapTypeControl: false, fullscreenControl: true });
       const marker = new maps.Marker({ map, position: center, draggable: true });
       const circle = new maps.Circle({
-        map, center, radius: detail?.geofence?.radiusMeters || 100,
+        map, center, radius: initialGeofence?.radiusMeters || 100,
         editable: true, fillOpacity: 0.15, strokeColor: "#B45309", fillColor: "#B45309",
       });
+
+      function suggestRegionFor(pos) {
+        const point = new maps.LatLng(pos.lat(), pos.lng());
+        for (const za of zoneAreas) {
+          if (!za.path?.length) continue;
+          const polygon = new maps.Polygon({ paths: za.path });
+          if (maps.geometry.poly.containsLocation(point, polygon)) { setSuggestedRegion(za.zoneName); return; }
+        }
+        setSuggestedRegion(null);
+      }
+
       marker.addListener("drag", () => circle.setCenter(marker.getPosition()));
+      marker.addListener("dragend", () => suggestRegionFor(marker.getPosition()));
       circle.addListener("center_changed", () => marker.setPosition(circle.getCenter()));
       circle.addListener("radius_changed", () => setRadius(Math.round(circle.getRadius())));
       markerRef.current = marker;
       circleRef.current = circle;
+      suggestRegionFor(center);
       setReady(true);
-    }).catch((e) => setError(e.message));
+    })();
     return () => { cancelled = true; };
   }, []);
 
-  function save() {
+  function apply() {
     const m = markerRef.current;
     const c = circleRef.current;
     if (!m || !c) return;
     const pos = m.getPosition();
-    persistPatrolSiteDetails("set", {
-      detail: { siteId: site.id, geofence: { center: { lat: pos.lat(), lng: pos.lng() }, radiusMeters: Math.round(c.getRadius()) }, schedule: detail?.schedule || null },
-    });
-    showToast(`Location saved for "${site.name}".`);
+    onApply({ center: { lat: pos.lat(), lng: pos.lng() }, radiusMeters: Math.round(c.getRadius()) }, suggestedRegion);
   }
 
   if (error) {
@@ -8017,8 +8086,13 @@ function SiteGeofenceEditor({ site, detail, persistPatrolSiteDetails }) {
   return (
     <div>
       <div ref={mapRef} style={{ width: "100%", height: 260, borderRadius: 8, border: "1px solid var(--border)", marginBottom: 8 }} />
-      <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 8 }}>Drag the pin to the site's door, drag the circle's edge to size the geofence. Radius: {radius} m</div>
-      <button onClick={save} disabled={!ready} style={{ ...primaryBtn, opacity: ready ? 1 : 0.6 }}>Save location for "{site.name}"</button>
+      <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 6 }}>Drag the pin to the site's door, drag the circle's edge to size the geofence. Radius: {radius} m</div>
+      {suggestedRegion && (
+        <div style={{ fontSize: 11.5, color: "var(--navy)", marginBottom: 8 }}>
+          📍 Falls inside "{suggestedRegion}"'s mapped area — change the Region field above if you'd rather keep it in a different one.
+        </div>
+      )}
+      <button onClick={apply} disabled={!ready} style={{ ...primaryBtn, opacity: ready ? 1 : 0.6 }}>Use this location</button>
     </div>
   );
 }
@@ -8033,30 +8107,26 @@ const BLANK_DAY_SCHEDULE = { enabled: false, patrols: 1, anytime: true, start: "
 // days it's active and the first active day's pattern as a representative
 // sample; the editor itself (PatrolScheduleEditor) is where every day's
 // own count/window actually shows.
-function scheduleSummaryText(detail) {
-  if (!detail?.schedule) return "No schedule set";
-  const active = PATROL_WEEKDAYS.filter(({ key }) => detail.schedule[key]?.enabled);
+function scheduleSummaryText(record) {
+  if (!record?.schedule) return "No schedule set";
+  const active = PATROL_WEEKDAYS.filter(({ key }) => record.schedule[key]?.enabled);
   if (!active.length) return "No days scheduled";
   const days = active.map((d) => d.label).join(",");
-  const sample = detail.schedule[active[0].key];
+  const sample = record.schedule[active[0].key];
   const timePart = sample.anytime ? "any time" : `${sample.start || "?"}–${sample.end || "?"}`;
   return `${days} · ${sample.patrols}/day · ${timePart}`;
 }
 
-function PatrolScheduleEditor({ site, detail, persistPatrolSiteDetails }) {
+// Same local/no-persistence contract as SiteGeofenceEditor above — just
+// hands the finished weekly schedule to the parent's onApply.
+function PatrolScheduleEditor({ initialSchedule, onApply }) {
   const [schedule, setSchedule] = useState(() => {
     const s = {};
-    PATROL_WEEKDAYS.forEach(({ key }) => { s[key] = { ...BLANK_DAY_SCHEDULE, ...(detail?.schedule?.[key] || {}) }; });
+    PATROL_WEEKDAYS.forEach(({ key }) => { s[key] = { ...BLANK_DAY_SCHEDULE, ...(initialSchedule?.[key] || {}) }; });
     return s;
   });
-  const showToast = useToast();
 
   function setDay(key, patch) { setSchedule((s) => ({ ...s, [key]: { ...s[key], ...patch } })); }
-
-  function save() {
-    persistPatrolSiteDetails("set", { detail: { siteId: site.id, schedule, geofence: detail?.geofence || null } });
-    showToast(`Schedule saved for "${site.name}".`);
-  }
 
   return (
     <div>
@@ -8087,66 +8157,146 @@ function PatrolScheduleEditor({ site, detail, persistPatrolSiteDetails }) {
           </div>
         );
       })}
-      <button onClick={save} style={{ ...primaryBtn, marginTop: 12 }}>Save schedule</button>
+      <button onClick={() => onApply(schedule)} style={{ ...primaryBtn, marginTop: 12 }}>Use this schedule</button>
     </div>
   );
 }
 
-// Same sites as the shared Sites section above — this just adds the two
-// patrol-only fields (geofence point, weekly schedule) to the ones that
-// actually get patrolled, rather than duplicating name/address/alarm
-// code/customer into a second site record.
-function PatrolSitesEditor({ sites, patrolSiteDetails, persistPatrolSiteDetails }) {
-  const [expanded, setExpanded] = useState(null); // { siteId, tab: "location" | "schedule" }
+// Permanent Patrol Sites — the contracted, visited-on-a-recurring-basis
+// sites (see PERMANENT_PATROL_SITES_KEY's own comment for why these are
+// a separate record from the alarm-response Sites section above, not an
+// add-on to it). One form covers everything for a site — customer,
+// name, address, notes, region, geofence, schedule — and is submitted
+// together in one save, so the Location/Schedule panels below are just
+// local sub-editors feeding back into this same form, never persisting
+// anything on their own.
+function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, persistPermanentPatrolSites }) {
+  const blank = { customer: "", name: "", address: "", notes: "", region: "", geofence: null, schedule: null };
+  const [form, setForm] = useState(blank);
+  const [editingId, setEditingId] = useState(null);
+  const [error, setError] = useState("");
+  const [panel, setPanel] = useState(null); // "location" | "schedule" | null
   const [filter, setFilter] = useState("");
-  const detailBySite = useMemo(() => new Map(patrolSiteDetails.map((d) => [d.siteId, d])), [patrolSiteDetails]);
+  const showToast = useToast();
+  const showConfirm = useConfirm();
+
+  function set(field, value) { setForm((f) => ({ ...f, [field]: value })); }
+
+  function startEdit(r) {
+    setEditingId(r.id);
+    setForm({ customer: r.customer || "", name: r.name || "", address: r.address || "", notes: r.notes || "", region: r.region || "", geofence: r.geofence || null, schedule: r.schedule || null });
+    setError("");
+    setPanel(null);
+  }
+  function cancelEdit() { setEditingId(null); setForm(blank); setError(""); setPanel(null); }
+
+  async function save() {
+    setError("");
+    const name = form.name.trim();
+    if (!name) { setError("Site name is required."); return; }
+    if (!form.address.trim()) { setError("Address is required."); return; }
+    const record = { customer: form.customer.trim(), name, address: form.address.trim(), notes: form.notes.trim(), region: form.region, geofence: form.geofence, schedule: form.schedule };
+    if (editingId) {
+      const existing = permanentPatrolSites.find((r) => r.id === editingId);
+      const ok = await persistPermanentPatrolSites("update", { id: editingId, record: { ...record, createdAt: existing?.createdAt || new Date().toISOString() } });
+      if (ok) { showToast("Site updated."); cancelEdit(); } else showToast("Couldn't save — try again.", "error");
+    } else {
+      const ok = await persistPermanentPatrolSites("add", { record: { ...record, id: makePermanentPatrolSiteId(), createdAt: new Date().toISOString() } });
+      if (ok) { showToast(`"${name}" added.`); cancelEdit(); } else showToast("Couldn't add — try again.", "error");
+    }
+  }
+
+  function remove(r) {
+    showConfirm(`Delete "${r.name}"? This can't be undone.`, async () => {
+      const ok = await persistPermanentPatrolSites("remove", { id: r.id });
+      if (ok) { if (editingId === r.id) cancelEdit(); showToast("Site deleted."); }
+      else showToast("Couldn't delete — try again.", "error");
+    });
+  }
 
   const q = filter.trim().toLowerCase();
-  const filteredSites = q ? sites.filter((s) => (s.name || "").toLowerCase().includes(q) || (s.address || "").toLowerCase().includes(q)) : sites;
+  const filtered = q
+    ? permanentPatrolSites.filter((r) => [r.name, r.address, r.customer].some((v) => (v || "").toLowerCase().includes(q)))
+    : permanentPatrolSites;
 
   return (
     <div>
-      <SectionTitle icon={MapPin} title={`Patrol Sites (${sites.length})`} small />
+      <SectionTitle icon={MapPin} title={editingId ? "Edit permanent patrol site" : "Add a permanent patrol site"} small />
       <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, maxWidth: 560 }}>
-        Site name, instructions, alarm code and customer are already on the site record above — this just adds a geofence point and a patrol schedule.
+        The sites you visit on a recurring basis — separate from the Sites section above, which is for alarm-response/ad-hoc dispatch.
       </div>
-      <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search sites…" style={{ ...selectStyle, marginBottom: 10, maxWidth: 420 }} />
+      <div style={{ maxWidth: 560, marginBottom: 24 }}>
+        <div style={{ display: "flex", gap: 12 }}>
+          <Field label="Customer" style={{ flex: 1 }}><input value={form.customer} onChange={(e) => set("customer", e.target.value)} style={selectStyle} /></Field>
+          <Field label="Site name" style={{ flex: 1 }}><input value={form.name} onChange={(e) => set("name", e.target.value)} style={selectStyle} /></Field>
+        </div>
+        <Field label="Address"><input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, suburb, state" style={selectStyle} /></Field>
+        <Field label="Region">
+          <select value={form.region} onChange={(e) => set("region", e.target.value)} style={selectStyle}>
+            <option value="">— none —</option>
+            {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+          </select>
+        </Field>
+        <Field label="Notes (optional)"><textarea rows={2} value={form.notes} onChange={(e) => set("notes", e.target.value)} style={{ ...selectStyle, resize: "vertical" }} /></Field>
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <button
+            onClick={() => setPanel(panel === "location" ? null : "location")}
+            style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px", background: panel === "location" ? "var(--navy)" : "var(--panel)", color: panel === "location" ? "#fff" : "var(--text)" }}
+          >
+            {form.geofence ? "Location ✓" : "Set location"}
+          </button>
+          <button
+            onClick={() => setPanel(panel === "schedule" ? null : "schedule")}
+            style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px", background: panel === "schedule" ? "var(--navy)" : "var(--panel)", color: panel === "schedule" ? "#fff" : "var(--text)" }}
+          >
+            {form.schedule ? "Schedule ✓" : "Set schedule"}
+          </button>
+        </div>
+        {panel === "location" && (
+          <div style={{ marginBottom: 14 }}>
+            <SiteGeofenceEditor
+              initialGeofence={form.geofence} initialAddress={form.address} zoneAreas={zoneAreas}
+              onApply={(geofence, suggestedRegion) => { setForm((f) => ({ ...f, geofence, region: f.region || suggestedRegion || f.region })); setPanel(null); }}
+            />
+          </div>
+        )}
+        {panel === "schedule" && (
+          <div style={{ marginBottom: 14 }}>
+            <PatrolScheduleEditor initialSchedule={form.schedule} onApply={(schedule) => { setForm((f) => ({ ...f, schedule })); setPanel(null); }} />
+          </div>
+        )}
+
+        {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={save} style={primaryBtn}><MapPin size={14} /> {editingId ? "Save changes" : "Add site"}</button>
+          {editingId && <button onClick={cancelEdit} style={secondaryBtn}>Cancel</button>}
+        </div>
+      </div>
+
+      <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search permanent patrol sites…" style={{ ...selectStyle, marginBottom: 10, maxWidth: 420 }} />
+      <SectionTitle icon={MapPin} title={`Permanent Patrol Sites (${permanentPatrolSites.length})`} small />
       <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 720 }}>
-        {filteredSites.map((s) => {
-          const detail = detailBySite.get(s.id);
-          const isOpen = expanded?.siteId === s.id;
-          const locationActive = isOpen && expanded.tab === "location";
-          const scheduleActive = isOpen && expanded.tab === "schedule";
-          return (
-            <div key={s.id} style={{ borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px" }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600 }}>{s.name}</div>
-                  <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
-                    {s.address} · {detail?.geofence ? "Location set" : "No location yet"} · {scheduleSummaryText(detail)}
-                  </div>
-                </div>
-                <button onClick={() => setExpanded(locationActive ? null : { siteId: s.id, tab: "location" })} style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px", background: locationActive ? "var(--navy)" : "var(--panel)", color: locationActive ? "#fff" : "var(--text)" }}>Location</button>
-                <button onClick={() => setExpanded(scheduleActive ? null : { siteId: s.id, tab: "schedule" })} style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px", background: scheduleActive ? "var(--navy)" : "var(--panel)", color: scheduleActive ? "#fff" : "var(--text)" }}>Schedule</button>
+        {filtered.map((r) => (
+          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: "var(--panel)", border: "1px solid var(--border)" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{r.name}{r.customer ? ` — ${r.customer}` : ""}</div>
+              <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
+                {r.address} · {r.region || "No region"} · {r.geofence ? "Location set" : "No location yet"} · {scheduleSummaryText(r)}
               </div>
-              {isOpen && (
-                <div style={{ padding: "0 14px 14px" }}>
-                  {locationActive
-                    ? <SiteGeofenceEditor site={s} detail={detail} persistPatrolSiteDetails={persistPatrolSiteDetails} />
-                    : <PatrolScheduleEditor site={s} detail={detail} persistPatrolSiteDetails={persistPatrolSiteDetails} />}
-                </div>
-              )}
             </div>
-          );
-        })}
-        {sites.length === 0 && <Empty text="No sites yet — add one in the Sites section above." />}
-        {sites.length > 0 && filteredSites.length === 0 && <Empty text="No sites match that search." />}
+            <button onClick={() => startEdit(r)} title="Edit" style={iconBtn}><RotateCcw size={13} /></button>
+            <button onClick={() => remove(r)} title="Delete" style={iconBtn}><Trash2 size={13} color="var(--breach)" /></button>
+          </div>
+        ))}
+        {permanentPatrolSites.length === 0 && <Empty text="No permanent patrol sites yet — add your first one above." />}
+        {permanentPatrolSites.length > 0 && filtered.length === 0 && <Empty text="No sites match that search." />}
       </div>
     </div>
   );
 }
 
-function RunSheetsManager({ zones, sites, accounts, zoneAreas, patrolSiteDetails, runSheets, persistRunSheets }) {
+function RunSheetsManager({ zones, accounts, zoneAreas, permanentPatrolSites, runSheets, persistRunSheets }) {
   const patrolmen = accounts.filter((a) => a.role === "patrolman");
   const blank = { name: "", region: "", siteIds: [], assigneeLoginName: "" };
   const [form, setForm] = useState(blank);
@@ -8157,14 +8307,13 @@ function RunSheetsManager({ zones, sites, accounts, zoneAreas, patrolSiteDetails
   const showConfirm = useConfirm();
 
   const areaByZone = useMemo(() => new Map(zoneAreas.map((z) => [z.zoneName, z])), [zoneAreas]);
-  const detailBySite = useMemo(() => new Map(patrolSiteDetails.map((d) => [d.siteId, d])), [patrolSiteDetails]);
-  const siteById = useMemo(() => new Map(sites.map((s) => [s.id, s])), [sites]);
+  const recordById = useMemo(() => new Map(permanentPatrolSites.map((r) => [r.id, r])), [permanentPatrolSites]);
 
   function set(field, value) { setForm((f) => ({ ...f, [field]: value })); }
 
   function loadSitesInRegion() {
     if (!form.region) return;
-    const ids = sites.filter((s) => s.run === form.region).map((s) => s.id);
+    const ids = permanentPatrolSites.filter((r) => r.region === form.region).map((r) => r.id);
     setForm((f) => ({ ...f, siteIds: ids, name: f.name.trim() ? f.name : f.region }));
     showToast(`Loaded ${ids.length} site(s) from "${form.region}".`);
   }
@@ -8219,7 +8368,9 @@ function RunSheetsManager({ zones, sites, accounts, zoneAreas, patrolSiteDetails
   }
 
   const q = siteQuery.trim().toLowerCase();
-  const pickableSites = q ? sites.filter((s) => (s.name || "").toLowerCase().includes(q) || (s.address || "").toLowerCase().includes(q)) : sites;
+  const pickableSites = q
+    ? permanentPatrolSites.filter((r) => (r.name || "").toLowerCase().includes(q) || (r.address || "").toLowerCase().includes(q))
+    : permanentPatrolSites;
   const regionArea = form.region ? areaByZone.get(form.region) : null;
 
   return (
@@ -8251,31 +8402,30 @@ function RunSheetsManager({ zones, sites, accounts, zoneAreas, patrolSiteDetails
         <Field label="Run sheet name"><input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Defaults to the region name" style={selectStyle} /></Field>
 
         <Field label={`Sites in this run (${form.siteIds.length} selected)`}>
-          <input value={siteQuery} onChange={(e) => setSiteQuery(e.target.value)} placeholder="Search sites to add…" style={{ ...selectStyle, marginBottom: 8 }} />
+          <input value={siteQuery} onChange={(e) => setSiteQuery(e.target.value)} placeholder="Search permanent patrol sites to add…" style={{ ...selectStyle, marginBottom: 8 }} />
           <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 180, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 7, padding: 8 }}>
-            {pickableSites.map((s) => (
-              <label key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 0", cursor: "pointer" }}>
-                <input type="checkbox" checked={form.siteIds.includes(s.id)} onChange={() => toggleSite(s.id)} />
-                {s.name} <span style={{ color: "var(--text-dim)" }}>— {s.address}</span>
+            {pickableSites.map((r) => (
+              <label key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 0", cursor: "pointer" }}>
+                <input type="checkbox" checked={form.siteIds.includes(r.id)} onChange={() => toggleSite(r.id)} />
+                {r.name} <span style={{ color: "var(--text-dim)" }}>— {r.address}</span>
               </label>
             ))}
-            {pickableSites.length === 0 && <div style={{ fontSize: 12, color: "var(--text-dim)" }}>No sites match.</div>}
+            {pickableSites.length === 0 && <div style={{ fontSize: 12, color: "var(--text-dim)" }}>No permanent patrol sites match — add some under Permanent Patrol Sites.</div>}
           </div>
         </Field>
 
         {form.siteIds.length > 0 && (
           <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10, marginBottom: 14 }}>
             {form.siteIds.map((id, i) => {
-              const s = siteById.get(id);
-              const detail = detailBySite.get(id);
+              const r = recordById.get(id);
               return (
                 <div key={id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 10px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12.5 }}>
                   <span style={{ width: 18, height: 18, borderRadius: "50%", background: "var(--navy)", color: "#fff", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 2 }}>{i + 1}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div>{s ? s.name : "(site removed)"}</div>
-                    {s && (
+                    <div>{r ? r.name : "(site removed)"}</div>
+                    {r && (
                       <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>
-                        {scheduleSummaryText(detail)}{s.alarmCode ? ` · Alarm code: ${s.alarmCode}` : ""}{s.keyInfo ? ` · ${s.keyInfo}` : ""}
+                        {scheduleSummaryText(r)}{r.customer ? ` · ${r.customer}` : ""}{r.notes ? ` · ${r.notes}` : ""}
                       </div>
                     )}
                   </div>

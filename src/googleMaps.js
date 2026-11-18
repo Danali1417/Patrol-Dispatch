@@ -25,10 +25,12 @@ export function loadGoogleMaps() {
       return;
     }
     const script = document.createElement("script");
-    // "drawing" is the freehand-polygon toolbar RegionAreaEditor uses; the
-    // Circle/Marker editors elsewhere don't need it, but loading one combined
-    // script is simpler than juggling two loader promises for one page.
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=drawing`;
+    // "geometry" is containsLocation(), used to suggest which region a
+    // Permanent Patrol Site's pin falls inside. Region polygons are drawn
+    // by hand (click-to-place-point — see RegionAreaEditor) rather than
+    // via the Drawing library, which Google removed the DrawingManager
+    // from as of Maps JS API v3.65.
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=geometry`;
     script.async = true;
     script.dataset.googleMapsLoader = "1";
     script.onload = () => resolve(window.google.maps);
