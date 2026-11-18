@@ -47,3 +47,35 @@ export function createMailTransporter() {
     socketTimeout: 30000,
   });
 }
+
+// Resend's own account-usage API — lets the manual ?checkEmailQuota=1
+// check (see daily-report.js) report the real daily/monthly reset time
+// instead of guessing. Worth having after a real incident (18 Nov 2026):
+// Resend's own docs describe the free daily quota two different,
+// contradictory ways — a rolling 24h window in one place, a fixed UTC
+// midnight reset in another — and what actually happened that day (a
+// resend batch got 4 of 12 through, then hit the wall again moments
+// later, well before any single clean reset instant could explain it)
+// matches the rolling-window description, not a fixed reset time. Same
+// RESEND_API_KEY as the SMTP transporter above works as a Bearer token
+// here — Resend's API keys aren't SMTP-only.
+//
+// As of writing, Resend's Usage API is in private beta and may not be
+// enabled for every account — a 404 here means "not available", not a
+// real failure, so callers should treat `available: false` as a normal,
+// expected outcome rather than an error.
+export async function fetchResendQuota() {
+  if (!process.env.RESEND_API_KEY) throw new Error("RESEND_API_KEY is not configured");
+  const res = await fetch("https://api.resend.com/usage", {
+    headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+  });
+  if (res.status === 404) {
+    return { available: false, reason: "Usage API isn't enabled for this Resend account (it's in private beta)." };
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Resend usage check failed (${res.status}): ${body}`);
+  }
+  const data = await res.json();
+  return { available: true, daily: data.daily || null, monthly: data.monthly || null };
+}
