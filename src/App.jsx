@@ -59,6 +59,9 @@ const JOBS_KEY = "ops:jobs";
 const BOARD_POLL_MS = 15000;
 const ZONES_KEY = "ops:zones";
 const SITES_KEY = "ops:sites";
+// Private pilot — see isDanLogin below. Patrol Sites & Run Sheets is only
+// built out for one login right now, not every manager.
+const RUN_SHEETS_KEY = "ops:runSheets";
 const ROSTER_KEY = "ops:roster";
 const LOGO_KEY = "ops:logo";
 const COMPANY_NAME_KEY = "ops:companyName";
@@ -148,6 +151,29 @@ function applySitesOpLocal(current, op, payload) {
     case "clearAll": return [];
     default: return current;
   }
+}
+
+// Same idea as applySitesOpLocal, for Run Sheets — mirrors applyRunSheetsOp
+// in api/kv.js for an instant local preview; the server's response is what
+// actually sticks.
+function applyRunSheetsOpLocal(current, op, payload) {
+  switch (op) {
+    case "add": return [...current, payload.runSheet];
+    case "update": return current.map((r) => (r.id === payload.id ? { ...payload.runSheet, id: payload.id } : r));
+    case "remove": return current.filter((r) => r.id !== payload.id);
+    default: return current;
+  }
+}
+
+// Patrol Sites & Run Sheets is a private pilot right now — one manager
+// login, not every manager, and not Control Room — so this is checked
+// wherever that feature's nav, data loading, or persistence would
+// otherwise run. Mirrors the same single-login precedent already used
+// for "Reset test data" (see ManagerView). Centralized here, rather than
+// re-inlining the comparison at each call site, so widening (or
+// removing) the pilot later is a one-line change.
+function isDanLogin(session) {
+  return !!session && session.role === "manager" && session.loginName.trim().toLowerCase() === "dan";
 }
 
 // Same idea as applySitesOpLocal, for Bureaus/Monitoring companies —
@@ -681,6 +707,7 @@ export default function SentrylinePrototype() {
   const [zones, setZones] = useState([]);
   const [sites, setSites] = useState([]);
   const [sitesLoaded, setSitesLoaded] = useState(false);
+  const [runSheets, setRunSheets] = useState([]);
   const [roster, setRoster] = useState([]);
   const [outcomePhrases, setOutcomePhrases] = useState([]);
   const [monitoringCompanies, setMonitoringCompanies] = useState([]);
@@ -924,6 +951,22 @@ export default function SentrylinePrototype() {
     })();
   }, [session]);
 
+  // Run Sheets — private pilot (see isDanLogin's own comment), so this
+  // only ever loads for that one login; every other session never
+  // requests ops:runSheets at all, rather than requesting it and just
+  // discarding a 403.
+  useEffect(() => {
+    if (!isDanLogin(session)) return;
+    (async () => {
+      try {
+        const res = await window.storage.get(RUN_SHEETS_KEY);
+        setRunSheets(res?.value ? JSON.parse(res.value) : []);
+      } catch (e) {
+        if (!isMissingKeyError(e)) console.error("Failed to load run sheets.", e);
+      }
+    })();
+  }, [session]);
+
   // Load or seed public holidays (used by slaWindowMinutes' weekend/
   // holiday SLA bucket — see its comment). Editable afterwards from
   // Manager > Roster.
@@ -1124,6 +1167,23 @@ export default function SentrylinePrototype() {
     try {
       const res = await window.storage.applyOp(SITES_KEY, op, payload);
       setSites(JSON.parse(res.value));
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
+  }, []);
+
+  // Same op-based, read-fresh-then-write pattern as persistSites above.
+  // Only ever called from RunSheetsManager, which only renders for the
+  // one pilot login (see isDanLogin) — the server enforces the same
+  // restriction independently (see api/kv.js), so this isn't the only
+  // thing standing between everyone else and this key.
+  const persistRunSheets = useCallback(async (op, payload) => {
+    setRunSheets((prev) => applyRunSheetsOpLocal(prev, op, payload));
+    try {
+      const res = await window.storage.applyOp(RUN_SHEETS_KEY, op, payload);
+      setRunSheets(JSON.parse(res.value));
       return true;
     } catch (e) {
       console.error(e);
@@ -1362,7 +1422,7 @@ export default function SentrylinePrototype() {
           {!accountsLoaded || !sitesLoaded ? (
             <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
           ) : session.role === "manager" ? (
-            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
+            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} runSheets={runSheets} persistRunSheets={persistRunSheets} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
           ) : session.role === "operator" ? (
             <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} logoUrl={logoUrl} monitoringCompanies={monitoringCompanies} bureaus={bureaus} />
           ) : session.role === "provider" ? (
@@ -6304,11 +6364,11 @@ function JobDetailProvider({ job, jobs, session, persist, now, onBack }) {
    MANAGER VIEW — create & manage logins
 ---------------------------------------------------------------- */
 
-function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, responseRate, persistResponseRate, bureauRates, persistBureauRates, monitoringRates, persistMonitoringRates, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
+function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, runSheets, persistRunSheets, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, responseRate, persistResponseRate, bureauRates, persistBureauRates, monitoringRates, persistMonitoringRates, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
   const [tab, setTab] = useState("accounts");
   const showConfirm = useConfirm();
   const showToast = useToast();
-  const isDan = session.loginName.trim().toLowerCase() === "dan";
+  const isDan = isDanLogin(session);
 
   function handleResetJobs() {
     showConfirm(
@@ -6349,7 +6409,7 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
         {tab === "accounts" && <AccountsManager accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />}
         {tab === "phrases" && <OutcomePhrasesEditor outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} />}
         {tab === "clients" && <ClientListsManager monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} />}
-        {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} />}
+        {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} session={session} runSheets={runSheets} persistRunSheets={persistRunSheets} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} />}
         {tab === "logs" && <Logs jobs={jobs.filter((j) => j.status !== "scheduled")} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} roster={roster} responseRate={responseRate} bureauRates={bureauRates} monitoringRates={monitoringRates} />}
       </div>
@@ -7163,12 +7223,18 @@ function AccountRow({ account, setAccounts, zones, isSelf, lastKnownPassword, on
    SITES & RUNS MANAGER
 ---------------------------------------------------------------- */
 
-function SitesManager({ zones, persistZones, sites, persistSites, accounts, setAccounts }) {
+function SitesManager({ zones, persistZones, sites, persistSites, accounts, setAccounts, session, runSheets, persistRunSheets }) {
   return (
     <div>
       <ZonesEditor zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} />
       <div style={{ height: 30 }} />
       <SitesEditor zones={zones} sites={sites} persistSites={persistSites} />
+      {isDanLogin(session) && (
+        <>
+          <div style={{ height: 30 }} />
+          <RunSheetsManager sites={sites} runSheets={runSheets} persistRunSheets={persistRunSheets} accounts={accounts} />
+        </>
+      )}
     </div>
   );
 }
@@ -7638,6 +7704,162 @@ function SitesEditor({ zones, sites, persistSites }) {
         ))}
         {sites.length === 0 && <Empty text="No sites yet — add your first one above, or import from Excel." />}
         {sites.length > 0 && filteredSites.length === 0 && <Empty text="No sites match that search." />}
+      </div>
+    </div>
+  );
+}
+
+function makeRunSheetId() {
+  return `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// Patrol Sites & Run Sheets — private pilot, rendered only for isDanLogin
+// (see SitesManager). A run sheet is a named, ordered group of existing
+// sites for one patrol — distinct from the "Runs/zones" above (an area
+// used for job routing). No geofencing or clock-in gate yet; this is just
+// grouping and assignment, same as SitesEditor's own scope above it.
+function RunSheetsManager({ sites, runSheets, persistRunSheets, accounts }) {
+  const patrolmen = accounts.filter((a) => a.role === "patrolman");
+  const blank = { name: "", area: "", siteIds: [], assigneeLoginName: "" };
+  const [form, setForm] = useState(blank);
+  const [editingId, setEditingId] = useState(null);
+  const [error, setError] = useState("");
+  const [siteQuery, setSiteQuery] = useState("");
+  const showToast = useToast();
+  const showConfirm = useConfirm();
+
+  function set(field, value) { setForm((f) => ({ ...f, [field]: value })); }
+
+  function toggleSite(id) {
+    setForm((f) => ({
+      ...f,
+      siteIds: f.siteIds.includes(id) ? f.siteIds.filter((x) => x !== id) : [...f.siteIds, id],
+    }));
+  }
+
+  function moveSite(id, dir) {
+    setForm((f) => {
+      const idx = f.siteIds.indexOf(id);
+      const next = idx + dir;
+      if (idx === -1 || next < 0 || next >= f.siteIds.length) return f;
+      const ids = f.siteIds.slice();
+      [ids[idx], ids[next]] = [ids[next], ids[idx]];
+      return { ...f, siteIds: ids };
+    });
+  }
+
+  function startEdit(rs) {
+    setEditingId(rs.id);
+    setForm({ name: rs.name, area: rs.area || "", siteIds: rs.siteIds || [], assigneeLoginName: rs.assigneeLoginName || "" });
+    setError("");
+  }
+  function cancelEdit() { setEditingId(null); setForm(blank); setError(""); }
+
+  async function save() {
+    setError("");
+    const name = form.name.trim();
+    if (!name) { setError("Run sheet name is required."); return; }
+    if (!form.siteIds.length) { setError("Add at least one site."); return; }
+    if (runSheets.some((r) => r.id !== editingId && r.name.toLowerCase() === name.toLowerCase())) {
+      setError("That run sheet name already exists."); return;
+    }
+    const runSheet = { name, area: form.area.trim(), siteIds: form.siteIds, assigneeLoginName: form.assigneeLoginName };
+    if (editingId) {
+      const existing = runSheets.find((r) => r.id === editingId);
+      const ok = await persistRunSheets("update", { id: editingId, runSheet: { ...runSheet, createdAt: existing?.createdAt || new Date().toISOString() } });
+      if (ok) { showToast("Run sheet updated."); cancelEdit(); } else showToast("Couldn't save — try again.", "error");
+    } else {
+      const ok = await persistRunSheets("add", { runSheet: { ...runSheet, id: makeRunSheetId(), createdAt: new Date().toISOString() } });
+      if (ok) { showToast(`Run sheet "${name}" created.`); cancelEdit(); } else showToast("Couldn't create — try again.", "error");
+    }
+  }
+
+  function remove(rs) {
+    showConfirm(`Delete run sheet "${rs.name}"? This can't be undone.`, async () => {
+      const ok = await persistRunSheets("remove", { id: rs.id });
+      if (ok) { if (editingId === rs.id) cancelEdit(); showToast("Run sheet deleted."); }
+      else showToast("Couldn't delete — try again.", "error");
+    });
+  }
+
+  const siteById = useMemo(() => new Map(sites.map((s) => [s.id, s])), [sites]);
+  const q = siteQuery.trim().toLowerCase();
+  const pickableSites = q ? sites.filter((s) => (s.name || "").toLowerCase().includes(q) || (s.address || "").toLowerCase().includes(q)) : sites;
+
+  return (
+    <div>
+      <div style={{ padding: 12, borderRadius: 8, border: "1px dashed var(--border)", background: "var(--panel-alt)", marginBottom: 20, maxWidth: 720, fontSize: 12, color: "var(--text-dim)" }}>
+        <b style={{ color: "var(--text)" }}>Run Sheets (pilot — visible only to this login).</b> A named, ordered group of sites for one patrol — separate from "Runs/zones" above, which are areas used for job routing. Nothing here affects dispatch yet.
+      </div>
+
+      <SectionTitle icon={Navigation} title={editingId ? "Edit run sheet" : "New run sheet"} small />
+      <div style={{ maxWidth: 560, marginBottom: 24 }}>
+        <div style={{ display: "flex", gap: 12 }}>
+          <Field label="Run sheet name" style={{ flex: 1 }}><input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Westside Night Run" style={selectStyle} /></Field>
+          <Field label="Assign to" style={{ width: 220 }}>
+            <select value={form.assigneeLoginName} onChange={(e) => set("assigneeLoginName", e.target.value)} style={selectStyle}>
+              <option value="">Unassigned</option>
+              {patrolmen.map((p) => <option key={p.loginName} value={p.loginName}>{p.displayName}</option>)}
+            </select>
+          </Field>
+        </div>
+        <Field label="Area (optional)"><input value={form.area} onChange={(e) => set("area", e.target.value)} placeholder="Free text for now, e.g. Westside zone" style={selectStyle} /></Field>
+
+        <Field label={`Sites in this run (${form.siteIds.length} selected)`}>
+          <input value={siteQuery} onChange={(e) => setSiteQuery(e.target.value)} placeholder="Search sites to add…" style={{ ...selectStyle, marginBottom: 8 }} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 180, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 7, padding: 8 }}>
+            {pickableSites.map((s) => (
+              <label key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 0", cursor: "pointer" }}>
+                <input type="checkbox" checked={form.siteIds.includes(s.id)} onChange={() => toggleSite(s.id)} />
+                {s.name} <span style={{ color: "var(--text-dim)" }}>— {s.address}</span>
+              </label>
+            ))}
+            {pickableSites.length === 0 && <div style={{ fontSize: 12, color: "var(--text-dim)" }}>No sites match.</div>}
+          </div>
+        </Field>
+
+        {form.siteIds.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10, marginBottom: 14 }}>
+            {form.siteIds.map((id, i) => {
+              const s = siteById.get(id);
+              return (
+                <div key={id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 7, background: "var(--panel)", border: "1px solid var(--border)", fontSize: 12.5 }}>
+                  <span style={{ width: 18, height: 18, borderRadius: "50%", background: "var(--navy)", color: "#fff", fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{i + 1}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>{s ? s.name : "(site removed)"}</span>
+                  <button onClick={() => moveSite(id, -1)} disabled={i === 0} title="Move up" style={{ ...iconBtn, opacity: i === 0 ? 0.4 : 1 }}>↑</button>
+                  <button onClick={() => moveSite(id, 1)} disabled={i === form.siteIds.length - 1} title="Move down" style={{ ...iconBtn, opacity: i === form.siteIds.length - 1 ? 0.4 : 1 }}>↓</button>
+                  <button onClick={() => toggleSite(id)} title="Remove" style={iconBtn}><X size={13} /></button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={save} style={primaryBtn}><Navigation size={14} /> {editingId ? "Save changes" : "Create run sheet"}</button>
+          {editingId && <button onClick={cancelEdit} style={secondaryBtn}>Cancel</button>}
+        </div>
+      </div>
+
+      <SectionTitle icon={Navigation} title={`Run sheets (${runSheets.length})`} small />
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 720 }}>
+        {runSheets.map((rs) => {
+          const assignee = patrolmen.find((p) => p.loginName === rs.assigneeLoginName);
+          return (
+            <div key={rs.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: "var(--panel)", border: "1px solid var(--border)" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>{rs.name}</div>
+                <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
+                  {(rs.siteIds || []).length} site(s){rs.area ? ` · ${rs.area}` : ""} · {assignee ? assignee.displayName : "Unassigned"}
+                </div>
+              </div>
+              <button onClick={() => startEdit(rs)} title="Edit" style={iconBtn}><RotateCcw size={13} /></button>
+              <button onClick={() => remove(rs)} title="Delete" style={iconBtn}><Trash2 size={13} color="var(--breach)" /></button>
+            </div>
+          );
+        })}
+        {runSheets.length === 0 && <Empty text="No run sheets yet — create one above from your Patrol Sites." />}
       </div>
     </div>
   );
