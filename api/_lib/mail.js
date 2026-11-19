@@ -17,6 +17,18 @@
 //                     only delivers to your own Resend account email, not
 //                     to real recipients — a verified domain is required
 //                     for actually sending client/report emails.
+// Optional:
+//   RESEND_USAGE_API_KEY   a separate Resend API key with full/account
+//                           access, used only by ?checkEmailQuota=1 (see
+//                           fetchResendQuota below). RESEND_API_KEY is
+//                           deliberately scoped to "sending emails only"
+//                           for everyday use — confirmed in production on
+//                           18 Nov 2026, when the usage check failed with
+//                           a 401 restricted_api_key error against that
+//                           key — so this stays a second, separate key
+//                           rather than widening the sending key's own
+//                           permissions. Leave unset and this check just
+//                           reports itself unavailable.
 
 import nodemailer from "nodemailer";
 
@@ -63,14 +75,28 @@ export function createMailTransporter() {
 // As of writing, Resend's Usage API is in private beta and may not be
 // enabled for every account — a 404 here means "not available", not a
 // real failure, so callers should treat `available: false` as a normal,
-// expected outcome rather than an error.
+// expected outcome rather than an error. Same for a 401 naming
+// "restricted_api_key": that's RESEND_API_KEY's sending-only scope
+// correctly refusing an account-level read, not a misconfiguration —
+// see RESEND_USAGE_API_KEY's own comment above.
 export async function fetchResendQuota() {
-  if (!process.env.RESEND_API_KEY) throw new Error("RESEND_API_KEY is not configured");
+  const apiKey = process.env.RESEND_USAGE_API_KEY || process.env.RESEND_API_KEY;
+  if (!apiKey) throw new Error("RESEND_API_KEY is not configured");
   const res = await fetch("https://api.resend.com/usage", {
-    headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+    headers: { Authorization: `Bearer ${apiKey}` },
   });
   if (res.status === 404) {
     return { available: false, reason: "Usage API isn't enabled for this Resend account (it's in private beta)." };
+  }
+  if (res.status === 401) {
+    const body = await res.text().catch(() => "");
+    if (body.includes("restricted_api_key")) {
+      return {
+        available: false,
+        reason: "The Resend API key in use is restricted to sending emails only, so it can't read account usage. Create a Resend API key with full/account access, set it as RESEND_USAGE_API_KEY, and redeploy — leave RESEND_API_KEY itself untouched.",
+      };
+    }
+    throw new Error(`Resend usage check failed (401): ${body}`);
   }
   if (!res.ok) {
     const body = await res.text().catch(() => "");
