@@ -6450,10 +6450,8 @@ function JobDetailProvider({ job, jobs, session, persist, now, onBack }) {
 ---------------------------------------------------------------- */
 
 function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, responseRate, persistResponseRate, bureauRates, persistBureauRates, monitoringRates, persistMonitoringRates, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
-  const [tab, setTab] = useState("accounts");
   const showConfirm = useConfirm();
   const showToast = useToast();
-  const isDan = isDanLogin(session);
 
   function handleResetJobs() {
     showConfirm(
@@ -6469,6 +6467,53 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
     );
   }
 
+  // isDanLogin(session) picks the new sidebar Control Room shell for this
+  // one login only; every other manager login gets ManagerClassicTools —
+  // the exact same screen this component always rendered, byte-for-byte,
+  // just moved into its own function below.
+  return (
+    <ManagerClassicOrNew
+      session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones}
+      sites={sites} persistSites={persistSites} runSheets={runSheets} persistRunSheets={persistRunSheets}
+      zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites}
+      roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases}
+      monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus}
+      responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates}
+      monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays}
+      logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName}
+      jobs={jobs} persistJobs={persistJobs} now={now} onResetJobs={handleResetJobs}
+    />
+  );
+}
+
+// ---- Dan-only Control Room pilot: a redesigned sidebar interface replacing
+// the classic TopNav for this one login only (see isDanLogin above — gated
+// the exact same way as the Patrol Sites/Run Sheets pilot). Nothing here
+// changes what any other manager login sees or how any existing component
+// behaves; this is a new, separate render branch in ManagerClassicOrNew
+// below that reuses the same already-shipped components (Board,
+// NewJobForm, JobDetailOperator, RosterView, Logs, AccountsManager,
+// PatrolOpsManager, SitesManager) rather than duplicating their logic.
+// Dashboard/Incident/Staff-licenses are previews only — see each
+// component's own comment for exactly what's real vs. not yet built.
+const CONTROL_ROOM_NAV = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "schedule", label: "Schedule", icon: CalendarDays },
+  { id: "dispatch", label: "Dispatch Board", icon: ShieldAlert },
+  { id: "sites", label: "Permanent Patrol Sites", icon: MapPin },
+  { id: "reports", label: "Reports", icon: BarChart3 },
+  { id: "incident", label: "Incident", icon: AlertTriangle },
+  { id: "staff", label: "Staff", icon: Users },
+];
+
+function ManagerClassicOrNew(props) {
+  const isDan = isDanLogin(props.session);
+  return isDan ? <ControlRoomShell {...props} /> : <ManagerClassicTools {...props} />;
+}
+
+function ManagerClassicTools({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, responseRate, persistResponseRate, bureauRates, persistBureauRates, monitoringRates, persistMonitoringRates, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, now, onResetJobs }) {
+  const [tab, setTab] = useState("accounts");
+  const isDan = isDanLogin(session);
   return (
     <div>
       <TopNav
@@ -6486,7 +6531,7 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
       <div style={{ padding: 20, maxWidth: 1180, margin: "0 auto" }}>
         {isDan && (
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
-            <button onClick={handleResetJobs} title="Delete every job so the app starts fresh — visible only to this login" style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 12px", borderRadius: 7, border: "1px solid var(--breach)", cursor: "pointer", fontSize: 12, fontWeight: 600, background: "transparent", color: "var(--breach)" }}>
+            <button onClick={onResetJobs} title="Delete every job so the app starts fresh — visible only to this login" style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 12px", borderRadius: 7, border: "1px solid var(--breach)", cursor: "pointer", fontSize: 12, fontWeight: 600, background: "transparent", color: "var(--breach)" }}>
               <Trash2 size={14} /> Reset test data
             </button>
           </div>
@@ -6498,6 +6543,284 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} />}
         {tab === "logs" && <Logs jobs={jobs.filter((j) => j.status !== "scheduled")} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} roster={roster} responseRate={responseRate} bureauRates={bureauRates} monitoringRates={monitoringRates} />}
       </div>
+    </div>
+  );
+}
+
+// The new sidebar shell. "Classic Tools" (bottom of the sidebar, below the
+// divider) is the entire old ManagerClassicTools screen above, unchanged —
+// so nothing Dan could do before is unreachable now, it's just not the
+// default view any more.
+function ControlRoomShell(props) {
+  const { session, accounts, setAccounts, zones, sites, persistSites, roster, persistRoster, companyName, logoUrl, now, jobs, persistJobs, onResetJobs, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, runSheets, persistRunSheets, publicHolidays, persistPublicHolidays, monitoringCompanies, bureaus, responseRate, bureauRates, monitoringRates } = props;
+  const [tab, setTab] = useState("dashboard");
+  const patrolmen = accounts.filter((a) => a.role === "patrolman");
+  const providers = accounts.filter((a) => a.role === "provider");
+
+  return (
+    <div style={{ display: "flex", minHeight: "100vh" }}>
+      <div style={{ width: 230, flexShrink: 0, background: "var(--navy)", color: "#fff", display: "flex", flexDirection: "column", padding: "18px 12px" }}>
+        <div style={{ padding: "6px 10px 18px", fontSize: 13, fontWeight: 700, color: "#fff" }}>Control Room</div>
+        {CONTROL_ROOM_NAV.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            style={{
+              display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, marginBottom: 2,
+              background: tab === t.id ? "var(--navy-dim)" : "transparent",
+              border: "none", color: tab === t.id ? "#fff" : "#9FB0CB", cursor: "pointer",
+              fontSize: 12.5, fontWeight: 600, textAlign: "left",
+            }}
+          >
+            <t.icon size={15} color={tab === t.id ? "var(--accent)" : "currentColor"} /> {t.label}
+          </button>
+        ))}
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.12)", marginTop: 10, paddingTop: 10 }}>
+          <button
+            onClick={() => setTab("classic")}
+            style={{
+              display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, width: "100%",
+              background: tab === "classic" ? "var(--navy-dim)" : "transparent",
+              border: "none", color: tab === "classic" ? "#fff" : "#9FB0CB", cursor: "pointer",
+              fontSize: 12.5, fontWeight: 600, textAlign: "left",
+            }}
+          >
+            <Settings size={15} color={tab === "classic" ? "var(--accent)" : "currentColor"} /> Classic Tools
+          </button>
+        </div>
+        <div style={{ marginTop: "auto", paddingTop: 14, fontSize: 10.5, lineHeight: 1.5, color: "#7B8CA8" }}>
+          Visible only to this login. Every other Control Room / manager login is unaffected.
+        </div>
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: "1px solid var(--border)", background: "var(--panel)" }}>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>
+            {tab === "classic" ? "Classic Tools" : CONTROL_ROOM_NAV.find((t) => t.id === tab)?.label}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 12.5, color: "var(--text-dim)" }}>
+              {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+            </span>
+          </div>
+        </div>
+
+        <div style={{ padding: 20, maxWidth: 1180, margin: "0 auto" }}>
+          {tab === "dashboard" && <ControlRoomDashboard jobs={jobs} onNavigate={setTab} />}
+          {tab === "schedule" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} />}
+          {tab === "dispatch" && (
+            <ControlRoomDispatchBoard
+              jobs={jobs} persist={persistJobs} roster={roster} sites={sites} persistSites={persistSites} zones={zones}
+              patrolmen={patrolmen} providers={providers} session={session} now={now} companyName={companyName} logoUrl={logoUrl}
+              monitoringCompanies={monitoringCompanies} bureaus={bureaus}
+            />
+          )}
+          {tab === "sites" && (
+            <PatrolOpsManager
+              zones={zones} accounts={accounts}
+              zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas}
+              permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites}
+              runSheets={runSheets} persistRunSheets={persistRunSheets}
+            />
+          )}
+          {tab === "reports" && (
+            <ControlRoomReports
+              jobs={jobs} persist={persistJobs} now={now} companyName={companyName} logoUrl={logoUrl} roster={roster}
+              patrolmen={patrolmen} providers={providers} session={session}
+              responseRate={responseRate} bureauRates={bureauRates} monitoringRates={monitoringRates}
+            />
+          )}
+          {tab === "incident" && <ControlRoomIncidentPreview />}
+          {tab === "staff" && (
+            <ControlRoomStaff accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={props.persistLogo} companyName={companyName} persistCompanyName={props.persistCompanyName} />
+          )}
+          {tab === "classic" && (
+            <ManagerClassicTools {...props} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Real, live numbers (dispatched / awaiting acknowledgement / scheduled)
+// computed straight from `jobs` — the same data the classic Dispatch Board
+// uses. Everything else on this dashboard (patrol run sheet progress,
+// incident notifications, staff license alerts) needs tracking that
+// doesn't exist yet, so it's left as an explicit placeholder rather than
+// faked, per the "phase it" decision.
+function ControlRoomDashboard({ jobs, onNavigate }) {
+  const dispatched = jobs.filter((j) => j.status === "dispatched").length;
+  const awaitingAck = jobs.filter((j) => j.status === "dispatched" && !j.acknowledgedAt).length;
+  const scheduled = jobs.filter((j) => j.status === "scheduled").length;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <div style={{ padding: "10px 14px", borderRadius: 8, background: "#FFFBEB", border: "1px solid var(--warn)", color: "#92400E", fontSize: 12 }}>
+        Preview — the three numbers below are live from your real jobs. Patrol run sheet progress, incident notifications and staff license alerts will appear here once those are built.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 14 }}>
+        <button onClick={() => onNavigate("dispatch")} style={{ textAlign: "left", borderRadius: 10, border: "1px solid var(--border)", background: "var(--panel)", padding: "14px 16px", cursor: "pointer" }}>
+          <div style={{ fontSize: 11.5, color: "var(--text-dim)", fontWeight: 600 }}>Dispatched</div>
+          <div style={{ fontSize: 26, fontWeight: 700, marginTop: 4 }}>{dispatched}</div>
+        </button>
+        <button onClick={() => onNavigate("dispatch")} style={{ textAlign: "left", borderRadius: 10, border: "1px solid var(--border)", background: "var(--panel)", padding: "14px 16px", cursor: "pointer" }}>
+          <div style={{ fontSize: 11.5, color: "var(--text-dim)", fontWeight: 600 }}>Awaiting acknowledgement</div>
+          <div style={{ fontSize: 26, fontWeight: 700, marginTop: 4, color: awaitingAck ? "var(--warn)" : undefined }}>{awaitingAck}</div>
+        </button>
+        <button onClick={() => onNavigate("dispatch")} style={{ textAlign: "left", borderRadius: 10, border: "1px solid var(--border)", background: "var(--panel)", padding: "14px 16px", cursor: "pointer" }}>
+          <div style={{ fontSize: 11.5, color: "var(--text-dim)", fontWeight: 600 }}>Scheduled</div>
+          <div style={{ fontSize: 26, fontWeight: 700, marginTop: 4 }}>{scheduled}</div>
+        </button>
+      </div>
+      <div style={{ borderRadius: 10, border: "1px dashed var(--border)", padding: 20, color: "var(--text-dim)", fontSize: 12.5, textAlign: "center" }}>
+        Patrol run sheet progress · Incident report notifications · Staff license alerts — coming soon.
+      </div>
+    </div>
+  );
+}
+
+// Dispatch Board: literally the same Board / NewJobForm / JobDetailOperator
+// components OperatorView uses, with the same selection/sub-tab pattern —
+// no new dispatch logic, just a new place to reach it from.
+function ControlRoomDispatchBoard({ jobs, persist, roster, sites, persistSites, zones, patrolmen, providers, session, now, companyName, logoUrl, monitoringCompanies, bureaus }) {
+  const [subTab, setSubTab] = useState("board");
+  const [selectedId, setSelectedId] = useState(null);
+  const [selectedArchivedJob, setSelectedArchivedJob] = useState(null);
+  const selected = jobs.find((j) => j.id === selectedId) || (selectedArchivedJob?.id === selectedId ? selectedArchivedJob : null);
+  function selectJob(id, archivedJob) {
+    setSelectedId(id);
+    setSelectedArchivedJob(archivedJob || null);
+  }
+  function goSub(id) {
+    setSubTab(id);
+    selectJob(null);
+  }
+  const pills = [["board", "Active jobs"], ["new", "+ New job"], ["scheduled", "Scheduled"], ["cancelled", "Cancelled"], ["closed", "Closed"]];
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        {pills.map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => goSub(id)}
+            style={{
+              padding: "7px 14px", borderRadius: 999, border: `1px solid ${subTab === id ? "var(--navy)" : "var(--border)"}`,
+              background: subTab === id ? "var(--navy)" : "var(--panel)", color: subTab === id ? "#fff" : "var(--text)",
+              fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {subTab === "board" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} roster={roster} />}
+      {subTab === "scheduled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="scheduled" roster={roster} />}
+      {subTab === "cancelled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="cancelled" roster={roster} />}
+      {subTab === "closed" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="emailed" roster={roster} />}
+      {(subTab === "board" || subTab === "scheduled" || subTab === "cancelled" || subTab === "closed") && selected && (
+        <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} providers={providers} roster={roster} persist={persist} now={now} session={session} companyName={companyName} logoUrl={logoUrl} onBack={() => selectJob(null)} />
+      )}
+      {subTab === "new" && (
+        <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} providers={providers} roster={roster} session={session} persist={persist} monitoringCompanies={monitoringCompanies} bureaus={bureaus} onCreated={(id) => { setSubTab("board"); selectJob(id); }} />
+      )}
+    </div>
+  );
+}
+
+// Reports: "Logs & Analysis" reuses the existing Logs component as-is.
+// "Response Attendance" reuses Board with lockedStatus, same as the
+// classic Closed jobs / Cancelled jobs tabs — real data either way. The
+// patrol-specific exports (run sheet exceptions/logs, NFC reports,
+// downloads) aren't built yet, so that third pill is a labeled preview.
+function ControlRoomReports({ jobs, persist, now, companyName, logoUrl, roster, patrolmen, providers, session, responseRate, bureauRates, monitoringRates }) {
+  const [subTab, setSubTab] = useState("logs");
+  const pills = [["logs", "Logs & Analysis"], ["attendance", "Response Attendance"], ["more", "More reports"]];
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        {pills.map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setSubTab(id)}
+            style={{
+              padding: "7px 14px", borderRadius: 999, border: `1px solid ${subTab === id ? "var(--navy)" : "var(--border)"}`,
+              background: subTab === id ? "var(--navy)" : "var(--panel)", color: subTab === id ? "#fff" : "var(--text)",
+              fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {subTab === "logs" && (
+        <Logs jobs={jobs.filter((j) => j.status !== "scheduled")} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} roster={roster} responseRate={responseRate} bureauRates={bureauRates} monitoringRates={monitoringRates} />
+      )}
+      {subTab === "attendance" && (
+        <ControlRoomAttendance jobs={jobs} persist={persist} now={now} roster={roster} patrolmen={patrolmen} providers={providers} session={session} companyName={companyName} logoUrl={logoUrl} />
+      )}
+      {subTab === "more" && (
+        <div style={{ borderRadius: 10, border: "1px dashed var(--border)", padding: 24, color: "var(--text-dim)", fontSize: 12.5, textAlign: "center" }}>
+          Run sheet exceptions · Run sheet logs · NFC reports · Run sheet download — coming soon.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ControlRoomAttendance({ jobs, persist, now, roster, patrolmen, providers, session, companyName, logoUrl }) {
+  const [status, setStatus] = useState("emailed");
+  const [selectedId, setSelectedId] = useState(null);
+  const [selectedArchivedJob, setSelectedArchivedJob] = useState(null);
+  const selected = jobs.find((j) => j.id === selectedId) || (selectedArchivedJob?.id === selectedId ? selectedArchivedJob : null);
+  function selectJob(id, archivedJob) {
+    setSelectedId(id);
+    setSelectedArchivedJob(archivedJob || null);
+  }
+  return (
+    <div>
+      {!selected && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          {[["emailed", "Closed jobs"], ["cancelled", "Cancelled jobs"]].map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => { setStatus(id); selectJob(null); }}
+              style={{
+                padding: "6px 12px", borderRadius: 7, border: `1px solid ${status === id ? "var(--navy)" : "var(--border)"}`,
+                background: status === id ? "var(--navy)" : "var(--panel)", color: status === id ? "#fff" : "var(--text)",
+                fontSize: 12, fontWeight: 600, cursor: "pointer",
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {!selected
+        ? <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus={status} roster={roster} />
+        : <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} providers={providers} roster={roster} persist={persist} now={now} session={session} companyName={companyName} logoUrl={logoUrl} onBack={() => selectJob(null)} />}
+    </div>
+  );
+}
+
+// Staff: the real account list and "create a login" flow are just the
+// existing AccountsManager, reused as-is. Licenses/compliance tracking is
+// net-new and isn't stored anywhere yet, so it stays a labeled preview
+// until that's actually built.
+function ControlRoomStaff({ accounts, setAccounts, zones, session, logoUrl, persistLogo, companyName, persistCompanyName }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <AccountsManager accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />
+      <div style={{ borderRadius: 10, border: "1px dashed var(--border)", padding: 18, color: "var(--text-dim)", fontSize: 12.5, textAlign: "center" }}>
+        Preview — security licenses, driver's licenses and compliance expiry tracking per staff member aren't stored yet. This section will grow here once that's built.
+      </div>
+    </div>
+  );
+}
+
+function ControlRoomIncidentPreview() {
+  return (
+    <div style={{ borderRadius: 10, border: "1px dashed var(--border)", padding: 36, color: "var(--text-dim)", fontSize: 12.5, textAlign: "center" }}>
+      Preview — custom incident report templates (built by you, assigned to specific patrol sites, visible only to the patrolmen on them) aren't built yet. This tab is a placeholder for that.
     </div>
   );
 }
