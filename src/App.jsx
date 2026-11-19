@@ -199,6 +199,7 @@ function applyZoneAreasOpLocal(current, op, payload) {
 function applyPermanentPatrolSitesOpLocal(current, op, payload) {
   switch (op) {
     case "add": return [...current, payload.record];
+    case "addMany": return [...current, ...payload.records];
     case "update": return current.map((r) => (r.id === payload.id ? { ...payload.record, id: payload.id } : r));
     case "remove": return current.filter((r) => r.id !== payload.id);
     default: return current;
@@ -8170,6 +8171,207 @@ function PatrolScheduleEditor({ initialSchedule, onApply }) {
 // together in one save, so the Location/Schedule panels below are just
 // local sub-editors feeding back into this same form, never persisting
 // anything on their own.
+const PERMANENT_PATROL_SITE_IMPORT_FIELDS = [
+  { key: "customer", match: (h) => h.includes("customer") || h.includes("client") },
+  { key: "name", match: (h) => h === "sitename" || h === "name" },
+  { key: "address", match: (h) => h === "address" },
+  { key: "notes", match: (h) => h.includes("note") },
+  { key: "region", match: (h) => h === "run" || h === "zone" || h === "region" || h.includes("run") || h.includes("zone") || h.includes("region") },
+  { key: "days", match: (h) => h.includes("day") && !h.includes("daily") },
+  { key: "patrolsPerDay", match: (h) => h.includes("frequency") || (h.includes("patrol") && (h.includes("day") || h.includes("visit"))) },
+  { key: "timeFrom", match: (h) => h.includes("from") || h.includes("start") },
+  { key: "timeTo", match: (h) => h.includes("to") || h.includes("end") || h.includes("finish") },
+];
+
+// Reads a free-text "days" cell into weekday keys — "Mon,Wed,Fri",
+// "Monday/Wednesday", "Mon-Fri" (a range) and "Daily"/"Every day" are
+// all accepted, since that's realistically how an existing spreadsheet
+// of patrol sites would have this column written, not as a fixed code.
+function parseDaysCell(text) {
+  const raw = String(text || "").toLowerCase().trim();
+  if (!raw) return [];
+  if (raw.includes("daily") || raw.includes("every day") || raw.includes("everyday")) {
+    return PATROL_WEEKDAYS.map((d) => d.key);
+  }
+  const order = PATROL_WEEKDAYS.map((d) => d.key);
+  const tokens = raw.split(/[,;/&]+|\sand\s/).map((t) => t.trim()).filter(Boolean);
+  const keys = new Set();
+  tokens.forEach((tok) => {
+    const range = tok.match(/^([a-z]+)\s*-\s*([a-z]+)$/);
+    if (range) {
+      const startIdx = order.findIndex((k) => range[1].startsWith(k));
+      const endIdx = order.findIndex((k) => range[2].startsWith(k));
+      if (startIdx !== -1 && endIdx !== -1) {
+        for (let i = startIdx; i <= endIdx; i++) keys.add(order[i]);
+        return;
+      }
+    }
+    const idx = order.findIndex((k) => tok.startsWith(k));
+    if (idx !== -1) keys.add(order[idx]);
+  });
+  return [...keys];
+}
+
+// Builds the same per-weekday schedule shape PatrolScheduleEditor edits,
+// from whatever Days/Patrols-per-day/Time-from/Time-to columns a row
+// has. Returns null (schedule left unset, same as a manually-added site
+// with no schedule yet) when the row names no days at all — the
+// spreadsheet isn't required to carry this; it can always be filled in
+// per-site afterward.
+function buildScheduleFromRow(get) {
+  const days = parseDaysCell(get("days"));
+  if (!days.length) return null;
+  const patrols = Math.max(1, Math.min(6, Number(get("patrolsPerDay")) || 1));
+  const timeFrom = get("timeFrom");
+  const timeTo = get("timeTo");
+  const anytime = !timeFrom || !timeTo;
+  const schedule = {};
+  PATROL_WEEKDAYS.forEach(({ key }) => {
+    schedule[key] = days.includes(key)
+      ? { enabled: true, patrols, anytime, start: anytime ? "" : timeFrom, end: anytime ? "" : timeTo }
+      : { ...BLANK_DAY_SCHEDULE };
+  });
+  return schedule;
+}
+
+// Bulk-loads an existing spreadsheet of permanent patrol sites: each
+// row's address is forward-geocoded for its map pin (default 100m
+// geofence radius, same as a manually-placed one — see
+// SiteGeofenceEditor), and checked against each region's drawn area
+// (see RegionAreaEditor) to suggest one, same logic either way. A
+// region named directly in the sheet always wins over the suggestion.
+// Geocoded one row at a time with a short pause between each — this
+// goes through Nominatim (see geocode.js/api/reverse-geocode.js), a
+// shared public service whose usage policy asks for roughly one
+// request per second, not a client hammering it with a big batch at once.
+function PermanentPatrolSitesImport({ zoneAreas, permanentPatrolSites, persistPermanentPatrolSites }) {
+  const fileRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState(null);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setBusy(true);
+    setError("");
+    setResult(null);
+    setProgress(null);
+    try {
+      const XLSX = await import("xlsx");
+      const buf = await file.arrayBuffer();
+      const workbook = XLSX.read(buf, { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      if (!rows.length) { setError("That file has no rows to import."); setBusy(false); return; }
+
+      const headers = Object.keys(rows[0]);
+      const fieldToHeader = {};
+      PERMANENT_PATROL_SITE_IMPORT_FIELDS.forEach(({ key, match }) => {
+        const h = headers.find((h) => match(normalizeHeader(h)));
+        if (h) fieldToHeader[key] = h;
+      });
+
+      const existingKeys = new Set(permanentPatrolSites.map((r) => `${(r.name || "").trim().toLowerCase()}|${(r.address || "").trim().toLowerCase()}`));
+      const seen = new Set();
+      let skippedMissing = 0;
+      let skippedDupe = 0;
+      let geocodeFailed = 0;
+
+      const candidates = [];
+      rows.forEach((row) => {
+        const get = (key) => (fieldToHeader[key] ? String(row[fieldToHeader[key]] ?? "").trim() : "");
+        const name = get("name");
+        const address = get("address");
+        if (!name || !address) { skippedMissing++; return; }
+        const dedupeKey = `${name.toLowerCase()}|${address.toLowerCase()}`;
+        if (existingKeys.has(dedupeKey) || seen.has(dedupeKey)) { skippedDupe++; return; }
+        seen.add(dedupeKey);
+        candidates.push({
+          name, address,
+          customer: get("customer"),
+          notes: get("notes"),
+          region: get("region"),
+          schedule: buildScheduleFromRow(get),
+        });
+      });
+
+      let maps = null;
+      try { maps = await loadGoogleMaps(); } catch (e) { /* region suggestion just won't run — geocoding still does */ }
+
+      function suggestRegion(center) {
+        if (!maps || !center) return "";
+        const point = new maps.LatLng(center.lat, center.lng);
+        for (const za of zoneAreas) {
+          if (!za.path?.length) continue;
+          const polygon = new maps.Polygon({ paths: za.path });
+          if (maps.geometry.poly.containsLocation(point, polygon)) return za.zoneName;
+        }
+        return "";
+      }
+
+      const imported = [];
+      setProgress({ done: 0, total: candidates.length });
+      for (let i = 0; i < candidates.length; i++) {
+        const c = candidates[i];
+        let geofence = null;
+        try {
+          const geo = await forwardGeocode(c.address);
+          if (geo) geofence = { center: { lat: geo.lat, lng: geo.lon }, radiusMeters: 100 };
+          else geocodeFailed++;
+        } catch (e) {
+          geocodeFailed++;
+        }
+        imported.push({
+          id: makePermanentPatrolSiteId(),
+          customer: c.customer, name: c.name, address: c.address, notes: c.notes,
+          region: c.region || suggestRegion(geofence?.center) || "",
+          geofence, schedule: c.schedule,
+          createdAt: new Date().toISOString(),
+        });
+        setProgress({ done: i + 1, total: candidates.length });
+        if (i < candidates.length - 1) await new Promise((r) => setTimeout(r, 300));
+      }
+
+      if (imported.length) await persistPermanentPatrolSites("addMany", { records: imported });
+      setResult({ imported: imported.length, skippedMissing, skippedDupe, geocodeFailed, total: rows.length });
+    } catch (err) {
+      setError("Couldn't read that file — make sure it's a valid .xlsx, .xls, or .csv export.");
+    }
+    setProgress(null);
+    setBusy(false);
+  }
+
+  return (
+    <div style={{ padding: 14, borderRadius: 8, border: "1px dashed var(--border)", background: "var(--panel-alt)", marginBottom: 20, maxWidth: 620 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>Import permanent patrol sites from Excel</div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginTop: 2 }}>
+            Columns recognized: Customer, Site name, Address, Notes, Region (optional — otherwise suggested from the address), Days (e.g. "Mon,Wed,Fri" or "Mon-Fri" or "Daily"), Patrols per day, Time from/to. Site name and Address are required per row — each row's address is geocoded for its map pin, so a large file can take a little while.
+          </div>
+        </div>
+        <button onClick={() => fileRef.current?.click()} disabled={busy} style={secondaryBtn}>
+          <Upload size={13} /> {busy ? "Importing…" : "Choose file"}
+        </button>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" hidden onChange={handleFile} />
+      </div>
+      {progress && <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 10 }}>Geocoding {progress.done} of {progress.total}…</div>}
+      {error && <div style={{ color: "var(--breach)", fontSize: 12, marginTop: 10 }}>{error}</div>}
+      {result && (
+        <div style={{ color: "var(--ok)", fontSize: 12, marginTop: 10 }}>
+          Imported {result.imported} of {result.total} row(s).
+          {result.skippedDupe > 0 && ` ${result.skippedDupe} skipped as duplicates.`}
+          {result.skippedMissing > 0 && ` ${result.skippedMissing} skipped (missing site name or address).`}
+          {result.geocodeFailed > 0 && ` ${result.geocodeFailed} site(s) couldn't be geocoded automatically — set their location manually.`}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, persistPermanentPatrolSites }) {
   const blank = { customer: "", name: "", address: "", notes: "", region: "", geofence: null, schedule: null };
   const [form, setForm] = useState(blank);
@@ -8273,6 +8475,8 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
           {editingId && <button onClick={cancelEdit} style={secondaryBtn}>Cancel</button>}
         </div>
       </div>
+
+      <PermanentPatrolSitesImport zoneAreas={zoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} />
 
       <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search permanent patrol sites…" style={{ ...selectStyle, marginBottom: 10, maxWidth: 420 }} />
       <SectionTitle icon={MapPin} title={`Permanent Patrol Sites (${permanentPatrolSites.length})`} small />
