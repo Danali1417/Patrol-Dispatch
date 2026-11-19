@@ -83,6 +83,10 @@ function applyPermanentPatrolSitesOp(current, op, payload) {
       if (!record || !record.id) throw new Error("record is required");
       return [...current, record];
     }
+    case "addMany": {
+      const records = Array.isArray(payload?.records) ? payload.records : [];
+      return [...current, ...records];
+    }
     case "update": {
       const { id, record } = payload || {};
       if (!id || !record) throw new Error("id and record are required");
