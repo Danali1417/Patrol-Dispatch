@@ -6600,7 +6600,7 @@ function ControlRoomShell(props) {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <span style={{ fontFamily: "var(--mono)", fontSize: 12.5, color: "var(--text-dim)" }}>
-              {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              {new Date(now).toLocaleTimeString("en-AU", { hour12: false })}
             </span>
           </div>
         </div>
