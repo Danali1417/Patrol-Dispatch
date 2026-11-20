@@ -8569,7 +8569,7 @@ function PatrolOpsManager({ zones, accounts, zoneAreas, persistZoneAreas, perman
           </button>
         ))}
       </div>
-      {subTab === "regions" && <RegionsManager zones={zones} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} />}
+      {subTab === "regions" && <RegionsManager zones={zones} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} />}
       {subTab === "sites" && <PermanentPatrolSitesEditor zones={zones} zoneAreas={zoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} />}
       {subTab === "runs" && (
         <RunSheetsManager zones={zones} accounts={accounts} zoneAreas={zoneAreas} permanentPatrolSites={permanentPatrolSites} runSheets={runSheets} persistRunSheets={persistRunSheets} />
@@ -8582,39 +8582,75 @@ function PatrolOpsManager({ zones, accounts, zoneAreas, persistZoneAreas, perman
 // above — not a separate region list of its own, so this stays the one
 // "run" concept the rest of the app already has, just with a real mapped
 // area layered on for the ones that get patrolled.
-function RegionsManager({ zones, zoneAreas, persistZoneAreas }) {
-  const [expanded, setExpanded] = useState(null);
+// Master-detail: pick a region on the left (narrow — it's just a name and
+// a one-line status), and the right side — the biggest space on the
+// screen — shows its map editor plus every Permanent Patrol Site already
+// assigned to it, instead of an accordion that pushes everything else
+// down the page.
+function RegionsManager({ zones, zoneAreas, persistZoneAreas, permanentPatrolSites }) {
+  const [selected, setSelected] = useState(zones[0] || null);
   const areaByZone = useMemo(() => new Map(zoneAreas.map((z) => [z.zoneName, z])), [zoneAreas]);
+  const area = selected ? areaByZone.get(selected) : null;
+  const sitesInRegion = selected ? permanentPatrolSites.filter((s) => s.region === selected) : [];
 
   return (
     <div>
       <SectionTitle icon={MapPin} title="Regions — mapped areas for your runs/zones" small />
-      <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, maxWidth: 560 }}>
+      <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, maxWidth: 760 }}>
         These are the same runs/zones from the section above. Draw an area for one here so Run Sheets can pull in every site that belongs to it.
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 640 }}>
-        {zones.map((z) => {
-          const area = areaByZone.get(z);
-          const isOpen = expanded === z;
-          return (
-            <div key={z} style={{ borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", cursor: "pointer" }} onClick={() => setExpanded(isOpen ? null : z)}>
-                <div style={{ flex: 1, minWidth: 0 }}>
+      {zones.length === 0 ? (
+        <Empty text="No runs/zones yet — add one in the Runs / zones section above." />
+      ) : (
+        <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+          <div style={{ width: 230, flexShrink: 0, display: "flex", flexDirection: "column", gap: 4, border: "1px solid var(--border)", borderRadius: 10, padding: 6, maxHeight: 600, overflowY: "auto" }}>
+            {zones.map((z) => {
+              const a = areaByZone.get(z);
+              const isSel = selected === z;
+              return (
+                <button
+                  key={z}
+                  onClick={() => setSelected(z)}
+                  style={{
+                    display: "block", textAlign: "left", border: "none", borderRadius: 7, padding: "9px 10px", cursor: "pointer",
+                    background: isSel ? "var(--navy)" : "transparent", color: isSel ? "#fff" : "var(--text)",
+                  }}
+                >
                   <div style={{ fontSize: 13, fontWeight: 600 }}>{z}</div>
-                  <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>{area?.path?.length ? `Area mapped — ${area.path.length}-point shape` : "No area mapped yet"}</div>
+                  <div style={{ fontSize: 11, color: isSel ? "#B9C4D6" : "var(--text-dim)" }}>
+                    {a?.path?.length ? `Area mapped — ${a.path.length}-point shape` : "No area mapped yet"}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {selected ? (
+              <>
+                <RegionAreaEditor zoneName={selected} zoneArea={area} persistZoneAreas={persistZoneAreas} />
+                <div style={{ marginTop: 22 }}>
+                  <SectionTitle icon={MapPin} title={`Sites in "${selected}"`} small />
+                  {sitesInRegion.length === 0 ? (
+                    <div style={{ fontSize: 12, color: "var(--text-dim)" }}>No Permanent Patrol Sites assigned to this region yet.</div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {sitesInRegion.map((s) => (
+                        <div key={s.id} style={{ padding: "9px 12px", borderRadius: 7, border: "1px solid var(--border)", background: "var(--panel)" }}>
+                          <div style={{ fontSize: 13, fontWeight: 600 }}>{s.name}</div>
+                          <div style={{ fontSize: 11, color: "var(--text-dim)" }}>{s.customer ? `${s.customer} · ` : ""}{s.address}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <ChevronRight size={16} style={{ transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .15s" }} />
-              </div>
-              {isOpen && (
-                <div style={{ padding: "0 14px 14px" }}>
-                  <RegionAreaEditor zoneName={z} zoneArea={area} persistZoneAreas={persistZoneAreas} />
-                </div>
-              )}
-            </div>
-          );
-        })}
-        {zones.length === 0 && <Empty text="No runs/zones yet — add one in the Runs / zones section above." />}
-      </div>
+              </>
+            ) : (
+              <Empty text="Select a region on the left." />
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -8884,7 +8920,7 @@ const VISIT_TYPES = [
   { value: "patrol", label: "Patrol" },
   { value: "lockup", label: "Lock-up" },
   { value: "unlock", label: "Unlock" },
-  { value: "escort", label: "Escort" },
+  { value: "escort", label: "Staff Escort" },
   { value: "withdrawal", label: "Withdrawal" },
 ];
 const BLANK_VISIT = { type: "patrol", mode: "anytime", count: 1, start: "", end: "", time: "" };
@@ -9369,25 +9405,36 @@ function PlaceSearchInput({ value, onChange, onPlaceSelected, placeholder, style
   );
 }
 
+// Master-detail, same idea as RegionsManager above: a searchable/filterable
+// list on the left (narrow — it's a lot of sites, most of the page's width
+// shouldn't go to names and addresses), the full add/edit form on the
+// right in whatever space is left, same shape as the Guard platform's own
+// Sites screen.
 function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, persistPermanentPatrolSites }) {
   const blank = { customer: "", name: "", address: "", notes: "", keyCode: "", region: "", geofence: null, schedule: null };
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [error, setError] = useState("");
-  const [panel, setPanel] = useState(null); // "location" | "schedule" | null
   const [filter, setFilter] = useState("");
+  const [regionFilter, setRegionFilter] = useState("");
+  const [panel, setPanel] = useState(null); // "location" | "schedule" | null
   const showToast = useToast();
   const showConfirm = useConfirm();
 
   function set(field, value) { setForm((f) => ({ ...f, [field]: value })); }
 
+  function startAdd() { setEditingId(null); setForm(blank); setError(""); setPanel(null); setShowImport(false); setShowForm(true); }
   function startEdit(r) {
     setEditingId(r.id);
     setForm({ customer: r.customer || "", name: r.name || "", address: r.address || "", notes: r.notes || "", keyCode: r.keyCode || "", region: r.region || "", geofence: r.geofence || null, schedule: r.schedule || null });
     setError("");
     setPanel(null);
+    setShowImport(false);
+    setShowForm(true);
   }
-  function cancelEdit() { setEditingId(null); setForm(blank); setError(""); setPanel(null); }
+  function closeForm() { setEditingId(null); setForm(blank); setError(""); setPanel(null); setShowForm(false); }
 
   async function save() {
     setError("");
@@ -9398,117 +9445,147 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
     if (editingId) {
       const existing = permanentPatrolSites.find((r) => r.id === editingId);
       const ok = await persistPermanentPatrolSites("update", { id: editingId, record: { ...record, createdAt: existing?.createdAt || new Date().toISOString() } });
-      if (ok) { showToast("Site updated."); cancelEdit(); } else showToast("Couldn't save — try again.", "error");
+      if (ok) { showToast("Site updated."); closeForm(); } else showToast("Couldn't save — try again.", "error");
     } else {
       const ok = await persistPermanentPatrolSites("add", { record: { ...record, id: makePermanentPatrolSiteId(), createdAt: new Date().toISOString() } });
-      if (ok) { showToast(`"${name}" added.`); cancelEdit(); } else showToast("Couldn't add — try again.", "error");
+      if (ok) { showToast(`"${name}" added.`); closeForm(); } else showToast("Couldn't add — try again.", "error");
     }
   }
 
   function remove(r) {
     showConfirm(`Delete "${r.name}"? This can't be undone.`, async () => {
       const ok = await persistPermanentPatrolSites("remove", { id: r.id });
-      if (ok) { if (editingId === r.id) cancelEdit(); showToast("Site deleted."); }
+      if (ok) { if (editingId === r.id) closeForm(); showToast("Site deleted."); }
       else showToast("Couldn't delete — try again.", "error");
     });
   }
 
   const q = filter.trim().toLowerCase();
-  const filtered = q
-    ? permanentPatrolSites.filter((r) => [r.name, r.address, r.customer].some((v) => (v || "").toLowerCase().includes(q)))
-    : permanentPatrolSites;
+  const filtered = permanentPatrolSites
+    .filter((r) => !regionFilter || r.region === regionFilter)
+    .filter((r) => !q || [r.name, r.address, r.customer].some((v) => (v || "").toLowerCase().includes(q)));
 
   return (
     <div>
-      <SectionTitle icon={MapPin} title={editingId ? "Edit permanent patrol site" : "Add a permanent patrol site"} small />
-      <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, maxWidth: 560 }}>
-        The sites you visit on a recurring basis — separate from the Sites section above, which is for alarm-response/ad-hoc dispatch.
-      </div>
-      <div style={{ maxWidth: 560, marginBottom: 24 }}>
-        <div style={{ display: "flex", gap: 12 }}>
-          <Field label="Site name" style={{ flex: 1 }}>
-            <PlaceSearchInput
-              value={form.name}
-              onChange={(v) => set("name", v)}
-              onPlaceSelected={async ({ address, name, location }) => {
-                let region = "";
-                if (location) {
-                  try {
-                    const maps = await loadGoogleMaps();
-                    region = suggestRegionForPoint(maps, zoneAreas, location);
-                  } catch (e) { /* region suggestion just won't run — address/name still fill in */ }
-                }
-                setForm((f) => ({ ...f, name: name || f.name, address: address || f.address, region: region || f.region }));
-              }}
-              style={selectStyle}
-            />
-          </Field>
-          <Field label="Customer" style={{ flex: 1 }}><input value={form.customer} onChange={(e) => set("customer", e.target.value)} style={selectStyle} /></Field>
-        </div>
-        <Field label="Address"><input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, suburb, state" style={selectStyle} /></Field>
-        <Field label="Region">
-          <select value={form.region} onChange={(e) => set("region", e.target.value)} style={selectStyle}>
-            <option value="">— none —</option>
+      <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+        <div style={{ width: 280, flexShrink: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>Sites ({permanentPatrolSites.length})</div>
+            <button onClick={startAdd} style={{ ...primaryBtn, padding: "6px 12px", fontSize: 11.5 }}><MapPin size={13} /> Add</button>
+          </div>
+          <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search site, customer, address…" style={selectStyle} />
+          <select value={regionFilter} onChange={(e) => setRegionFilter(e.target.value)} style={selectStyle}>
+            <option value="">All regions</option>
             {zones.map((z) => <option key={z} value={z}>{z}</option>)}
           </select>
-        </Field>
-        <Field label="Key / access code"><input value={form.keyCode} onChange={(e) => set("keyCode", e.target.value)} placeholder="e.g. Key #14, lockbox code 2481" style={selectStyle} /></Field>
-        <Field label="Notes (optional)"><textarea rows={2} value={form.notes} onChange={(e) => set("notes", e.target.value)} style={{ ...selectStyle, resize: "vertical" }} /></Field>
-
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
           <button
-            onClick={() => setPanel(panel === "location" ? null : "location")}
-            style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px", background: panel === "location" ? "var(--navy)" : "var(--panel)", color: panel === "location" ? "#fff" : "var(--text)" }}
+            onClick={() => { setShowImport((v) => !v); setShowForm(false); }}
+            style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px", background: showImport ? "var(--navy)" : "var(--panel)", color: showImport ? "#fff" : "var(--text)" }}
           >
-            {form.geofence ? "Location ✓" : "Set location"}
+            Import Excel
           </button>
-          <button
-            onClick={() => setPanel(panel === "schedule" ? null : "schedule")}
-            style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px", background: panel === "schedule" ? "var(--navy)" : "var(--panel)", color: panel === "schedule" ? "#fff" : "var(--text)" }}
-          >
-            {form.schedule ? "Schedule ✓" : "Set schedule"}
-          </button>
-        </div>
-        {panel === "location" && (
-          <div style={{ marginBottom: 14 }}>
-            <SiteGeofenceEditor
-              initialGeofence={form.geofence} initialAddress={form.address} zoneAreas={zoneAreas}
-              onApply={(geofence, suggestedRegion) => { setForm((f) => ({ ...f, geofence, region: f.region || suggestedRegion || f.region })); setPanel(null); }}
-            />
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 600, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 10, padding: 6 }}>
+            {filtered.map((r) => {
+              const isSel = editingId === r.id && showForm;
+              return (
+                <button
+                  key={r.id}
+                  onClick={() => startEdit(r)}
+                  style={{
+                    display: "block", textAlign: "left", border: "none", borderRadius: 7, padding: "9px 10px", cursor: "pointer",
+                    background: isSel ? "var(--navy)" : "transparent", color: isSel ? "#fff" : "var(--text)",
+                  }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{r.name}</div>
+                  <div style={{ fontSize: 11, color: isSel ? "#B9C4D6" : "var(--text-dim)" }}>{r.customer ? `${r.customer} · ` : ""}{r.address}</div>
+                </button>
+              );
+            })}
+            {permanentPatrolSites.length === 0 && <div style={{ fontSize: 12, color: "var(--text-dim)", padding: 10 }}>No permanent patrol sites yet.</div>}
+            {permanentPatrolSites.length > 0 && filtered.length === 0 && <div style={{ fontSize: 12, color: "var(--text-dim)", padding: 10 }}>No sites match.</div>}
           </div>
-        )}
-        {panel === "schedule" && (
-          <div style={{ marginBottom: 14 }}>
-            <PatrolScheduleEditor initialSchedule={form.schedule} onApply={(schedule) => { setForm((f) => ({ ...f, schedule })); setPanel(null); }} />
-          </div>
-        )}
-
-        {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={save} style={primaryBtn}><MapPin size={14} /> {editingId ? "Save changes" : "Add site"}</button>
-          {editingId && <button onClick={cancelEdit} style={secondaryBtn}>Cancel</button>}
         </div>
-      </div>
 
-      <PermanentPatrolSitesImport zoneAreas={zoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {showImport && (
+            <PermanentPatrolSitesImport zoneAreas={zoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} />
+          )}
 
-      <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search permanent patrol sites…" style={{ ...selectStyle, marginBottom: 10, maxWidth: 420 }} />
-      <SectionTitle icon={MapPin} title={`Permanent Patrol Sites (${permanentPatrolSites.length})`} small />
-      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 720 }}>
-        {filtered.map((r) => (
-          <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: "var(--panel)", border: "1px solid var(--border)" }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600 }}>{r.name}{r.customer ? ` — ${r.customer}` : ""}</div>
-              <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
-                {r.address} · {r.region || "No region"} · {r.geofence ? "Location set" : "No location yet"} · {scheduleSummaryText(r)}
+          {!showImport && !showForm && (
+            <Empty text="Select a site on the left to view or edit it, or click Add to create a new one." />
+          )}
+
+          {!showImport && showForm && (
+            <div style={{ maxWidth: 560 }}>
+              <SectionTitle icon={MapPin} title={editingId ? "Edit permanent patrol site" : "Add a permanent patrol site"} small />
+              <div style={{ display: "flex", gap: 12 }}>
+                <Field label="Site name" style={{ flex: 1 }}>
+                  <PlaceSearchInput
+                    value={form.name}
+                    onChange={(v) => set("name", v)}
+                    onPlaceSelected={async ({ address, name, location }) => {
+                      let region = "";
+                      if (location) {
+                        try {
+                          const maps = await loadGoogleMaps();
+                          region = suggestRegionForPoint(maps, zoneAreas, location);
+                        } catch (e) { /* region suggestion just won't run — address/name still fill in */ }
+                      }
+                      setForm((f) => ({ ...f, name: name || f.name, address: address || f.address, region: region || f.region }));
+                    }}
+                    style={selectStyle}
+                  />
+                </Field>
+                <Field label="Customer" style={{ flex: 1 }}><input value={form.customer} onChange={(e) => set("customer", e.target.value)} style={selectStyle} /></Field>
+              </div>
+              <Field label="Address"><input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, suburb, state" style={selectStyle} /></Field>
+              <Field label="Region">
+                <select value={form.region} onChange={(e) => set("region", e.target.value)} style={selectStyle}>
+                  <option value="">— none —</option>
+                  {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+                </select>
+              </Field>
+              <Field label="Key / access code"><input value={form.keyCode} onChange={(e) => set("keyCode", e.target.value)} placeholder="e.g. Key #14, lockbox code 2481" style={selectStyle} /></Field>
+              <Field label="Notes (optional)"><textarea rows={2} value={form.notes} onChange={(e) => set("notes", e.target.value)} style={{ ...selectStyle, resize: "vertical" }} /></Field>
+
+              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                <button
+                  onClick={() => setPanel(panel === "location" ? null : "location")}
+                  style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px", background: panel === "location" ? "var(--navy)" : "var(--panel)", color: panel === "location" ? "#fff" : "var(--text)" }}
+                >
+                  {form.geofence ? "Location ✓" : "Set location"}
+                </button>
+                <button
+                  onClick={() => setPanel(panel === "schedule" ? null : "schedule")}
+                  style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px", background: panel === "schedule" ? "var(--navy)" : "var(--panel)", color: panel === "schedule" ? "#fff" : "var(--text)" }}
+                >
+                  {form.schedule ? "Schedule ✓" : "Set schedule"}
+                </button>
+                {editingId && <button onClick={() => remove(permanentPatrolSites.find((r) => r.id === editingId))} style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px", color: "var(--breach)", borderColor: "var(--breach)" }}>Delete</button>}
+              </div>
+              {panel === "location" && (
+                <div style={{ marginBottom: 14 }}>
+                  <SiteGeofenceEditor
+                    initialGeofence={form.geofence} initialAddress={form.address} zoneAreas={zoneAreas}
+                    onApply={(geofence, suggestedRegion) => { setForm((f) => ({ ...f, geofence, region: f.region || suggestedRegion || f.region })); setPanel(null); }}
+                  />
+                </div>
+              )}
+              {panel === "schedule" && (
+                <div style={{ marginBottom: 14 }}>
+                  <PatrolScheduleEditor initialSchedule={form.schedule} onApply={(schedule) => { setForm((f) => ({ ...f, schedule })); setPanel(null); }} />
+                </div>
+              )}
+
+              {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={save} style={primaryBtn}><MapPin size={14} /> {editingId ? "Save changes" : "Add site"}</button>
+                <button onClick={closeForm} style={secondaryBtn}>Cancel</button>
               </div>
             </div>
-            <button onClick={() => startEdit(r)} title="Edit" style={iconBtn}><RotateCcw size={13} /></button>
-            <button onClick={() => remove(r)} title="Delete" style={iconBtn}><Trash2 size={13} color="var(--breach)" /></button>
-          </div>
-        ))}
-        {permanentPatrolSites.length === 0 && <Empty text="No permanent patrol sites yet — add your first one above." />}
-        {permanentPatrolSites.length > 0 && filtered.length === 0 && <Empty text="No sites match that search." />}
+          )}
+        </div>
       </div>
     </div>
   );
