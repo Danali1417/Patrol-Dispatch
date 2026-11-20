@@ -8882,6 +8882,12 @@ function SiteGeofenceEditor({ initialGeofence, initialAddress, zoneAreas, onAppl
     onApply({ center: { lat: pos.lat(), lng: pos.lng() }, radiusMeters: Math.round(c.getRadius()) }, suggestedRegion);
   }
 
+  function setRadiusValue(v) {
+    const n = Math.max(10, Math.min(2000, Math.round(Number(v) || 0) || 100));
+    setRadius(n);
+    if (circleRef.current) circleRef.current.setRadius(n);
+  }
+
   if (error) {
     return <div style={{ fontSize: 12, color: "var(--breach)" }}>Couldn't load the map — {error}. Add VITE_GOOGLE_MAPS_API_KEY in Vercel's environment variables and redeploy.</div>;
   }
@@ -8889,7 +8895,16 @@ function SiteGeofenceEditor({ initialGeofence, initialAddress, zoneAreas, onAppl
   return (
     <div>
       <div ref={mapRef} style={{ width: "100%", height: 260, borderRadius: 8, border: "1px solid var(--border)", marginBottom: 8 }} />
-      <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 6 }}>Drag the pin to the site's door, drag the circle's edge to size the geofence. Radius: {radius} m</div>
+      <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 8 }}>Drag the pin to the site's door, drag the circle's edge to resize the geofence, or type an exact radius:</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <input
+          type="number" min={10} max={2000} step={10}
+          value={radius}
+          onChange={(e) => setRadiusValue(e.target.value)}
+          style={{ ...selectStyle, width: 90 }}
+        />
+        <span style={{ fontSize: 11.5, color: "var(--text-dim)" }}>metres</span>
+      </div>
       {suggestedRegion && (
         <div style={{ fontSize: 11.5, color: "var(--navy)", marginBottom: 8 }}>
           📍 Falls inside "{suggestedRegion}"'s mapped area — change the Region field above if you'd rather keep it in a different one.
