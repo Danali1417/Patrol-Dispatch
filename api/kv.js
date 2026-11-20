@@ -21,6 +21,7 @@ const RUN_SHEETS_KEY = "ops:runSheets";
 const ZONE_AREAS_KEY = "ops:zoneAreas";
 const PERMANENT_PATROL_SITES_KEY = "ops:permanentPatrolSites";
 const INCIDENT_TEMPLATES_KEY = "ops:incidentTemplates";
+const PUBLISHED_WEEKS_KEY = "ops:publishedWeeks";
 
 // Patrol Ops (Regions, Patrol Sites, Run Sheets) is a private pilot for
 // one manager login right now, not every manager — mirrors the client's
@@ -126,6 +127,27 @@ function applyIncidentTemplatesOp(current, op, payload) {
   }
 }
 
+// Which Mon-Sun weeks Dan has marked "Published" in the new Schedule
+// preview — just a marker he can see, not a gate on what the patrolman
+// app shows (that still reads every roster entry unconditionally, same
+// as always). Keyed by weekStart rather than an id.
+function applyPublishedWeeksOp(current, op, payload) {
+  switch (op) {
+    case "add": {
+      const { weekStart, publishedAt } = payload || {};
+      if (!weekStart) throw new Error("weekStart is required");
+      if (current.some((w) => w.weekStart === weekStart)) return current;
+      return [...current, { weekStart, publishedAt: publishedAt || new Date().toISOString() }];
+    }
+    case "remove": {
+      if (!payload?.weekStart) throw new Error("weekStart is required");
+      return current.filter((w) => w.weekStart !== payload.weekStart);
+    }
+    default:
+      throw new Error(`Unknown published weeks op: ${op}`);
+  }
+}
+
 // Every Dan-only pilot key shares the same GET/POST handling (see the
 // dedicated block below) — this is what tells that block which reducer
 // to apply for a given key, so adding another pilot key later is just
@@ -135,6 +157,7 @@ const DAN_ONLY_PILOT_KEYS = {
   [ZONE_AREAS_KEY]: applyZoneAreasOp,
   [PERMANENT_PATROL_SITES_KEY]: applyPermanentPatrolSitesOp,
   [INCIDENT_TEMPLATES_KEY]: applyIncidentTemplatesOp,
+  [PUBLISHED_WEEKS_KEY]: applyPublishedWeeksOp,
 };
 
 const PUBLIC_READ_KEYS = new Set(["ops:logo", "ops:companyName"]);

@@ -83,6 +83,13 @@ const PERMANENT_PATROL_SITES_KEY = "ops:permanentPatrolSites";
 // ids it's assigned to. Nothing patrolman-facing reads this yet; this is
 // just the build/manage side.
 const INCIDENT_TEMPLATES_KEY = "ops:incidentTemplates";
+// Which Mon-Sun weeks Dan has hit "Publish" on in the new Schedule
+// preview. Deliberately just a marker Dan can see — it does NOT gate
+// what the patrolman app shows (that still reads every roster entry the
+// moment it's added, same as always). Turning this into a real
+// draft/publish workflow would mean changing that patrolman-side lookup,
+// which was explicitly ruled out for now.
+const PUBLISHED_WEEKS_KEY = "ops:publishedWeeks";
 const ROSTER_KEY = "ops:roster";
 const LOGO_KEY = "ops:logo";
 const COMPANY_NAME_KEY = "ops:companyName";
@@ -219,6 +226,16 @@ function applyIncidentTemplatesOpLocal(current, op, payload) {
     case "add": return [...current, payload.record];
     case "update": return current.map((r) => (r.id === payload.id ? { ...payload.record, id: payload.id } : r));
     case "remove": return current.filter((r) => r.id !== payload.id);
+    default: return current;
+  }
+}
+
+// Same idea again, for published weeks — a flat list of { weekStart,
+// publishedAt }, keyed by weekStart rather than an id.
+function applyPublishedWeeksOpLocal(current, op, payload) {
+  switch (op) {
+    case "add": return current.some((w) => w.weekStart === payload.weekStart) ? current : [...current, { weekStart: payload.weekStart, publishedAt: payload.publishedAt }];
+    case "remove": return current.filter((w) => w.weekStart !== payload.weekStart);
     default: return current;
   }
 }
@@ -769,6 +786,7 @@ export default function SentrylinePrototype() {
   const [zoneAreas, setZoneAreas] = useState([]);
   const [permanentPatrolSites, setPermanentPatrolSites] = useState([]);
   const [incidentTemplates, setIncidentTemplates] = useState([]);
+  const [publishedWeeks, setPublishedWeeks] = useState([]);
   const [roster, setRoster] = useState([]);
   const [outcomePhrases, setOutcomePhrases] = useState([]);
   const [monitoringCompanies, setMonitoringCompanies] = useState([]);
@@ -1050,6 +1068,14 @@ export default function SentrylinePrototype() {
         if (!isMissingKeyError(e)) console.error("Failed to load incident templates.", e);
       }
     })();
+    (async () => {
+      try {
+        const res = await window.storage.get(PUBLISHED_WEEKS_KEY);
+        setPublishedWeeks(res?.value ? JSON.parse(res.value) : []);
+      } catch (e) {
+        if (!isMissingKeyError(e)) console.error("Failed to load published weeks.", e);
+      }
+    })();
   }, [session]);
 
   // Load or seed public holidays (used by slaWindowMinutes' weekend/
@@ -1315,6 +1341,19 @@ export default function SentrylinePrototype() {
     }
   }, []);
 
+  // Same op-based pattern as persistRunSheets above.
+  const persistPublishedWeeks = useCallback(async (op, payload) => {
+    setPublishedWeeks((prev) => applyPublishedWeeksOpLocal(prev, op, payload));
+    try {
+      const res = await window.storage.applyOp(PUBLISHED_WEEKS_KEY, op, payload);
+      setPublishedWeeks(JSON.parse(res.value));
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
+  }, []);
+
   // Same op-based, read-fresh-then-write pattern as persistSites below —
   // this used to be a blind full-array overwrite, the same class of bug
   // fixed there. A patrolman's roster entry for today going missing (only
@@ -1546,7 +1585,7 @@ export default function SentrylinePrototype() {
           {!accountsLoaded || !sitesLoaded ? (
             <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
           ) : session.role === "manager" ? (
-            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} runSheets={runSheets} persistRunSheets={persistRunSheets} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} incidentTemplates={incidentTemplates} persistIncidentTemplates={persistIncidentTemplates} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
+            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} runSheets={runSheets} persistRunSheets={persistRunSheets} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} incidentTemplates={incidentTemplates} persistIncidentTemplates={persistIncidentTemplates} publishedWeeks={publishedWeeks} persistPublishedWeeks={persistPublishedWeeks} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
           ) : session.role === "operator" ? (
             <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} logoUrl={logoUrl} monitoringCompanies={monitoringCompanies} bureaus={bureaus} />
           ) : session.role === "provider" ? (
@@ -6488,7 +6527,7 @@ function JobDetailProvider({ job, jobs, session, persist, now, onBack }) {
    MANAGER VIEW — create & manage logins
 ---------------------------------------------------------------- */
 
-function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, incidentTemplates, persistIncidentTemplates, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, responseRate, persistResponseRate, bureauRates, persistBureauRates, monitoringRates, persistMonitoringRates, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
+function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, incidentTemplates, persistIncidentTemplates, publishedWeeks, persistPublishedWeeks, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, responseRate, persistResponseRate, bureauRates, persistBureauRates, monitoringRates, persistMonitoringRates, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
   const showConfirm = useConfirm();
   const showToast = useToast();
 
@@ -6516,6 +6555,7 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
       sites={sites} persistSites={persistSites} runSheets={runSheets} persistRunSheets={persistRunSheets}
       zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites}
       incidentTemplates={incidentTemplates} persistIncidentTemplates={persistIncidentTemplates}
+      publishedWeeks={publishedWeeks} persistPublishedWeeks={persistPublishedWeeks}
       roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases}
       monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus}
       responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates}
@@ -6592,7 +6632,7 @@ function ManagerClassicTools({ session, accounts, setAccounts, zones, persistZon
 // so nothing Dan could do before is unreachable now, it's just not the
 // default view any more.
 function ControlRoomShell(props) {
-  const { session, accounts, setAccounts, zones, sites, persistSites, roster, persistRoster, companyName, logoUrl, now, jobs, persistJobs, onResetJobs, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, incidentTemplates, persistIncidentTemplates, runSheets, persistRunSheets, publicHolidays, persistPublicHolidays, monitoringCompanies, bureaus, responseRate, bureauRates, monitoringRates } = props;
+  const { session, accounts, setAccounts, zones, sites, persistSites, roster, persistRoster, companyName, logoUrl, now, jobs, persistJobs, onResetJobs, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, incidentTemplates, persistIncidentTemplates, publishedWeeks, persistPublishedWeeks, runSheets, persistRunSheets, publicHolidays, persistPublicHolidays, monitoringCompanies, bureaus, responseRate, bureauRates, monitoringRates } = props;
   const [tab, setTab] = useState("dashboard");
   const patrolmen = accounts.filter((a) => a.role === "patrolman");
   const providers = accounts.filter((a) => a.role === "provider");
@@ -6647,7 +6687,12 @@ function ControlRoomShell(props) {
 
         <div style={{ padding: 20, maxWidth: 1180, margin: "0 auto" }}>
           {tab === "dashboard" && <ControlRoomDashboard jobs={jobs} onNavigate={setTab} />}
-          {tab === "schedule" && <ControlRoomSchedulePreview permanentPatrolSites={permanentPatrolSites} roster={roster} accounts={accounts} />}
+          {tab === "schedule" && (
+            <ControlRoomSchedulePreview
+              permanentPatrolSites={permanentPatrolSites} roster={roster} accounts={accounts}
+              publishedWeeks={publishedWeeks} persistPublishedWeeks={persistPublishedWeeks}
+            />
+          )}
           {tab === "dispatch" && (
             <ControlRoomDispatchBoard
               jobs={jobs} persist={persistJobs} roster={roster} sites={sites} persistSites={persistSites} zones={zones}
@@ -6731,14 +6776,26 @@ function ControlRoomDashboard({ jobs, onNavigate }) {
 // a weekly grid instead of one day at a time. Nothing about the real
 // roster or RosterView changes; this only reads `roster`, never writes it.
 const SCHEDULE_DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts }) {
+function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, publishedWeeks, persistPublishedWeeks }) {
   const [view, setView] = useState("employee");
   const [weekOffset, setWeekOffset] = useState(0);
+  const showToast = useToast();
 
   const monday = addDays(mondayOfWeek(new Date()), weekOffset * 7);
   const weekDates = Array.from({ length: 7 }, (_, i) => dateOnlyISO(addDays(monday, i)));
   const fmtShort = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-AU", { day: "numeric", month: "short" });
   const weekLabel = `${fmtShort(weekDates[0])} – ${fmtShort(weekDates[6])} ${new Date(`${weekDates[6]}T00:00:00`).getFullYear()}`;
+  const isPublished = publishedWeeks.some((w) => w.weekStart === weekDates[0]);
+
+  async function togglePublish() {
+    if (isPublished) {
+      const ok = await persistPublishedWeeks("remove", { weekStart: weekDates[0] });
+      if (ok) showToast("Marked as not published.");
+    } else {
+      const ok = await persistPublishedWeeks("add", { weekStart: weekDates[0], publishedAt: new Date().toISOString() });
+      if (ok) showToast("Marked as published.");
+    }
+  }
 
   const patrolmen = accounts.filter((a) => a.role === "patrolman");
 
@@ -6761,17 +6818,32 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts }) 
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ padding: "10px 14px", borderRadius: 8, background: "#FFFBEB", border: "1px solid var(--warn)", color: "#92400E", fontSize: 12 }}>
         {view === "employee"
-          ? "\"By employee\" shows your real roster for this week. \"By site\" is still a preview — there's no site-based shift data behind it yet."
+          ? "\"By employee\" shows your real roster for this week. \"By site\" is still a preview — there's no site-based shift data behind it yet. Publish is just a marker for now — it doesn't change what patrolmen see."
           : "Preview — \"By site\" isn't wired to real shift data yet. Switch to \"By employee\" to see your real roster, or use Classic Tools → Roster."}
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
           <div style={{ fontSize: 20, fontWeight: 700 }}>Schedule</div>
-          <div style={{ fontSize: 12.5, color: "var(--text-dim)" }}>All customers</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3 }}>
+            <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>All customers</span>
+            <span style={{
+              fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+              background: isPublished ? "#DCFCE7" : "var(--panel-alt)",
+              color: isPublished ? "#166534" : "var(--text-dim)",
+            }}>
+              {isPublished ? "Published" : "Not published"}
+            </span>
+          </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button style={secondaryBtn}>Select shifts</button>
           <button style={secondaryBtn}>Copy week</button>
+          <button
+            onClick={togglePublish}
+            style={isPublished ? { ...secondaryBtn, color: "var(--ok)", borderColor: "var(--ok)" } : primaryBtn}
+          >
+            {isPublished ? "✓ Published — unpublish" : "Publish this week"}
+          </button>
           <button style={primaryBtn}>+ Create shift</button>
         </div>
       </div>
