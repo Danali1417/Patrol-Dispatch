@@ -9380,11 +9380,17 @@ function PlaceSearchInput({ value, onChange, onPlaceSelected, placeholder, style
   // Keeps the widget's own text roughly in sync when the form's name
   // changes from elsewhere (e.g. switching which site is being edited,
   // or picking a place) — best-effort, since the element's exact
-  // property surface is new.
+  // property surface is new. widgetReady is in the dependency list too:
+  // Maps loads async, so the very first time this editor opens, `value`
+  // can already hold an existing site's name before the widget element
+  // even exists yet — without re-running once it's ready, that initial
+  // sync is silently lost and the widget shows blank despite the
+  // underlying form state (and the saved record) being correct the
+  // whole time.
   useEffect(() => {
     if (!elementRef.current) return;
     try { elementRef.current.value = value || ""; } catch (e) {}
-  }, [value]);
+  }, [value, widgetReady]);
 
   return (
     <div>
