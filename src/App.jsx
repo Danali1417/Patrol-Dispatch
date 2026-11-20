@@ -6782,6 +6782,11 @@ function ControlRoomDashboard({ jobs, onNavigate }) {
 const SCHEDULE_DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 function ControlRoomSchedulePreview({ permanentPatrolSites, roster, persistRoster, accounts, zones = [], publishedWeeks, persistPublishedWeeks }) {
   const [creating, setCreating] = useState(null); // { date, run } to prefill, or null
+  const [editing, setEditing] = useState(null); // a roster entry being edited
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState([]); // roster entry ids ticked in Select shifts
+  const [copyOpen, setCopyOpen] = useState(false);
+  const showConfirm = useConfirm();
   const [view, setView] = useState("employee");
   const [weekOffset, setWeekOffset] = useState(0);
   const showToast = useToast();
@@ -6812,6 +6817,28 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, persistRoste
   const thStyle = { textAlign: "left", padding: "9px 12px", fontSize: 11.5, fontWeight: 700, color: "var(--text-dim)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
   const tdStyle = { padding: "12px", borderBottom: "1px solid var(--panel-alt)", verticalAlign: "middle" };
 
+  // A roster entry in a grid cell: click to edit it, or (Select shifts) tick it.
+  function EntryChip({ e, top, sub }) {
+    const on = picked.includes(e.id);
+    const box = { display: "block", width: "100%", textAlign: "center", fontSize: 11.5, padding: "3px 4px", borderRadius: 6, border: `1px solid ${on ? "var(--navy)" : "transparent"}`, background: on ? "var(--accent-dim)" : "none", cursor: "pointer", marginBottom: 2 };
+    if (selecting) {
+      return (
+        <label style={box}>
+          <input type="checkbox" checked={on} onChange={(ev) => setPicked((x) => (ev.target.checked ? [...x, e.id] : x.filter((id) => id !== e.id)))} style={{ marginRight: 4 }} />
+          <span style={{ fontWeight: 600 }}>{top}</span>
+          {sub && <div style={{ color: "var(--text-dim)" }}>{sub}</div>}
+        </label>
+      );
+    }
+    return (
+      <button type="button" onClick={() => { setCreating(null); setEditing(e); }} title="Edit this roster entry" style={box}>
+        <div style={{ fontWeight: 600 }}>{top}</div>
+        {sub && <div style={{ color: "var(--text-dim)" }}>{sub}</div>}
+      </button>
+    );
+  }
+  const weekEntries = roster.filter((r) => weekDates.includes(r.date));
+
   function entriesFor(patrolman, date) {
     return roster.filter((r) => r.date === date && (
       (patrolman.loginName && r.patrolmanLoginName === patrolman.loginName) ||
@@ -6841,15 +6868,15 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, persistRoste
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button style={secondaryBtn}>Select shifts</button>
-          <button style={secondaryBtn}>Copy week</button>
+          <button style={selecting ? { ...secondaryBtn, borderColor: "var(--navy)" } : secondaryBtn} onClick={() => { setSelecting((v) => !v); setPicked([]); setEditing(null); setCreating(null); }}>{selecting ? "Done selecting" : "Select shifts"}</button>
+          <button style={secondaryBtn} onClick={() => setCopyOpen((v) => !v)}>Copy week</button>
           <button
             onClick={togglePublish}
             style={isPublished ? { ...secondaryBtn, color: "var(--ok)", borderColor: "var(--ok)" } : primaryBtn}
           >
             {isPublished ? "✓ Published — unpublish" : "Publish this week"}
           </button>
-          <button style={primaryBtn} onClick={() => setCreating({ date: weekDates.includes(todayISO()) ? todayISO() : weekDates[0], run: zones[0] || "" })}>+ Create shift</button>
+          <button style={primaryBtn} onClick={() => { setEditing(null); setSelecting(false); setPicked([]); setCreating({ date: weekDates.includes(todayISO()) ? todayISO() : weekDates[0], run: zones[0] || "" }); }}>+ Create shift</button>
         </div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -6865,7 +6892,27 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, persistRoste
         </div>
       </div>
 
-      {creating && (
+      {selecting && (
+        <RosterBulkBar
+          picked={picked} setPicked={setPicked} weekEntries={weekEntries} zones={zones} patrolmen={patrolmen}
+          persistRoster={persistRoster} showConfirm={showConfirm} onDone={() => { setSelecting(false); setPicked([]); }}
+        />
+      )}
+      {copyOpen && <CopyRosterWeek weekDates={weekDates} weekEntries={weekEntries} roster={roster} persistRoster={persistRoster} onClose={() => setCopyOpen(false)} />}
+      {editing && (
+        <CreateRosterShift
+          key={`edit-${editing.id}`}
+          editing={editing}
+          initial={{ date: editing.date, run: editing.run }}
+          weekDates={weekDates}
+          zones={zones}
+          patrolmen={patrolmen}
+          roster={roster}
+          persistRoster={persistRoster}
+          onClose={() => setEditing(null)}
+        />
+      )}
+      {creating && !editing && (
         <CreateRosterShift
           key={`${creating.date}|${creating.run}`}
           initial={creating}
@@ -6901,13 +6948,8 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, persistRoste
                     return (
                       <td key={date} style={{ ...tdStyle, textAlign: "center" }}>
                         {entries.length === 0
-                          ? <button type="button" onClick={() => setCreating({ date, run: zone })} title={`Roster someone to ${zone} on this day`} style={{ background: "none", border: "none", color: "var(--warn)", fontSize: 11, cursor: "pointer", padding: 0 }}>No one rostered · +</button>
-                          : entries.map((e) => (
-                            <div key={e.id} style={{ fontSize: 11.5 }}>
-                              <div style={{ fontWeight: 600 }}>{e.patrolmanName || "Patrolman"}</div>
-                              {e.shift && <div style={{ color: "var(--text-dim)" }}>{e.shift}</div>}
-                            </div>
-                          ))}
+                          ? <button type="button" onClick={() => { setEditing(null); setCreating({ date, run: zone }); }} title={`Roster someone to ${zone} on this day`} style={{ background: "none", border: "none", color: "var(--warn)", fontSize: 11, cursor: "pointer", padding: 0 }}>No one rostered · +</button>
+                          : entries.map((e) => <EntryChip key={e.id} e={e} top={e.patrolmanName || "Patrolman"} sub={e.shift} />)}
                       </td>
                     );
                   })}
@@ -6938,12 +6980,7 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, persistRoste
                       <td key={date} style={{ ...tdStyle, textAlign: "center" }}>
                         {entries.length === 0
                           ? <span style={{ color: "var(--text-dim)" }}>—</span>
-                          : entries.map((e) => (
-                            <div key={e.id} style={{ fontSize: 11.5 }}>
-                              <div style={{ fontWeight: 600 }}>{e.shift || "Rostered"}</div>
-                              <div style={{ color: "var(--text-dim)" }}>{e.run}</div>
-                            </div>
-                          ))}
+                          : entries.map((e) => <EntryChip key={e.id} e={e} top={e.shift || "Rostered"} sub={e.run} />)}
                       </td>
                     );
                   })}
@@ -6960,13 +6997,15 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, persistRoste
 // "+ Create shift" on the Control Room Schedule: adds real roster entries
 // (the same records Classic Tools -> Roster edits) — a patrolman on a
 // region for a day, optionally repeated on other days of the shown week.
-function CreateRosterShift({ initial, weekDates, zones, patrolmen, roster, persistRoster, onClose }) {
+function CreateRosterShift({ initial, editing = null, weekDates, zones, patrolmen, roster, persistRoster, onClose }) {
   const showToast = useToast();
+  const showConfirm = useConfirm();
+  const knownLogin = editing && patrolmen.some((p) => p.loginName === editing.patrolmanLoginName) ? editing.patrolmanLoginName : "";
   const [date, setDate] = useState(initial.date);
   const [run, setRun] = useState(initial.run || zones[0] || "");
-  const [loginName, setLoginName] = useState("");
-  const [customName, setCustomName] = useState("");
-  const [shift, setShift] = useState("");
+  const [loginName, setLoginName] = useState(editing ? knownLogin || "__custom__" : "");
+  const [customName, setCustomName] = useState(editing && !knownLogin ? editing.patrolmanName || "" : "");
+  const [shift, setShift] = useState(editing?.shift || "");
   const [alsoDays, setAlsoDays] = useState([]);
   const [error, setError] = useState("");
   const account = patrolmen.find((p) => p.loginName === loginName);
@@ -6982,6 +7021,27 @@ function CreateRosterShift({ initial, weekDates, zones, patrolmen, roster, persi
   async function save() {
     setError("");
     if (!date || !run || !name) { setError("Choose the date, region and patrolman."); return; }
+    if (editing) {
+      setSaving(true);
+      const r = await persistRoster("update", {
+        id: editing.id,
+        entry: {
+          ...editing,
+          date,
+          run,
+          patrolmanLoginName: account ? account.loginName : loginName === "__custom__" ? "" : editing.patrolmanLoginName || "",
+          patrolmanName: name,
+          shift: shift.trim(),
+          contactNumber: account?.contactNumber || (account ? "" : editing.contactNumber || ""),
+          securityLicenceNumber: account?.securityLicenceNumber || (account ? "" : editing.securityLicenceNumber || ""),
+        },
+      });
+      setSaving(false);
+      if (!r?.ok) { setError("Couldn't save — try again."); return; }
+      showToast("Roster entry updated.");
+      onClose();
+      return;
+    }
     const dates = Array.from(new Set([date, ...alsoDays])).sort();
     const already = dates.filter((d) => roster.some((r) => r.date === d && r.run === run && ((account && r.patrolmanLoginName === account.loginName) || r.patrolmanName === name)));
     const todo = dates.filter((d) => !already.includes(d));
@@ -7013,7 +7073,7 @@ function CreateRosterShift({ initial, weekDates, zones, patrolmen, roster, persi
   const label = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
   return (
     <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 16, background: "var(--panel)", maxWidth: 640 }}>
-      <SectionTitle icon={UserPlus} title="Create shift" small />
+      <SectionTitle icon={UserPlus} title={editing ? "Edit roster entry" : "Create shift"} small />
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         <Field label="Date" style={{ width: 170 }}>
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={selectStyle} />
@@ -7040,8 +7100,8 @@ function CreateRosterShift({ initial, weekDates, zones, patrolmen, roster, persi
       {loginName === "__custom__" && (
         <Field label="Name"><input value={customName} onChange={(e) => setCustomName(e.target.value)} placeholder="Patrolman's name" style={selectStyle} /></Field>
       )}
-      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-dim)", margin: "4px 0 6px" }}>Also on (this week)</div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+      {!editing && <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-dim)", margin: "4px 0 6px" }}>Also on (this week)</div>}
+      <div style={{ display: editing ? "none" : "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
         {weekDates.filter((d) => d !== date).map((d) => (
           <label key={d} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 999, border: "1px solid var(--border)", background: alsoDays.includes(d) ? "var(--accent-dim)" : "var(--panel)", fontSize: 12, cursor: "pointer" }}>
             <input type="checkbox" checked={alsoDays.includes(d)} onChange={(e) => setAlsoDays((a) => (e.target.checked ? [...a, d] : a.filter((x) => x !== d)))} />
@@ -7051,9 +7111,123 @@ function CreateRosterShift({ initial, weekDates, zones, patrolmen, roster, persi
       </div>
       {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
       <div style={{ display: "flex", gap: 8 }}>
-        <button style={primaryBtn} onClick={save} disabled={saving}>{saving ? "Saving…" : "Add to roster"}</button>
+        <button style={primaryBtn} onClick={save} disabled={saving}>{saving ? "Saving…" : editing ? "Save changes" : "Add to roster"}</button>
         <button style={secondaryBtn} onClick={onClose}>Cancel</button>
+        {editing && (
+          <button
+            style={{ ...secondaryBtn, color: "var(--breach)", borderColor: "var(--breach)", marginLeft: "auto" }}
+            onClick={() => showConfirm(`Remove ${editing.patrolmanName || "this patrolman"} from ${editing.run} on ${editing.date}?`, async () => {
+              const r = await persistRoster("remove", { id: editing.id });
+              if (r?.ok) { showToast("Roster entry removed."); onClose(); } else setError("Couldn't remove — try again.");
+            })}
+          >
+            Remove
+          </button>
+        )}
       </div>
+    </div>
+  );
+}
+
+// Select shifts on the Control Room Schedule: tick roster entries, then
+// give them to another patrolman, move them to another region, or remove
+// them. Saved one at a time (each reads the latest roster on the server).
+function RosterBulkBar({ picked, setPicked, weekEntries, zones, patrolmen, persistRoster, showConfirm, onDone }) {
+  const showToast = useToast();
+  const [who, setWho] = useState("");
+  const [region, setRegion] = useState("");
+  const [busy, setBusy] = useState(false);
+  const chosen = weekEntries.filter((e) => picked.includes(e.id));
+
+  async function apply(label, change) {
+    setBusy(true);
+    let failed = 0;
+    for (const e of chosen) {
+      const r = change === "remove" ? await persistRoster("remove", { id: e.id }) : await persistRoster("update", { id: e.id, entry: { ...e, ...change } });
+      if (!r?.ok) failed++;
+    }
+    setBusy(false);
+    setPicked([]);
+    showToast(failed ? `${chosen.length - failed} done, ${failed} couldn't be saved — try again.` : `${label} ${chosen.length} roster entr${chosen.length === 1 ? "y" : "ies"}.`, failed ? "error" : undefined);
+  }
+
+  const small = { ...secondaryBtn, padding: "6px 10px", fontSize: 12 };
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: 12, border: "2px solid var(--navy)", borderRadius: 10, background: "var(--panel)" }}>
+      <b style={{ fontSize: 13 }}>{chosen.length} selected</b>
+      <button style={small} onClick={() => setPicked(weekEntries.map((e) => e.id))}>Select all this week</button>
+      <button style={small} onClick={() => setPicked([])}>Clear</button>
+      <span style={{ flex: 1 }} />
+      <select value={who} onChange={(e) => setWho(e.target.value)} style={{ ...selectStyle, width: 190 }}>
+        <option value="">Give to patrolman…</option>
+        {patrolmen.map((p) => <option key={p.loginName} value={p.loginName}>{p.displayName}</option>)}
+      </select>
+      <button
+        style={small}
+        disabled={busy || !who || !chosen.length}
+        onClick={() => {
+          const a = patrolmen.find((p) => p.loginName === who);
+          if (a) apply(`Gave ${a.displayName}`, { patrolmanLoginName: a.loginName, patrolmanName: a.displayName, contactNumber: a.contactNumber || "", securityLicenceNumber: a.securityLicenceNumber || "" });
+        }}
+      >
+        Reassign
+      </button>
+      <select value={region} onChange={(e) => setRegion(e.target.value)} style={{ ...selectStyle, width: 150 }}>
+        <option value="">Move to region…</option>
+        {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+      </select>
+      <button style={small} disabled={busy || !region || !chosen.length} onClick={() => apply(`Moved to ${region}:`, { run: region })}>Move</button>
+      <button
+        style={{ ...small, color: "var(--breach)", borderColor: "var(--breach)" }}
+        disabled={busy || !chosen.length}
+        onClick={() => showConfirm(`Remove ${chosen.length} roster entr${chosen.length === 1 ? "y" : "ies"}?`, () => apply("Removed", "remove"))}
+      >
+        Remove
+      </button>
+      <button style={small} onClick={onDone}>Done</button>
+      {busy && <span style={{ fontSize: 12, color: "var(--text-dim)" }}>Saving…</span>}
+    </div>
+  );
+}
+
+// Copy week on the Control Room Schedule: this week's roster entries to the
+// same days of the next 1–4 weeks, in one save. Entries already there (same
+// day, region and patrolman) aren't doubled up.
+function CopyRosterWeek({ weekDates, weekEntries, roster, persistRoster, onClose }) {
+  const showToast = useToast();
+  const [weeks, setWeeks] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const keyOf = (r) => `${r.date}|${String(r.run || "").toLowerCase()}|${String(r.patrolmanName || "").toLowerCase()}`;
+
+  async function copy() {
+    const existing = new Set(roster.map(keyOf));
+    const rows = [];
+    for (let w = 1; w <= weeks; w++) {
+      for (const e of weekEntries) {
+        const { id, ...rest } = e;
+        const row = { ...rest, date: dateOnlyISO(addDays(new Date(`${e.date}T00:00:00`), 7 * w)) };
+        if (!existing.has(keyOf(row))) rows.push(row);
+      }
+    }
+    if (!rows.length) { showToast("Nothing to copy — those weeks already have these entries."); onClose(); return; }
+    setBusy(true);
+    const r = await persistRoster("importRows", { rows });
+    setBusy(false);
+    if (!r?.ok) { showToast("Couldn't copy — try again.", "error"); return; }
+    showToast(`Copied ${rows.length} roster entr${rows.length === 1 ? "y" : "ies"} to the next ${weeks === 1 ? "week" : `${weeks} weeks`}.`);
+    onClose();
+  }
+
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: 12, border: "1px solid var(--border)", borderRadius: 10, background: "var(--panel)" }}>
+      <span style={{ fontSize: 13 }}>
+        Copy this week&rsquo;s <b>{weekEntries.length}</b> roster entr{weekEntries.length === 1 ? "y" : "ies"} ({weekDates[0]} – {weekDates[6]}) to the next
+      </span>
+      <select value={weeks} onChange={(e) => setWeeks(Number(e.target.value))} style={{ ...selectStyle, width: 110 }}>
+        {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n} week{n > 1 ? "s" : ""}</option>)}
+      </select>
+      <button style={primaryBtn} disabled={busy || !weekEntries.length} onClick={copy}>{busy ? "Copying…" : "Copy"}</button>
+      <button style={secondaryBtn} onClick={onClose}>Cancel</button>
     </div>
   );
 }
