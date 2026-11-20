@@ -8745,6 +8745,22 @@ function makePermanentPatrolSiteId() {
   return `pps_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+// Which drawn region (if any) a point falls inside — same containsLocation
+// check SiteGeofenceEditor and the Excel import already each do on their
+// own; shared here so the Site Name place search can suggest a region too
+// the moment an address is picked, without duplicating the geometry math
+// a third time.
+function suggestRegionForPoint(maps, zoneAreas, point) {
+  if (!maps?.geometry || !point) return "";
+  const latLng = new maps.LatLng(point.lat, point.lng);
+  for (const za of zoneAreas) {
+    if (!za.path?.length) continue;
+    const polygon = new maps.Polygon({ paths: za.path });
+    if (maps.geometry.poly.containsLocation(latLng, polygon)) return za.zoneName;
+  }
+  return "";
+}
+
 // A draggable pin + resizable circle for one Permanent Patrol Site's
 // geofence. Purely local — commits nothing on its own; the parent
 // (PermanentPatrolSitesEditor) takes the result via onApply and saves it
@@ -9158,8 +9174,10 @@ function PlaceSearchInput({ value, onChange, onPlaceSelected, placeholder, style
           const prediction = e.placePrediction || e.detail?.placePrediction;
           const place = prediction?.toPlace?.();
           if (!place) return;
-          await place.fetchFields({ fields: ["formattedAddress", "displayName"] });
-          onPlaceSelectedRef.current?.({ address: place.formattedAddress || "", name: place.displayName || "" });
+          await place.fetchFields({ fields: ["formattedAddress", "displayName", "location"] });
+          const loc = place.location;
+          const location = loc ? { lat: typeof loc.lat === "function" ? loc.lat() : loc.lat, lng: typeof loc.lng === "function" ? loc.lng() : loc.lng } : null;
+          onPlaceSelectedRef.current?.({ address: place.formattedAddress || "", name: place.displayName || "", location });
         } catch (err) {
           console.error("Couldn't read the selected place.", err);
         }
@@ -9264,7 +9282,16 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
             <PlaceSearchInput
               value={form.name}
               onChange={(v) => set("name", v)}
-              onPlaceSelected={({ address, name }) => setForm((f) => ({ ...f, name: name || f.name, address: address || f.address }))}
+              onPlaceSelected={async ({ address, name, location }) => {
+                let region = "";
+                if (location) {
+                  try {
+                    const maps = await loadGoogleMaps();
+                    region = suggestRegionForPoint(maps, zoneAreas, location);
+                  } catch (e) { /* region suggestion just won't run — address/name still fill in */ }
+                }
+                setForm((f) => ({ ...f, name: name || f.name, address: address || f.address, region: region || f.region }));
+              }}
               style={selectStyle}
             />
           </Field>
