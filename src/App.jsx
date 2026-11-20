@@ -6647,7 +6647,7 @@ function ControlRoomShell(props) {
 
         <div style={{ padding: 20, maxWidth: 1180, margin: "0 auto" }}>
           {tab === "dashboard" && <ControlRoomDashboard jobs={jobs} onNavigate={setTab} />}
-          {tab === "schedule" && <ControlRoomSchedulePreview permanentPatrolSites={permanentPatrolSites} />}
+          {tab === "schedule" && <ControlRoomSchedulePreview permanentPatrolSites={permanentPatrolSites} roster={roster} accounts={accounts} />}
           {tab === "dispatch" && (
             <ControlRoomDispatchBoard
               jobs={jobs} persist={persistJobs} roster={roster} sites={sites} persistSites={persistSites} zones={zones}
@@ -6725,23 +6725,44 @@ function ControlRoomDashboard({ jobs, onNavigate }) {
   );
 }
 
-// Preview of the new by-site weekly scheduler from the mockup. Not wired
-// to any real shift data yet — the real roster (per-guard day shifts)
-// still lives under Classic Tools -> Roster, completely untouched. Site
-// names are real (from Permanent Patrol Sites) where available, purely so
-// this doesn't read as entirely fake; the day cells are inert.
-const SCHEDULE_PREVIEW_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-function ControlRoomSchedulePreview({ permanentPatrolSites }) {
+// "By site" is still the mockup preview — there's no site-based shift
+// model to back it yet. "By employee" is real: same roster data as
+// Classic Tools -> Roster (per-guard, per-date entries), just laid out as
+// a weekly grid instead of one day at a time. Nothing about the real
+// roster or RosterView changes; this only reads `roster`, never writes it.
+const SCHEDULE_DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts }) {
+  const [view, setView] = useState("employee");
+  const [weekOffset, setWeekOffset] = useState(0);
+
+  const monday = addDays(mondayOfWeek(new Date()), weekOffset * 7);
+  const weekDates = Array.from({ length: 7 }, (_, i) => dateOnlyISO(addDays(monday, i)));
+  const fmtShort = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  const weekLabel = `${fmtShort(weekDates[0])} – ${fmtShort(weekDates[6])} ${new Date(`${weekDates[6]}T00:00:00`).getFullYear()}`;
+
+  const patrolmen = accounts.filter((a) => a.role === "patrolman");
+
   const siteNames = permanentPatrolSites && permanentPatrolSites.length
     ? permanentPatrolSites.slice(0, 6).map((s) => s.name)
     : ["Riverside Plaza", "Northgate Retail Centre", "Harbour Logistics Yard", "Westline Depot"];
+
   const segBtn = { padding: "7px 14px", fontSize: 12.5, fontWeight: 600, border: "none", background: "var(--panel)", color: "var(--text)", cursor: "pointer" };
   const thStyle = { textAlign: "left", padding: "9px 12px", fontSize: 11.5, fontWeight: 700, color: "var(--text-dim)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
   const tdStyle = { padding: "12px", borderBottom: "1px solid var(--panel-alt)", verticalAlign: "middle" };
+
+  function entriesFor(patrolman, date) {
+    return roster.filter((r) => r.date === date && (
+      (patrolman.loginName && r.patrolmanLoginName === patrolman.loginName) ||
+      (!r.patrolmanLoginName && r.patrolmanName === patrolman.displayName)
+    ));
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ padding: "10px 14px", borderRadius: 8, background: "#FFFBEB", border: "1px solid var(--warn)", color: "#92400E", fontSize: 12 }}>
-        Preview — this is the new by-site weekly scheduler. It isn't wired to real shift data yet; your real roster still lives under Classic Tools → Roster.
+        {view === "employee"
+          ? "\"By employee\" shows your real roster for this week. \"By site\" is still a preview — there's no site-based shift data behind it yet."
+          : "Preview — \"By site\" isn't wired to real shift data yet. Switch to \"By employee\" to see your real roster, or use Classic Tools → Roster."}
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
@@ -6756,50 +6777,88 @@ function ControlRoomSchedulePreview({ permanentPatrolSites }) {
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", border: "1px solid var(--border)", borderRadius: 8 }}>
-          <button style={{ ...segBtn, padding: "7px 11px" }}>‹</button>
-          <span style={{ padding: "0 10px", fontSize: 12.5, fontWeight: 600, borderLeft: "1px solid var(--border)", borderRight: "1px solid var(--border)" }}>30 Nov – 6 Dec 2026</span>
-          <button style={{ ...segBtn, padding: "7px 11px" }}>›</button>
+          <button onClick={() => setWeekOffset((w) => w - 1)} style={{ ...segBtn, padding: "7px 11px" }}>‹</button>
+          <span style={{ padding: "0 10px", fontSize: 12.5, fontWeight: 600, borderLeft: "1px solid var(--border)", borderRight: "1px solid var(--border)" }}>{weekLabel}</span>
+          <button onClick={() => setWeekOffset((w) => w + 1)} style={{ ...segBtn, padding: "7px 11px" }}>›</button>
         </div>
-        <button style={secondaryBtn}>This week</button>
+        <button onClick={() => setWeekOffset(0)} style={secondaryBtn}>This week</button>
         <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
-          <button style={{ ...segBtn, background: "var(--navy)", color: "#fff" }}>By site</button>
-          <button style={segBtn}>By employee</button>
+          <button onClick={() => setView("site")} style={{ ...segBtn, ...(view === "site" ? { background: "var(--navy)", color: "#fff" } : {}) }}>By site</button>
+          <button onClick={() => setView("employee")} style={{ ...segBtn, ...(view === "employee" ? { background: "var(--navy)", color: "#fff" } : {}) }}>By employee</button>
         </div>
-        <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "var(--text-dim)" }}>
-          <input type="checkbox" readOnly /> Only sites with shifts
-        </label>
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 11.5, color: "var(--text-dim)" }}>
-        <span>○ Draft</span>
-        <span>○ Unassigned</span>
-        <span>◐ Awaiting</span>
-        <span style={{ color: "var(--ok)" }}>● Confirmed</span>
-        <span>◐ Declined</span>
-        <span>◐ Subcontractor</span>
-      </div>
-      <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10 }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 640 }}>
-          <thead>
-            <tr>
-              <th style={thStyle}>Site</th>
-              {SCHEDULE_PREVIEW_DAYS.map((d) => <th key={d} style={thStyle}>{d}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {siteNames.map((name) => (
-              <tr key={name}>
-                <td style={tdStyle}>
-                  <div style={{ fontWeight: 700 }}>{name}</div>
-                  <div style={{ fontSize: 11, color: "var(--text-dim)" }}>Security Services</div>
-                </td>
-                {SCHEDULE_PREVIEW_DAYS.map((d) => (
-                  <td key={d} style={{ ...tdStyle, textAlign: "center", color: "var(--info)", cursor: "pointer" }}>+</td>
+
+      {view === "site" ? (
+        <>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 11.5, color: "var(--text-dim)" }}>
+            <span>○ Draft</span>
+            <span>○ Unassigned</span>
+            <span>◐ Awaiting</span>
+            <span style={{ color: "var(--ok)" }}>● Confirmed</span>
+            <span>◐ Declined</span>
+            <span>◐ Subcontractor</span>
+          </div>
+          <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 640 }}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>Site</th>
+                  {SCHEDULE_DAY_LABELS.map((d) => <th key={d} style={thStyle}>{d}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {siteNames.map((name) => (
+                  <tr key={name}>
+                    <td style={tdStyle}>
+                      <div style={{ fontWeight: 700 }}>{name}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-dim)" }}>Security Services</div>
+                    </td>
+                    {SCHEDULE_DAY_LABELS.map((d) => (
+                      <td key={d} style={{ ...tdStyle, textAlign: "center", color: "var(--info)", cursor: "pointer" }}>+</td>
+                    ))}
+                  </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : (
+        <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 640 }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>Patrolman</th>
+                {weekDates.map((date, i) => <th key={date} style={thStyle}>{SCHEDULE_DAY_LABELS[i]} {fmtShort(date)}</th>)}
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {patrolmen.length === 0 && (
+                <tr><td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "var(--text-dim)" }}>No patrolman logins yet — add some under Staff.</td></tr>
+              )}
+              {patrolmen.map((p) => (
+                <tr key={p.loginName}>
+                  <td style={tdStyle}><div style={{ fontWeight: 700 }}>{p.displayName}</div></td>
+                  {weekDates.map((date) => {
+                    const entries = entriesFor(p, date);
+                    return (
+                      <td key={date} style={{ ...tdStyle, textAlign: "center" }}>
+                        {entries.length === 0
+                          ? <span style={{ color: "var(--text-dim)" }}>—</span>
+                          : entries.map((e) => (
+                            <div key={e.id} style={{ fontSize: 11.5 }}>
+                              <div style={{ fontWeight: 600 }}>{e.shift || "Rostered"}</div>
+                              <div style={{ color: "var(--text-dim)" }}>{e.run}</div>
+                            </div>
+                          ))}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
