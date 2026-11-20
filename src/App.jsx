@@ -2529,13 +2529,13 @@ function Board({ jobs, now, onSelect, lockedStatus, roster }) {
           <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
         </Field>
         <Field label="From time" style={{ marginBottom: 0 }}>
-          <input type="time" value={timeFrom} onChange={(e) => setTimeFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
+          <Time24Input value={timeFrom} onChange={(e) => setTimeFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
         </Field>
         <Field label="Date to" style={{ marginBottom: 0 }}>
           <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
         </Field>
         <Field label="To time" style={{ marginBottom: 0 }}>
-          <input type="time" value={timeTo} onChange={(e) => setTimeTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
+          <Time24Input value={timeTo} onChange={(e) => setTimeTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
         </Field>
         {hasFilter && <button onClick={clearFilters} style={{ ...secondaryBtn, marginBottom: 0 }}><X size={13} /> Clear filters</button>}
       </div>
@@ -3067,7 +3067,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, providers, ro
 
       {(jobType === "keyPickup" || jobType === "keyDropoff") && (
         <Field label={`Due by (${jobType === "keyPickup" ? "pickup" : "drop off"} deadline)`} style={{ maxWidth: 180 }}>
-          <input type="time" value={dueByTime} onChange={(e) => setDueByTime(e.target.value)} style={selectStyle} />
+          <Time24Input value={dueByTime} onChange={(e) => setDueByTime(e.target.value)} style={selectStyle} />
         </Field>
       )}
 
@@ -5516,13 +5516,13 @@ function Reports({ jobs, companyName, logoUrl, roster, responseRate, bureauRates
           <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
         </Field>
         <Field label="From time" style={{ marginBottom: 0 }}>
-          <input type="time" value={timeFrom} onChange={(e) => setTimeFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
+          <Time24Input value={timeFrom} onChange={(e) => setTimeFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
         </Field>
         <Field label="Date to" style={{ marginBottom: 0 }}>
           <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
         </Field>
         <Field label="To time" style={{ marginBottom: 0 }}>
-          <input type="time" value={timeTo} onChange={(e) => setTimeTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
+          <Time24Input value={timeTo} onChange={(e) => setTimeTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
         </Field>
         {hasFilter && <button onClick={clearFilters} style={{ ...secondaryBtn, marginBottom: 0 }}><X size={13} /> Clear filters</button>}
         <button
@@ -9048,13 +9048,13 @@ function PatrolScheduleEditor({ initialSchedule, onApply }) {
                             </select>
                             {/* From and to stay together on one row. */}
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
-                              <input type="time" value={v.start} onChange={(e) => setVisit(key, i, { start: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                              <Time24Input value={v.start} onChange={(e) => setVisit(key, i, { start: e.target.value })} style={{ ...selectStyle, width: 105 }} />
                               <span style={{ fontSize: 12, color: "var(--text-dim)" }}>to</span>
-                              <input type="time" value={v.end} onChange={(e) => setVisit(key, i, { end: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                              <Time24Input value={v.end} onChange={(e) => setVisit(key, i, { end: e.target.value })} style={{ ...selectStyle, width: 105 }} />
                             </span>
                           </>
                         ) : (
-                          <input type="time" value={v.time} onChange={(e) => setVisit(key, i, { time: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                          <Time24Input value={v.time} onChange={(e) => setVisit(key, i, { time: e.target.value })} style={{ ...selectStyle, width: 105 }} />
                         )}
                       </>
                     ) : (
@@ -9071,13 +9071,13 @@ function PatrolScheduleEditor({ initialSchedule, onApply }) {
                           <>
                             {/* From and to stay together on one row. */}
                             <span style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
-                              <input type="time" value={v.start} onChange={(e) => setVisit(key, i, { start: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                              <Time24Input value={v.start} onChange={(e) => setVisit(key, i, { start: e.target.value })} style={{ ...selectStyle, width: 105 }} />
                               <span style={{ fontSize: 12, color: "var(--text-dim)" }}>to</span>
-                              <input type="time" value={v.end} onChange={(e) => setVisit(key, i, { end: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                              <Time24Input value={v.end} onChange={(e) => setVisit(key, i, { end: e.target.value })} style={{ ...selectStyle, width: 105 }} />
                             </span>
                           </>
                         ) : (
-                          <input type="time" value={v.time} onChange={(e) => setVisit(key, i, { time: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                          <Time24Input value={v.time} onChange={(e) => setVisit(key, i, { time: e.target.value })} style={{ ...selectStyle, width: 105 }} />
                         )}
                       </>
                     )}
@@ -9333,6 +9333,54 @@ function PermanentPatrolSitesImport({ zoneAreas, permanentPatrolSites, persistPe
   );
 }
 
+// A time box that's always 24-hour ("18:30"), whatever the computer's own
+// clock setting — the browser's built-in time picker follows the device's
+// AM/PM preference, which isn't how shifts are worked out. Accepts "1830",
+// "18.30", "6:45", "645" or "18" and tidies it to HH:MM when you leave the
+// box. Calls onChange like a normal input (e.target.value) when you leave
+// the box (or press Enter), with a valid time or "" when cleared.
+function parseTime24(text) {
+  const t = String(text || "").trim().replace(/[.\sh]/gi, ":");
+  if (!t) return "";
+  let h, m;
+  const parts = t.split(":").filter((x) => x !== "");
+  if (parts.length >= 2) { h = Number(parts[0]); m = Number(parts[1]); }
+  else if (/^\d{3,4}$/.test(t)) { h = Number(t.slice(0, t.length - 2)); m = Number(t.slice(-2)); }
+  else if (/^\d{1,2}$/.test(t)) { h = Number(t); m = 0; }
+  else return null;
+  if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || h > 23 || m < 0 || m > 59) return null;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function Time24Input({ value, onChange, style, ...rest }) {
+  const [text, setText] = useState(value || "");
+  const [bad, setBad] = useState(false);
+  useEffect(() => { setText(value || ""); setBad(false); }, [value]);
+  const send = (v) => onChange?.({ target: { value: v } });
+  return (
+    <input
+      {...rest}
+      type="text"
+      inputMode="numeric"
+      placeholder="HH:MM"
+      maxLength={5}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+      onBlur={() => {
+        const v = parseTime24(text);
+        if (v === null) { setBad(true); return; }
+        setBad(false);
+        setText(v);
+        if (v !== (value || "")) send(v);
+      }}
+      title={bad ? "Use 24-hour time, e.g. 06:45 or 18:30" : "24-hour time, e.g. 18:30"}
+      style={{ ...style, fontVariantNumeric: "tabular-nums", ...(bad ? { borderColor: "var(--breach)" } : {}) }}
+    />
+  );
+}
+
+
 // Search-as-you-type on the Site Name field — type a business/place name
 // (or an address), pick the right result, and it fills the Address field
 // with the complete formatted address while leaving the name free to
@@ -9365,6 +9413,10 @@ function PlaceSearchInput({ value, onChange, onPlaceSelected, placeholder, style
     loadGoogleMaps().then((maps) => {
       if (cancelled || !containerRef.current || !maps.places?.PlaceAutocompleteElement) return;
       const el = new maps.places.PlaceAutocompleteElement();
+      // Australian places only (searching a business name otherwise matches
+      // places all over the world).
+      try { el.includedRegionCodes = ["au"]; } catch (e) { /* older widget: worldwide */ }
+      if (placeholder) try { el.placeholder = placeholder; } catch (e) {}
       el.style.width = "100%";
       // The widget ships borderless/transparent by design (it's meant to
       // be dropped into a host app's own field styling) — these are its
@@ -9409,7 +9461,7 @@ function PlaceSearchInput({ value, onChange, onPlaceSelected, placeholder, style
   // underlying form state (and the saved record) being correct the
   // whole time.
   useEffect(() => {
-    if (!elementRef.current) return;
+    if (!elementRef.current || value === undefined) return; // search-only: leave the widget's text alone
     try { elementRef.current.value = value || ""; } catch (e) {}
   }, [value, widgetReady]);
 
@@ -9427,7 +9479,8 @@ function PlaceSearchInput({ value, onChange, onPlaceSelected, placeholder, style
           // why suggestions stopped appearing after the last styling pass.
         }}
       />
-      {!widgetReady && <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={style} />}
+      {!widgetReady && onChange && <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={style} />}
+      {!widgetReady && !onChange && <div style={{ fontSize: 12, color: "var(--text-dim)" }}>Address search isn’t available right now — type the address below.</div>}
     </div>
   );
 }
@@ -9548,10 +9601,15 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
               <SectionTitle icon={MapPin} title={editingId ? "Edit permanent patrol site" : "Add a permanent patrol site"} small />
               <div style={{ display: "flex", gap: 12 }}>
                 <Field label="Site name" style={{ flex: 1 }}>
-                  <PlaceSearchInput
-                    value={form.name}
-                    onChange={(v) => set("name", v)}
-                    onPlaceSelected={async ({ address, name, location }) => {
+                  <input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Riverwood Business Park" style={selectStyle} />
+                </Field>
+                <Field label="Customer" style={{ flex: 1 }}><input value={form.customer} onChange={(e) => set("customer", e.target.value)} style={selectStyle} /></Field>
+              </div>
+              {/* Google search fills in the address (and the site name only if it's blank). Australia only. */}
+              <Field label="Find the address">
+                <PlaceSearchInput
+                  placeholder="Search a street address or place in Australia"
+                  onPlaceSelected={async ({ address, name, location }) => {
                       let region = "";
                       if (location) {
                         try {
@@ -9559,13 +9617,10 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
                           region = suggestRegionForPoint(maps, zoneAreas, location);
                         } catch (e) { /* region suggestion just won't run — address/name still fill in */ }
                       }
-                      setForm((f) => ({ ...f, name: name || f.name, address: address || f.address, region: region || f.region }));
+                      setForm((f) => ({ ...f, name: f.name.trim() ? f.name : name || f.name, address: address || f.address, region: region || f.region }));
                     }}
-                    style={selectStyle}
-                  />
-                </Field>
-                <Field label="Customer" style={{ flex: 1 }}><input value={form.customer} onChange={(e) => set("customer", e.target.value)} style={selectStyle} /></Field>
-              </div>
+                />
+              </Field>
               <Field label="Address"><input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, suburb, state" style={selectStyle} /></Field>
               <Field label="Region">
                 <select value={form.region} onChange={(e) => set("region", e.target.value)} style={selectStyle}>
