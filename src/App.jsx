@@ -9117,26 +9117,63 @@ function PermanentPatrolSitesImport({ zoneAreas, permanentPatrolSites, persistPe
 // of a map canvas. Falls back to a normal text field with no suggestions
 // if Maps fails to load (missing/invalid key, network issue, etc.) —
 // never blocks typing an address by hand.
+// Google retired the classic places.Autocomplete widget for projects that
+// never had the legacy Places API enabled before 1 March 2025 (confirmed
+// in production: "you're calling a legacy API, which is not enabled for
+// your project") — so this uses its replacement, PlaceAutocompleteElement,
+// which runs on Places API (New) instead. Unlike the old widget, this one
+// is a self-contained custom element rather than something attached to a
+// plain <input>, so until (and unless) it mounts successfully, a normal
+// text input is shown underneath — same fallback behavior as before,
+// never worse than a plain address field with no suggestions.
 function AddressAutocompleteInput({ value, onChange, placeholder, style }) {
-  const inputRef = useRef(null);
-  const autocompleteRef = useRef(null);
+  const containerRef = useRef(null);
+  const elementRef = useRef(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const [widgetReady, setWidgetReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     loadGoogleMaps().then((maps) => {
-      if (cancelled || !inputRef.current || !maps.places) return;
-      autocompleteRef.current = new maps.places.Autocomplete(inputRef.current, { fields: ["formatted_address"] });
-      autocompleteRef.current.addListener("place_changed", () => {
-        const place = autocompleteRef.current.getPlace();
-        if (place?.formatted_address) onChangeRef.current(place.formatted_address);
+      if (cancelled || !containerRef.current || !maps.places?.PlaceAutocompleteElement) return;
+      const el = new maps.places.PlaceAutocompleteElement();
+      el.style.width = "100%";
+      el.addEventListener("gmp-select", async (e) => {
+        try {
+          const prediction = e.placePrediction || e.detail?.placePrediction;
+          const place = prediction?.toPlace?.();
+          if (!place) return;
+          await place.fetchFields({ fields: ["formattedAddress"] });
+          if (place.formattedAddress) onChangeRef.current(place.formattedAddress);
+        } catch (err) {
+          console.error("Couldn't read the selected address.", err);
+        }
       });
-    }).catch(() => {}); // no suggestions available — the plain input below still works
-    return () => { cancelled = true; };
+      containerRef.current.appendChild(el);
+      elementRef.current = el;
+      setWidgetReady(true);
+    }).catch(() => {}); // no suggestions available — the fallback input below still works
+    return () => {
+      cancelled = true;
+      if (elementRef.current) elementRef.current.remove();
+    };
   }, []);
 
-  return <input ref={inputRef} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={style} />;
+  // Keeps the widget's own text roughly in sync when the form's address
+  // changes from elsewhere (e.g. switching which site is being edited) —
+  // best-effort, since the element's exact property surface is new.
+  useEffect(() => {
+    if (!elementRef.current) return;
+    try { elementRef.current.value = value || ""; } catch (e) {}
+  }, [value]);
+
+  return (
+    <div>
+      <div ref={containerRef} style={{ display: widgetReady ? "block" : "none" }} />
+      {!widgetReady && <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={style} />}
+    </div>
+  );
 }
 
 function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, persistPermanentPatrolSites }) {
