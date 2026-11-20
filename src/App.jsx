@@ -6693,7 +6693,7 @@ function ControlRoomShell(props) {
           {tab === "dashboard" && <ControlRoomDashboard jobs={jobs} onNavigate={setTab} />}
           {tab === "schedule" && (
             <ControlRoomSchedulePreview
-              permanentPatrolSites={permanentPatrolSites} roster={roster} accounts={accounts} zones={zones}
+              permanentPatrolSites={permanentPatrolSites} roster={roster} persistRoster={persistRoster} accounts={accounts} zones={zones}
               publishedWeeks={publishedWeeks} persistPublishedWeeks={persistPublishedWeeks}
             />
           )}
@@ -6780,7 +6780,8 @@ function ControlRoomDashboard({ jobs, onNavigate }) {
 // a weekly grid instead of one day at a time. Nothing about the real
 // roster or RosterView changes; this only reads `roster`, never writes it.
 const SCHEDULE_DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, zones = [], publishedWeeks, persistPublishedWeeks }) {
+function ControlRoomSchedulePreview({ permanentPatrolSites, roster, persistRoster, accounts, zones = [], publishedWeeks, persistPublishedWeeks }) {
+  const [creating, setCreating] = useState(null); // { date, run } to prefill, or null
   const [view, setView] = useState("employee");
   const [weekOffset, setWeekOffset] = useState(0);
   const showToast = useToast();
@@ -6823,7 +6824,7 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, zo
       <div style={{ padding: "10px 14px", borderRadius: 8, background: "#FFFBEB", border: "1px solid var(--warn)", color: "#92400E", fontSize: 12 }}>
         {view === "employee"
           ? "\"By employee\" shows your real roster for this week, one row per patrolman. Publish is just a marker for now — it doesn't change what patrolmen see."
-          : "\"By region\" shows the same real roster, one row per region: who is rostered to work each region each day. A region's run sheets go to whoever is rostered there. To change the roster, use Classic Tools → Roster."}
+          : "\"By region\" shows the same real roster, one row per region: who is rostered to work each region each day. A region's run sheets go to whoever is rostered there. Use + Create shift (or click an empty day) to roster someone; edit or remove entries in Classic Tools → Roster."}
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
@@ -6848,7 +6849,7 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, zo
           >
             {isPublished ? "✓ Published — unpublish" : "Publish this week"}
           </button>
-          <button style={primaryBtn}>+ Create shift</button>
+          <button style={primaryBtn} onClick={() => setCreating({ date: weekDates.includes(todayISO()) ? todayISO() : weekDates[0], run: zones[0] || "" })}>+ Create shift</button>
         </div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -6864,6 +6865,18 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, zo
         </div>
       </div>
 
+      {creating && (
+        <CreateRosterShift
+          key={`${creating.date}|${creating.run}`}
+          initial={creating}
+          weekDates={weekDates}
+          zones={zones}
+          patrolmen={patrolmen}
+          roster={roster}
+          persistRoster={persistRoster}
+          onClose={() => setCreating(null)}
+        />
+      )}
       {view === "region" ? (
         <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 640 }}>
@@ -6888,7 +6901,7 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, zo
                     return (
                       <td key={date} style={{ ...tdStyle, textAlign: "center" }}>
                         {entries.length === 0
-                          ? <span style={{ color: "var(--warn)", fontSize: 11 }}>No one rostered</span>
+                          ? <button type="button" onClick={() => setCreating({ date, run: zone })} title={`Roster someone to ${zone} on this day`} style={{ background: "none", border: "none", color: "var(--warn)", fontSize: 11, cursor: "pointer", padding: 0 }}>No one rostered · +</button>
                           : entries.map((e) => (
                             <div key={e.id} style={{ fontSize: 11.5 }}>
                               <div style={{ fontWeight: 600 }}>{e.patrolmanName || "Patrolman"}</div>
@@ -6940,6 +6953,107 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, zo
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+// "+ Create shift" on the Control Room Schedule: adds real roster entries
+// (the same records Classic Tools -> Roster edits) — a patrolman on a
+// region for a day, optionally repeated on other days of the shown week.
+function CreateRosterShift({ initial, weekDates, zones, patrolmen, roster, persistRoster, onClose }) {
+  const showToast = useToast();
+  const [date, setDate] = useState(initial.date);
+  const [run, setRun] = useState(initial.run || zones[0] || "");
+  const [loginName, setLoginName] = useState("");
+  const [customName, setCustomName] = useState("");
+  const [shift, setShift] = useState("");
+  const [alsoDays, setAlsoDays] = useState([]);
+  const [error, setError] = useState("");
+  const account = patrolmen.find((p) => p.loginName === loginName);
+  const name = loginName === "__custom__" ? customName.trim() : account?.displayName || "";
+
+  function pick(v) {
+    setLoginName(v);
+    const a = patrolmen.find((p) => p.loginName === v);
+    if (a?.shift && !shift) setShift(a.shift);
+  }
+
+  const [saving, setSaving] = useState(false);
+  async function save() {
+    setError("");
+    if (!date || !run || !name) { setError("Choose the date, region and patrolman."); return; }
+    const dates = Array.from(new Set([date, ...alsoDays])).sort();
+    const already = dates.filter((d) => roster.some((r) => r.date === d && r.run === run && ((account && r.patrolmanLoginName === account.loginName) || r.patrolmanName === name)));
+    const todo = dates.filter((d) => !already.includes(d));
+    if (!todo.length) { setError(`${name} is already rostered to ${run} on ${dates.length === 1 ? "that day" : "those days"}.`); return; }
+    setSaving(true);
+    let failed = 0;
+    // One at a time: each save reads the latest roster on the server, so they can't overwrite each other.
+    for (const [i, d] of todo.entries()) {
+      const r = await persistRoster("add", {
+        entry: {
+          id: `roster_${Date.now()}_${i}`,
+          date: d,
+          run,
+          patrolmanLoginName: account ? account.loginName : "",
+          patrolmanName: name,
+          shift: shift.trim(),
+          contactNumber: account?.contactNumber || "",
+          securityLicenceNumber: account?.securityLicenceNumber || "",
+        },
+      });
+      if (!r?.ok) failed++;
+    }
+    setSaving(false);
+    if (failed) { setError(`${failed} day${failed === 1 ? "" : "s"} couldn't be saved — try again.`); return; }
+    showToast(`${name} rostered to ${run} on ${todo.length} day${todo.length === 1 ? "" : "s"}.${already.length ? ` (${already.length} already there, skipped.)` : ""}`);
+    onClose();
+  }
+
+  const label = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 16, background: "var(--panel)", maxWidth: 640 }}>
+      <SectionTitle icon={UserPlus} title="Create shift" small />
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <Field label="Date" style={{ width: 170 }}>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={selectStyle} />
+        </Field>
+        <Field label="Region" style={{ flex: 1, minWidth: 160 }}>
+          <select value={run} onChange={(e) => setRun(e.target.value)} style={selectStyle}>
+            <option value="">Choose a region…</option>
+            {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+          </select>
+        </Field>
+      </div>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <Field label="Patrolman" style={{ flex: 1, minWidth: 200 }}>
+          <select value={loginName} onChange={(e) => pick(e.target.value)} style={selectStyle}>
+            <option value="">Choose a patrolman…</option>
+            {patrolmen.map((p) => <option key={p.loginName} value={p.loginName}>{p.displayName}</option>)}
+            <option value="__custom__">Someone else (type a name)</option>
+          </select>
+        </Field>
+        <Field label="Shift" style={{ flex: 1, minWidth: 160 }}>
+          <input value={shift} onChange={(e) => setShift(e.target.value)} placeholder="e.g. Night 22:00–06:00" style={selectStyle} />
+        </Field>
+      </div>
+      {loginName === "__custom__" && (
+        <Field label="Name"><input value={customName} onChange={(e) => setCustomName(e.target.value)} placeholder="Patrolman's name" style={selectStyle} /></Field>
+      )}
+      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-dim)", margin: "4px 0 6px" }}>Also on (this week)</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+        {weekDates.filter((d) => d !== date).map((d) => (
+          <label key={d} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 999, border: "1px solid var(--border)", background: alsoDays.includes(d) ? "var(--accent-dim)" : "var(--panel)", fontSize: 12, cursor: "pointer" }}>
+            <input type="checkbox" checked={alsoDays.includes(d)} onChange={(e) => setAlsoDays((a) => (e.target.checked ? [...a, d] : a.filter((x) => x !== d)))} />
+            {label(d)}
+          </label>
+        ))}
+      </div>
+      {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button style={primaryBtn} onClick={save} disabled={saving}>{saving ? "Saving…" : "Add to roster"}</button>
+        <button style={secondaryBtn} onClick={onClose}>Cancel</button>
+      </div>
     </div>
   );
 }
