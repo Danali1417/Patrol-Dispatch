@@ -6638,7 +6638,11 @@ function ControlRoomShell(props) {
   const providers = accounts.filter((a) => a.role === "provider");
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh" }}>
+    // #root itself is capped at max-width:880px and centered (index.html) —
+    // fine for the classic app's narrow forms/lists, but this sidebar
+    // layout needs the full viewport, so it breaks out the same way the
+    // navy TopNav header already does (see fullBleedStyle's own comment).
+    <div style={{ ...fullBleedStyle, display: "flex", minHeight: "100vh" }}>
       <div style={{ width: 230, flexShrink: 0, background: "var(--navy)", color: "#fff", display: "flex", flexDirection: "column", padding: "18px 12px" }}>
         <div style={{ padding: "6px 10px 18px", fontSize: 13, fontWeight: 700, color: "#fff" }}>Control Room</div>
         {CONTROL_ROOM_NAV.map((t) => (
