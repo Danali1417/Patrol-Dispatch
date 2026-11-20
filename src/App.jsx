@@ -9111,26 +9111,31 @@ function PermanentPatrolSitesImport({ zoneAreas, permanentPatrolSites, persistPe
   );
 }
 
-// Address suggestions as you type, via the Google Maps Places widget —
-// same Google Maps API key/loader as the Regions map and the geofence
-// pin (see googleMaps.js), just attached to a plain text input instead
-// of a map canvas. Falls back to a normal text field with no suggestions
-// if Maps fails to load (missing/invalid key, network issue, etc.) —
-// never blocks typing an address by hand.
-// Google retired the classic places.Autocomplete widget for projects that
-// never had the legacy Places API enabled before 1 March 2025 (confirmed
-// in production: "you're calling a legacy API, which is not enabled for
-// your project") — so this uses its replacement, PlaceAutocompleteElement,
-// which runs on Places API (New) instead. Unlike the old widget, this one
-// is a self-contained custom element rather than something attached to a
-// plain <input>, so until (and unless) it mounts successfully, a normal
-// text input is shown underneath — same fallback behavior as before,
-// never worse than a plain address field with no suggestions.
-function AddressAutocompleteInput({ value, onChange, placeholder, style }) {
+// Search-as-you-type on the Site Name field — type a business/place name
+// (or an address), pick the right result, and it fills the Address field
+// with the complete formatted address while leaving the name free to
+// rename afterward. Same Google Maps API key/loader as the Regions map
+// and the geofence pin (see googleMaps.js). Falls back to a plain text
+// field with no suggestions if Maps fails to load — never blocks typing
+// a name by hand.
+//
+// Google retired the classic places.Autocomplete widget for projects
+// that never had the legacy Places API enabled before 1 March 2025
+// (confirmed in production: "you're calling a legacy API, which is not
+// enabled for your project") — so this uses its replacement,
+// PlaceAutocompleteElement, which runs on Places API (New) instead.
+// Unlike the old widget, this one is a self-contained custom element
+// rather than something attached to a plain <input>, so until (and
+// unless) it mounts successfully, a normal text input is shown
+// underneath — same fallback behavior as before, never worse than a
+// plain name field with no suggestions.
+function PlaceSearchInput({ value, onChange, onPlaceSelected, placeholder, style }) {
   const containerRef = useRef(null);
   const elementRef = useRef(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onPlaceSelectedRef = useRef(onPlaceSelected);
+  onPlaceSelectedRef.current = onPlaceSelected;
   const [widgetReady, setWidgetReady] = useState(false);
 
   useEffect(() => {
@@ -9153,10 +9158,10 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style }) {
           const prediction = e.placePrediction || e.detail?.placePrediction;
           const place = prediction?.toPlace?.();
           if (!place) return;
-          await place.fetchFields({ fields: ["formattedAddress"] });
-          if (place.formattedAddress) onChangeRef.current(place.formattedAddress);
+          await place.fetchFields({ fields: ["formattedAddress", "displayName"] });
+          onPlaceSelectedRef.current?.({ address: place.formattedAddress || "", name: place.displayName || "" });
         } catch (err) {
-          console.error("Couldn't read the selected address.", err);
+          console.error("Couldn't read the selected place.", err);
         }
       });
       containerRef.current.appendChild(el);
@@ -9169,9 +9174,10 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style }) {
     };
   }, []);
 
-  // Keeps the widget's own text roughly in sync when the form's address
-  // changes from elsewhere (e.g. switching which site is being edited) —
-  // best-effort, since the element's exact property surface is new.
+  // Keeps the widget's own text roughly in sync when the form's name
+  // changes from elsewhere (e.g. switching which site is being edited,
+  // or picking a place) — best-effort, since the element's exact
+  // property surface is new.
   useEffect(() => {
     if (!elementRef.current) return;
     try { elementRef.current.value = value || ""; } catch (e) {}
@@ -9252,9 +9258,16 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
       <div style={{ maxWidth: 560, marginBottom: 24 }}>
         <div style={{ display: "flex", gap: 12 }}>
           <Field label="Customer" style={{ flex: 1 }}><input value={form.customer} onChange={(e) => set("customer", e.target.value)} style={selectStyle} /></Field>
-          <Field label="Site name" style={{ flex: 1 }}><input value={form.name} onChange={(e) => set("name", e.target.value)} style={selectStyle} /></Field>
+          <Field label="Site name" style={{ flex: 1 }}>
+            <PlaceSearchInput
+              value={form.name}
+              onChange={(v) => set("name", v)}
+              onPlaceSelected={({ address, name }) => setForm((f) => ({ ...f, name: name || f.name, address: address || f.address }))}
+              style={selectStyle}
+            />
+          </Field>
         </div>
-        <Field label="Address"><AddressAutocompleteInput value={form.address} onChange={(v) => set("address", v)} placeholder="Street, suburb, state" style={selectStyle} /></Field>
+        <Field label="Address"><input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, suburb, state" style={selectStyle} /></Field>
         <Field label="Region">
           <select value={form.region} onChange={(e) => set("region", e.target.value)} style={selectStyle}>
             <option value="">— none —</option>
