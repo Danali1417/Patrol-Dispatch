@@ -9353,7 +9353,7 @@ function PlaceSearchInput({ value, onChange, onPlaceSelected, placeholder, style
 }
 
 function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, persistPermanentPatrolSites }) {
-  const blank = { customer: "", name: "", address: "", notes: "", region: "", geofence: null, schedule: null };
+  const blank = { customer: "", name: "", address: "", notes: "", keyCode: "", region: "", geofence: null, schedule: null };
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState("");
@@ -9366,7 +9366,7 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
 
   function startEdit(r) {
     setEditingId(r.id);
-    setForm({ customer: r.customer || "", name: r.name || "", address: r.address || "", notes: r.notes || "", region: r.region || "", geofence: r.geofence || null, schedule: r.schedule || null });
+    setForm({ customer: r.customer || "", name: r.name || "", address: r.address || "", notes: r.notes || "", keyCode: r.keyCode || "", region: r.region || "", geofence: r.geofence || null, schedule: r.schedule || null });
     setError("");
     setPanel(null);
   }
@@ -9377,7 +9377,7 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
     const name = form.name.trim();
     if (!name) { setError("Site name is required."); return; }
     if (!form.address.trim()) { setError("Address is required."); return; }
-    const record = { customer: form.customer.trim(), name, address: form.address.trim(), notes: form.notes.trim(), region: form.region, geofence: form.geofence, schedule: form.schedule };
+    const record = { customer: form.customer.trim(), name, address: form.address.trim(), notes: form.notes.trim(), keyCode: form.keyCode.trim(), region: form.region, geofence: form.geofence, schedule: form.schedule };
     if (editingId) {
       const existing = permanentPatrolSites.find((r) => r.id === editingId);
       const ok = await persistPermanentPatrolSites("update", { id: editingId, record: { ...record, createdAt: existing?.createdAt || new Date().toISOString() } });
@@ -9409,7 +9409,6 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
       </div>
       <div style={{ maxWidth: 560, marginBottom: 24 }}>
         <div style={{ display: "flex", gap: 12 }}>
-          <Field label="Customer" style={{ flex: 1 }}><input value={form.customer} onChange={(e) => set("customer", e.target.value)} style={selectStyle} /></Field>
           <Field label="Site name" style={{ flex: 1 }}>
             <PlaceSearchInput
               value={form.name}
@@ -9427,6 +9426,7 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
               style={selectStyle}
             />
           </Field>
+          <Field label="Customer" style={{ flex: 1 }}><input value={form.customer} onChange={(e) => set("customer", e.target.value)} style={selectStyle} /></Field>
         </div>
         <Field label="Address"><input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, suburb, state" style={selectStyle} /></Field>
         <Field label="Region">
@@ -9435,6 +9435,7 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
             {zones.map((z) => <option key={z} value={z}>{z}</option>)}
           </select>
         </Field>
+        <Field label="Key / access code"><input value={form.keyCode} onChange={(e) => set("keyCode", e.target.value)} placeholder="e.g. Key #14, lockbox code 2481" style={selectStyle} /></Field>
         <Field label="Notes (optional)"><textarea rows={2} value={form.notes} onChange={(e) => set("notes", e.target.value)} style={{ ...selectStyle, resize: "vertical" }} /></Field>
 
         <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
