@@ -77,6 +77,19 @@ const ZONE_AREAS_KEY = "ops:zoneAreas";
 // and writes today. Two different kinds of "site" with different
 // lifecycles, not one list wearing two hats.
 const PERMANENT_PATROL_SITES_KEY = "ops:permanentPatrolSites";
+// Custom incident report templates (Control Room pilot, Dan-only, same
+// reasoning as PERMANENT_PATROL_SITES_KEY above) — each one is a name, a
+// list of questions (text + answer type), and the permanent patrol site
+// ids it's assigned to. Nothing patrolman-facing reads this yet; this is
+// just the build/manage side.
+const INCIDENT_TEMPLATES_KEY = "ops:incidentTemplates";
+// Which Mon-Sun weeks Dan has hit "Publish" on in the new Schedule
+// preview. Deliberately just a marker Dan can see — it does NOT gate
+// what the patrolman app shows (that still reads every roster entry the
+// moment it's added, same as always). Turning this into a real
+// draft/publish workflow would mean changing that patrolman-side lookup,
+// which was explicitly ruled out for now.
+const PUBLISHED_WEEKS_KEY = "ops:publishedWeeks";
 const ROSTER_KEY = "ops:roster";
 const LOGO_KEY = "ops:logo";
 const COMPANY_NAME_KEY = "ops:companyName";
@@ -202,6 +215,27 @@ function applyPermanentPatrolSitesOpLocal(current, op, payload) {
     case "addMany": return [...current, ...payload.records];
     case "update": return current.map((r) => (r.id === payload.id ? { ...payload.record, id: payload.id } : r));
     case "remove": return current.filter((r) => r.id !== payload.id);
+    default: return current;
+  }
+}
+
+// Same idea again, for Incident Templates — mirrors applyIncidentTemplatesOp
+// in api/kv.js.
+function applyIncidentTemplatesOpLocal(current, op, payload) {
+  switch (op) {
+    case "add": return [...current, payload.record];
+    case "update": return current.map((r) => (r.id === payload.id ? { ...payload.record, id: payload.id } : r));
+    case "remove": return current.filter((r) => r.id !== payload.id);
+    default: return current;
+  }
+}
+
+// Same idea again, for published weeks — a flat list of { weekStart,
+// publishedAt }, keyed by weekStart rather than an id.
+function applyPublishedWeeksOpLocal(current, op, payload) {
+  switch (op) {
+    case "add": return current.some((w) => w.weekStart === payload.weekStart) ? current : [...current, { weekStart: payload.weekStart, publishedAt: payload.publishedAt }];
+    case "remove": return current.filter((w) => w.weekStart !== payload.weekStart);
     default: return current;
   }
 }
@@ -751,6 +785,8 @@ export default function SentrylinePrototype() {
   const [runSheets, setRunSheets] = useState([]);
   const [zoneAreas, setZoneAreas] = useState([]);
   const [permanentPatrolSites, setPermanentPatrolSites] = useState([]);
+  const [incidentTemplates, setIncidentTemplates] = useState([]);
+  const [publishedWeeks, setPublishedWeeks] = useState([]);
   const [roster, setRoster] = useState([]);
   const [outcomePhrases, setOutcomePhrases] = useState([]);
   const [monitoringCompanies, setMonitoringCompanies] = useState([]);
@@ -1024,6 +1060,22 @@ export default function SentrylinePrototype() {
         if (!isMissingKeyError(e)) console.error("Failed to load permanent patrol sites.", e);
       }
     })();
+    (async () => {
+      try {
+        const res = await window.storage.get(INCIDENT_TEMPLATES_KEY);
+        setIncidentTemplates(res?.value ? JSON.parse(res.value) : []);
+      } catch (e) {
+        if (!isMissingKeyError(e)) console.error("Failed to load incident templates.", e);
+      }
+    })();
+    (async () => {
+      try {
+        const res = await window.storage.get(PUBLISHED_WEEKS_KEY);
+        setPublishedWeeks(res?.value ? JSON.parse(res.value) : []);
+      } catch (e) {
+        if (!isMissingKeyError(e)) console.error("Failed to load published weeks.", e);
+      }
+    })();
   }, [session]);
 
   // Load or seed public holidays (used by slaWindowMinutes' weekend/
@@ -1276,6 +1328,32 @@ export default function SentrylinePrototype() {
     }
   }, []);
 
+  // Same op-based pattern as persistRunSheets above.
+  const persistIncidentTemplates = useCallback(async (op, payload) => {
+    setIncidentTemplates((prev) => applyIncidentTemplatesOpLocal(prev, op, payload));
+    try {
+      const res = await window.storage.applyOp(INCIDENT_TEMPLATES_KEY, op, payload);
+      setIncidentTemplates(JSON.parse(res.value));
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
+  }, []);
+
+  // Same op-based pattern as persistRunSheets above.
+  const persistPublishedWeeks = useCallback(async (op, payload) => {
+    setPublishedWeeks((prev) => applyPublishedWeeksOpLocal(prev, op, payload));
+    try {
+      const res = await window.storage.applyOp(PUBLISHED_WEEKS_KEY, op, payload);
+      setPublishedWeeks(JSON.parse(res.value));
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
+  }, []);
+
   // Same op-based, read-fresh-then-write pattern as persistSites below —
   // this used to be a blind full-array overwrite, the same class of bug
   // fixed there. A patrolman's roster entry for today going missing (only
@@ -1507,7 +1585,7 @@ export default function SentrylinePrototype() {
           {!accountsLoaded || !sitesLoaded ? (
             <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
           ) : session.role === "manager" ? (
-            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} runSheets={runSheets} persistRunSheets={persistRunSheets} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
+            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} runSheets={runSheets} persistRunSheets={persistRunSheets} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} incidentTemplates={incidentTemplates} persistIncidentTemplates={persistIncidentTemplates} publishedWeeks={publishedWeeks} persistPublishedWeeks={persistPublishedWeeks} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
           ) : session.role === "operator" ? (
             <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} logoUrl={logoUrl} monitoringCompanies={monitoringCompanies} bureaus={bureaus} />
           ) : session.role === "provider" ? (
@@ -6449,11 +6527,9 @@ function JobDetailProvider({ job, jobs, session, persist, now, onBack }) {
    MANAGER VIEW — create & manage logins
 ---------------------------------------------------------------- */
 
-function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, responseRate, persistResponseRate, bureauRates, persistBureauRates, monitoringRates, persistMonitoringRates, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
-  const [tab, setTab] = useState("accounts");
+function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, incidentTemplates, persistIncidentTemplates, publishedWeeks, persistPublishedWeeks, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, responseRate, persistResponseRate, bureauRates, persistBureauRates, monitoringRates, persistMonitoringRates, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
   const showConfirm = useConfirm();
   const showToast = useToast();
-  const isDan = isDanLogin(session);
 
   function handleResetJobs() {
     showConfirm(
@@ -6469,6 +6545,55 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
     );
   }
 
+  // isDanLogin(session) picks the new sidebar Control Room shell for this
+  // one login only; every other manager login gets ManagerClassicTools —
+  // the exact same screen this component always rendered, byte-for-byte,
+  // just moved into its own function below.
+  return (
+    <ManagerClassicOrNew
+      session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones}
+      sites={sites} persistSites={persistSites} runSheets={runSheets} persistRunSheets={persistRunSheets}
+      zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites}
+      incidentTemplates={incidentTemplates} persistIncidentTemplates={persistIncidentTemplates}
+      publishedWeeks={publishedWeeks} persistPublishedWeeks={persistPublishedWeeks}
+      roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases}
+      monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus}
+      responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates}
+      monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays}
+      logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName}
+      jobs={jobs} persistJobs={persistJobs} now={now} onResetJobs={handleResetJobs}
+    />
+  );
+}
+
+// ---- Dan-only Control Room pilot: a redesigned sidebar interface replacing
+// the classic TopNav for this one login only (see isDanLogin above — gated
+// the exact same way as the Patrol Sites/Run Sheets pilot). Nothing here
+// changes what any other manager login sees or how any existing component
+// behaves; this is a new, separate render branch in ManagerClassicOrNew
+// below that reuses the same already-shipped components (Board,
+// NewJobForm, JobDetailOperator, RosterView, Logs, AccountsManager,
+// PatrolOpsManager, SitesManager) rather than duplicating their logic.
+// Dashboard/Incident/Staff-licenses are previews only — see each
+// component's own comment for exactly what's real vs. not yet built.
+const CONTROL_ROOM_NAV = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "schedule", label: "Schedule", icon: CalendarDays },
+  { id: "dispatch", label: "Dispatch Board", icon: ShieldAlert },
+  { id: "sites", label: "Permanent Patrol Sites", icon: MapPin },
+  { id: "reports", label: "Reports", icon: BarChart3 },
+  { id: "incident", label: "Incident", icon: AlertTriangle },
+  { id: "staff", label: "Staff", icon: Users },
+];
+
+function ManagerClassicOrNew(props) {
+  const isDan = isDanLogin(props.session);
+  return isDan ? <ControlRoomShell {...props} /> : <ManagerClassicTools {...props} />;
+}
+
+function ManagerClassicTools({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, responseRate, persistResponseRate, bureauRates, persistBureauRates, monitoringRates, persistMonitoringRates, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, now, onResetJobs }) {
+  const [tab, setTab] = useState("accounts");
+  const isDan = isDanLogin(session);
   return (
     <div>
       <TopNav
@@ -6486,7 +6611,7 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
       <div style={{ padding: 20, maxWidth: 1180, margin: "0 auto" }}>
         {isDan && (
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
-            <button onClick={handleResetJobs} title="Delete every job so the app starts fresh — visible only to this login" style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 12px", borderRadius: 7, border: "1px solid var(--breach)", cursor: "pointer", fontSize: 12, fontWeight: 600, background: "transparent", color: "var(--breach)" }}>
+            <button onClick={onResetJobs} title="Delete every job so the app starts fresh — visible only to this login" style={{ display: "flex", alignItems: "center", gap: 7, padding: "7px 12px", borderRadius: 7, border: "1px solid var(--breach)", cursor: "pointer", fontSize: 12, fontWeight: 600, background: "transparent", color: "var(--breach)" }}>
               <Trash2 size={14} /> Reset test data
             </button>
           </div>
@@ -6498,6 +6623,620 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} />}
         {tab === "logs" && <Logs jobs={jobs.filter((j) => j.status !== "scheduled")} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} roster={roster} responseRate={responseRate} bureauRates={bureauRates} monitoringRates={monitoringRates} />}
       </div>
+    </div>
+  );
+}
+
+// The new sidebar shell. "Classic Tools" (bottom of the sidebar, below the
+// divider) is the entire old ManagerClassicTools screen above, unchanged —
+// so nothing Dan could do before is unreachable now, it's just not the
+// default view any more.
+function ControlRoomShell(props) {
+  const { session, accounts, setAccounts, zones, sites, persistSites, roster, persistRoster, companyName, logoUrl, now, jobs, persistJobs, onResetJobs, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, incidentTemplates, persistIncidentTemplates, publishedWeeks, persistPublishedWeeks, runSheets, persistRunSheets, publicHolidays, persistPublicHolidays, monitoringCompanies, bureaus, responseRate, bureauRates, monitoringRates } = props;
+  const [tab, setTab] = useState("dashboard");
+  const patrolmen = accounts.filter((a) => a.role === "patrolman");
+  const providers = accounts.filter((a) => a.role === "provider");
+
+  return (
+    // #root itself is capped at max-width:880px and centered (index.html) —
+    // fine for the classic app's narrow forms/lists, but this sidebar
+    // layout needs the full viewport, so it breaks out the same way the
+    // navy TopNav header already does (see fullBleedStyle's own comment).
+    <div style={{ ...fullBleedStyle, display: "flex", minHeight: "100vh" }}>
+      <div style={{ width: 230, flexShrink: 0, background: "var(--navy)", color: "#fff", display: "flex", flexDirection: "column", padding: "18px 12px" }}>
+        <div style={{ padding: "6px 10px 18px", fontSize: 13, fontWeight: 700, color: "#fff" }}>Control Room</div>
+        {CONTROL_ROOM_NAV.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            style={{
+              display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, marginBottom: 2,
+              background: tab === t.id ? "var(--navy-dim)" : "transparent",
+              border: "none", color: tab === t.id ? "#fff" : "#9FB0CB", cursor: "pointer",
+              fontSize: 12.5, fontWeight: 600, textAlign: "left",
+            }}
+          >
+            <t.icon size={15} color={tab === t.id ? "var(--accent)" : "currentColor"} /> {t.label}
+          </button>
+        ))}
+        <div style={{ borderTop: "1px solid rgba(255,255,255,0.12)", marginTop: 10, paddingTop: 10 }}>
+          <button
+            onClick={() => setTab("classic")}
+            style={{
+              display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 8, width: "100%",
+              background: tab === "classic" ? "var(--navy-dim)" : "transparent",
+              border: "none", color: tab === "classic" ? "#fff" : "#9FB0CB", cursor: "pointer",
+              fontSize: 12.5, fontWeight: 600, textAlign: "left",
+            }}
+          >
+            <Settings size={15} color={tab === "classic" ? "var(--accent)" : "currentColor"} /> Classic Tools
+          </button>
+        </div>
+        <div style={{ marginTop: "auto", paddingTop: 14, fontSize: 10.5, lineHeight: 1.5, color: "#7B8CA8" }}>
+          Visible only to this login. Every other Control Room / manager login is unaffected.
+        </div>
+      </div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: "1px solid var(--border)", background: "var(--panel)" }}>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>
+            {tab === "classic" ? "Classic Tools" : CONTROL_ROOM_NAV.find((t) => t.id === tab)?.label}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 12.5, color: "var(--text-dim)" }}>
+              {new Date(now).toLocaleTimeString("en-AU", { hour12: false })}
+            </span>
+          </div>
+        </div>
+
+        <div style={{ padding: 20 }}>
+          {tab === "dashboard" && <ControlRoomDashboard jobs={jobs} onNavigate={setTab} />}
+          {tab === "schedule" && (
+            <ControlRoomSchedulePreview
+              permanentPatrolSites={permanentPatrolSites} roster={roster} accounts={accounts}
+              publishedWeeks={publishedWeeks} persistPublishedWeeks={persistPublishedWeeks}
+            />
+          )}
+          {tab === "dispatch" && (
+            <ControlRoomDispatchBoard
+              jobs={jobs} persist={persistJobs} roster={roster} sites={sites} persistSites={persistSites} zones={zones}
+              patrolmen={patrolmen} providers={providers} session={session} now={now} companyName={companyName} logoUrl={logoUrl}
+              monitoringCompanies={monitoringCompanies} bureaus={bureaus}
+            />
+          )}
+          {tab === "sites" && (
+            <PatrolOpsManager
+              zones={zones} accounts={accounts}
+              zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas}
+              permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites}
+              runSheets={runSheets} persistRunSheets={persistRunSheets}
+            />
+          )}
+          {tab === "reports" && (
+            <ControlRoomReports
+              jobs={jobs} persist={persistJobs} now={now} companyName={companyName} logoUrl={logoUrl} roster={roster}
+              patrolmen={patrolmen} providers={providers} session={session}
+              responseRate={responseRate} bureauRates={bureauRates} monitoringRates={monitoringRates}
+            />
+          )}
+          {tab === "incident" && (
+            <ControlRoomIncidentManager
+              incidentTemplates={incidentTemplates}
+              persistIncidentTemplates={persistIncidentTemplates}
+              permanentPatrolSites={permanentPatrolSites}
+            />
+          )}
+          {tab === "staff" && (
+            <ControlRoomStaff accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={props.persistLogo} companyName={companyName} persistCompanyName={props.persistCompanyName} />
+          )}
+          {tab === "classic" && (
+            <ManagerClassicTools {...props} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Real, live numbers (dispatched / awaiting acknowledgement / scheduled)
+// computed straight from `jobs` — the same data the classic Dispatch Board
+// uses. Everything else on this dashboard (patrol run sheet progress,
+// incident notifications, staff license alerts) needs tracking that
+// doesn't exist yet, so it's left as an explicit placeholder rather than
+// faked, per the "phase it" decision.
+function ControlRoomDashboard({ jobs, onNavigate }) {
+  const dispatched = jobs.filter((j) => j.status === "dispatched").length;
+  const awaitingAck = jobs.filter((j) => j.status === "dispatched" && !j.acknowledgedAt).length;
+  const scheduled = jobs.filter((j) => j.status === "scheduled").length;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <div style={{ padding: "10px 14px", borderRadius: 8, background: "#FFFBEB", border: "1px solid var(--warn)", color: "#92400E", fontSize: 12 }}>
+        Preview — the three numbers below are live from your real jobs. Patrol run sheet progress, incident notifications and staff license alerts will appear here once those are built.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 14 }}>
+        <button onClick={() => onNavigate("dispatch")} style={{ textAlign: "left", borderRadius: 10, border: "1px solid var(--border)", background: "var(--panel)", padding: "14px 16px", cursor: "pointer" }}>
+          <div style={{ fontSize: 11.5, color: "var(--text-dim)", fontWeight: 600 }}>Dispatched</div>
+          <div style={{ fontSize: 26, fontWeight: 700, marginTop: 4 }}>{dispatched}</div>
+        </button>
+        <button onClick={() => onNavigate("dispatch")} style={{ textAlign: "left", borderRadius: 10, border: "1px solid var(--border)", background: "var(--panel)", padding: "14px 16px", cursor: "pointer" }}>
+          <div style={{ fontSize: 11.5, color: "var(--text-dim)", fontWeight: 600 }}>Awaiting acknowledgement</div>
+          <div style={{ fontSize: 26, fontWeight: 700, marginTop: 4, color: awaitingAck ? "var(--warn)" : undefined }}>{awaitingAck}</div>
+        </button>
+        <button onClick={() => onNavigate("dispatch")} style={{ textAlign: "left", borderRadius: 10, border: "1px solid var(--border)", background: "var(--panel)", padding: "14px 16px", cursor: "pointer" }}>
+          <div style={{ fontSize: 11.5, color: "var(--text-dim)", fontWeight: 600 }}>Scheduled</div>
+          <div style={{ fontSize: 26, fontWeight: 700, marginTop: 4 }}>{scheduled}</div>
+        </button>
+      </div>
+      <div style={{ borderRadius: 10, border: "1px dashed var(--border)", padding: 20, color: "var(--text-dim)", fontSize: 12.5, textAlign: "center" }}>
+        Patrol run sheet progress · Incident report notifications · Staff license alerts — coming soon.
+      </div>
+    </div>
+  );
+}
+
+// "By site" is still the mockup preview — there's no site-based shift
+// model to back it yet. "By employee" is real: same roster data as
+// Classic Tools -> Roster (per-guard, per-date entries), just laid out as
+// a weekly grid instead of one day at a time. Nothing about the real
+// roster or RosterView changes; this only reads `roster`, never writes it.
+const SCHEDULE_DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, publishedWeeks, persistPublishedWeeks }) {
+  const [view, setView] = useState("employee");
+  const [weekOffset, setWeekOffset] = useState(0);
+  const showToast = useToast();
+
+  const monday = addDays(mondayOfWeek(new Date()), weekOffset * 7);
+  const weekDates = Array.from({ length: 7 }, (_, i) => dateOnlyISO(addDays(monday, i)));
+  const fmtShort = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  const weekLabel = `${fmtShort(weekDates[0])} – ${fmtShort(weekDates[6])} ${new Date(`${weekDates[6]}T00:00:00`).getFullYear()}`;
+  const isPublished = publishedWeeks.some((w) => w.weekStart === weekDates[0]);
+
+  async function togglePublish() {
+    if (isPublished) {
+      const ok = await persistPublishedWeeks("remove", { weekStart: weekDates[0] });
+      if (ok) showToast("Marked as not published.");
+    } else {
+      const ok = await persistPublishedWeeks("add", { weekStart: weekDates[0], publishedAt: new Date().toISOString() });
+      if (ok) showToast("Marked as published.");
+    }
+  }
+
+  const patrolmen = accounts.filter((a) => a.role === "patrolman");
+
+  const siteNames = permanentPatrolSites && permanentPatrolSites.length
+    ? permanentPatrolSites.slice(0, 6).map((s) => s.name)
+    : ["Riverside Plaza", "Northgate Retail Centre", "Harbour Logistics Yard", "Westline Depot"];
+
+  const segBtn = { padding: "7px 14px", fontSize: 12.5, fontWeight: 600, border: "none", background: "var(--panel)", color: "var(--text)", cursor: "pointer" };
+  const thStyle = { textAlign: "left", padding: "9px 12px", fontSize: 11.5, fontWeight: 700, color: "var(--text-dim)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+  const tdStyle = { padding: "12px", borderBottom: "1px solid var(--panel-alt)", verticalAlign: "middle" };
+
+  function entriesFor(patrolman, date) {
+    return roster.filter((r) => r.date === date && (
+      (patrolman.loginName && r.patrolmanLoginName === patrolman.loginName) ||
+      (!r.patrolmanLoginName && r.patrolmanName === patrolman.displayName)
+    ));
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ padding: "10px 14px", borderRadius: 8, background: "#FFFBEB", border: "1px solid var(--warn)", color: "#92400E", fontSize: 12 }}>
+        {view === "employee"
+          ? "\"By employee\" shows your real roster for this week. \"By site\" is still a preview — there's no site-based shift data behind it yet. Publish is just a marker for now — it doesn't change what patrolmen see."
+          : "Preview — \"By site\" isn't wired to real shift data yet. Switch to \"By employee\" to see your real roster, or use Classic Tools → Roster."}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>Schedule</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3 }}>
+            <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>All customers</span>
+            <span style={{
+              fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 999,
+              background: isPublished ? "#DCFCE7" : "var(--panel-alt)",
+              color: isPublished ? "#166534" : "var(--text-dim)",
+            }}>
+              {isPublished ? "Published" : "Not published"}
+            </span>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button style={secondaryBtn}>Select shifts</button>
+          <button style={secondaryBtn}>Copy week</button>
+          <button
+            onClick={togglePublish}
+            style={isPublished ? { ...secondaryBtn, color: "var(--ok)", borderColor: "var(--ok)" } : primaryBtn}
+          >
+            {isPublished ? "✓ Published — unpublish" : "Publish this week"}
+          </button>
+          <button style={primaryBtn}>+ Create shift</button>
+        </div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", border: "1px solid var(--border)", borderRadius: 8 }}>
+          <button onClick={() => setWeekOffset((w) => w - 1)} style={{ ...segBtn, padding: "7px 11px" }}>‹</button>
+          <span style={{ padding: "0 10px", fontSize: 12.5, fontWeight: 600, borderLeft: "1px solid var(--border)", borderRight: "1px solid var(--border)" }}>{weekLabel}</span>
+          <button onClick={() => setWeekOffset((w) => w + 1)} style={{ ...segBtn, padding: "7px 11px" }}>›</button>
+        </div>
+        <button onClick={() => setWeekOffset(0)} style={secondaryBtn}>This week</button>
+        <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
+          <button onClick={() => setView("site")} style={{ ...segBtn, ...(view === "site" ? { background: "var(--navy)", color: "#fff" } : {}) }}>By site</button>
+          <button onClick={() => setView("employee")} style={{ ...segBtn, ...(view === "employee" ? { background: "var(--navy)", color: "#fff" } : {}) }}>By employee</button>
+        </div>
+      </div>
+
+      {view === "site" ? (
+        <>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 11.5, color: "var(--text-dim)" }}>
+            <span>○ Draft</span>
+            <span>○ Unassigned</span>
+            <span>◐ Awaiting</span>
+            <span style={{ color: "var(--ok)" }}>● Confirmed</span>
+            <span>◐ Declined</span>
+            <span>◐ Subcontractor</span>
+          </div>
+          <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 640 }}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>Site</th>
+                  {SCHEDULE_DAY_LABELS.map((d) => <th key={d} style={thStyle}>{d}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {siteNames.map((name) => (
+                  <tr key={name}>
+                    <td style={tdStyle}>
+                      <div style={{ fontWeight: 700 }}>{name}</div>
+                      <div style={{ fontSize: 11, color: "var(--text-dim)" }}>Security Services</div>
+                    </td>
+                    {SCHEDULE_DAY_LABELS.map((d) => (
+                      <td key={d} style={{ ...tdStyle, textAlign: "center", color: "var(--info)", cursor: "pointer" }}>+</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : (
+        <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 640 }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>Patrolman</th>
+                {weekDates.map((date, i) => <th key={date} style={thStyle}>{SCHEDULE_DAY_LABELS[i]} {fmtShort(date)}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {patrolmen.length === 0 && (
+                <tr><td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "var(--text-dim)" }}>No patrolman logins yet — add some under Staff.</td></tr>
+              )}
+              {patrolmen.map((p) => (
+                <tr key={p.loginName}>
+                  <td style={tdStyle}><div style={{ fontWeight: 700 }}>{p.displayName}</div></td>
+                  {weekDates.map((date) => {
+                    const entries = entriesFor(p, date);
+                    return (
+                      <td key={date} style={{ ...tdStyle, textAlign: "center" }}>
+                        {entries.length === 0
+                          ? <span style={{ color: "var(--text-dim)" }}>—</span>
+                          : entries.map((e) => (
+                            <div key={e.id} style={{ fontSize: 11.5 }}>
+                              <div style={{ fontWeight: 600 }}>{e.shift || "Rostered"}</div>
+                              <div style={{ color: "var(--text-dim)" }}>{e.run}</div>
+                            </div>
+                          ))}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Dispatch Board: literally the same Board / NewJobForm / JobDetailOperator
+// components OperatorView uses, with the same selection/sub-tab pattern —
+// no new dispatch logic, just a new place to reach it from.
+function ControlRoomDispatchBoard({ jobs, persist, roster, sites, persistSites, zones, patrolmen, providers, session, now, companyName, logoUrl, monitoringCompanies, bureaus }) {
+  const [subTab, setSubTab] = useState("board");
+  const [selectedId, setSelectedId] = useState(null);
+  const [selectedArchivedJob, setSelectedArchivedJob] = useState(null);
+  const selected = jobs.find((j) => j.id === selectedId) || (selectedArchivedJob?.id === selectedId ? selectedArchivedJob : null);
+  function selectJob(id, archivedJob) {
+    setSelectedId(id);
+    setSelectedArchivedJob(archivedJob || null);
+  }
+  function goSub(id) {
+    setSubTab(id);
+    selectJob(null);
+  }
+  const pills = [["board", "Active jobs"], ["new", "+ New job"], ["scheduled", "Scheduled"], ["cancelled", "Cancelled"], ["closed", "Closed"]];
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        {pills.map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => goSub(id)}
+            style={{
+              padding: "7px 14px", borderRadius: 999, border: `1px solid ${subTab === id ? "var(--navy)" : "var(--border)"}`,
+              background: subTab === id ? "var(--navy)" : "var(--panel)", color: subTab === id ? "#fff" : "var(--text)",
+              fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {subTab === "board" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} roster={roster} />}
+      {subTab === "scheduled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="scheduled" roster={roster} />}
+      {subTab === "cancelled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="cancelled" roster={roster} />}
+      {subTab === "closed" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="emailed" roster={roster} />}
+      {(subTab === "board" || subTab === "scheduled" || subTab === "cancelled" || subTab === "closed") && selected && (
+        <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} providers={providers} roster={roster} persist={persist} now={now} session={session} companyName={companyName} logoUrl={logoUrl} onBack={() => selectJob(null)} />
+      )}
+      {subTab === "new" && (
+        <NewJobForm jobs={jobs} sites={sites} persistSites={persistSites} zones={zones} patrolmen={patrolmen} providers={providers} roster={roster} session={session} persist={persist} monitoringCompanies={monitoringCompanies} bureaus={bureaus} onCreated={(id) => { setSubTab("board"); selectJob(id); }} />
+      )}
+    </div>
+  );
+}
+
+// Reports: "Logs & Analysis" reuses the existing Logs component as-is.
+// "Response Attendance" reuses Board with lockedStatus, same as the
+// classic Closed jobs / Cancelled jobs tabs — real data either way. The
+// patrol-specific exports (run sheet exceptions/logs, NFC reports,
+// downloads) aren't built yet, so that third pill is a labeled preview.
+function ControlRoomReports({ jobs, persist, now, companyName, logoUrl, roster, patrolmen, providers, session, responseRate, bureauRates, monitoringRates }) {
+  const [subTab, setSubTab] = useState("logs");
+  const pills = [["logs", "Logs & Analysis"], ["attendance", "Response Attendance"], ["more", "More reports"]];
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+        {pills.map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setSubTab(id)}
+            style={{
+              padding: "7px 14px", borderRadius: 999, border: `1px solid ${subTab === id ? "var(--navy)" : "var(--border)"}`,
+              background: subTab === id ? "var(--navy)" : "var(--panel)", color: subTab === id ? "#fff" : "var(--text)",
+              fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {subTab === "logs" && (
+        <Logs jobs={jobs.filter((j) => j.status !== "scheduled")} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} roster={roster} responseRate={responseRate} bureauRates={bureauRates} monitoringRates={monitoringRates} />
+      )}
+      {subTab === "attendance" && (
+        <ControlRoomAttendance jobs={jobs} persist={persist} now={now} roster={roster} patrolmen={patrolmen} providers={providers} session={session} companyName={companyName} logoUrl={logoUrl} />
+      )}
+      {subTab === "more" && (
+        <div style={{ borderRadius: 10, border: "1px dashed var(--border)", padding: 24, color: "var(--text-dim)", fontSize: 12.5, textAlign: "center" }}>
+          Run sheet exceptions · Run sheet logs · NFC reports · Run sheet download — coming soon.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ControlRoomAttendance({ jobs, persist, now, roster, patrolmen, providers, session, companyName, logoUrl }) {
+  const [status, setStatus] = useState("emailed");
+  const [selectedId, setSelectedId] = useState(null);
+  const [selectedArchivedJob, setSelectedArchivedJob] = useState(null);
+  const selected = jobs.find((j) => j.id === selectedId) || (selectedArchivedJob?.id === selectedId ? selectedArchivedJob : null);
+  function selectJob(id, archivedJob) {
+    setSelectedId(id);
+    setSelectedArchivedJob(archivedJob || null);
+  }
+  return (
+    <div>
+      {!selected && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          {[["emailed", "Closed jobs"], ["cancelled", "Cancelled jobs"]].map(([id, label]) => (
+            <button
+              key={id}
+              onClick={() => { setStatus(id); selectJob(null); }}
+              style={{
+                padding: "6px 12px", borderRadius: 7, border: `1px solid ${status === id ? "var(--navy)" : "var(--border)"}`,
+                background: status === id ? "var(--navy)" : "var(--panel)", color: status === id ? "#fff" : "var(--text)",
+                fontSize: 12, fontWeight: 600, cursor: "pointer",
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {!selected
+        ? <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus={status} roster={roster} />
+        : <JobDetailOperator job={selected} jobs={jobs} patrolmen={patrolmen} providers={providers} roster={roster} persist={persist} now={now} session={session} companyName={companyName} logoUrl={logoUrl} onBack={() => selectJob(null)} />}
+    </div>
+  );
+}
+
+// Staff: the real account list and "create a login" flow are just the
+// existing AccountsManager, reused as-is. Licenses/compliance tracking is
+// net-new and isn't stored anywhere yet, so it stays a labeled preview
+// until that's actually built.
+function ControlRoomStaff({ accounts, setAccounts, zones, session, logoUrl, persistLogo, companyName, persistCompanyName }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <AccountsManager accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />
+      <div style={{ borderRadius: 10, border: "1px dashed var(--border)", padding: 18, color: "var(--text-dim)", fontSize: 12.5, textAlign: "center" }}>
+        Preview — security licenses, driver's licenses and compliance expiry tracking per staff member aren't stored yet. This section will grow here once that's built.
+      </div>
+    </div>
+  );
+}
+
+function makeIncidentTemplateId() {
+  return `tpl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+const INCIDENT_QUESTION_TYPES = ["Yes / No", "Text answer", "Photo", "Multiple choice"];
+const BLANK_INCIDENT_QUESTION = { text: "", type: INCIDENT_QUESTION_TYPES[0] };
+
+// Build and manage custom incident report templates — real storage (see
+// INCIDENT_TEMPLATES_KEY), Dan-only for now like the rest of this pilot.
+// Nothing patrolman-facing reads these yet: this is the build/manage side
+// only, same deliberate scoping as the rest of this Control Room pilot —
+// no changes to the real patrolman app.
+function ControlRoomIncidentManager({ incidentTemplates, persistIncidentTemplates, permanentPatrolSites }) {
+  const blank = { name: "", questions: [{ ...BLANK_INCIDENT_QUESTION }], siteIds: [] };
+  const [form, setForm] = useState(blank);
+  const [editingId, setEditingId] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [error, setError] = useState("");
+  const showToast = useToast();
+  const showConfirm = useConfirm();
+
+  function set(field, value) { setForm((f) => ({ ...f, [field]: value })); }
+
+  function setQuestion(i, patch) {
+    setForm((f) => ({ ...f, questions: f.questions.map((q, idx) => (idx === i ? { ...q, ...patch } : q)) }));
+  }
+  function addQuestion() { setForm((f) => ({ ...f, questions: [...f.questions, { ...BLANK_INCIDENT_QUESTION }] })); }
+  function removeQuestion(i) { setForm((f) => ({ ...f, questions: f.questions.filter((_, idx) => idx !== i) })); }
+  function toggleSite(id) {
+    setForm((f) => ({ ...f, siteIds: f.siteIds.includes(id) ? f.siteIds.filter((x) => x !== id) : [...f.siteIds, id] }));
+  }
+
+  function startNew() { setEditingId(null); setForm(blank); setError(""); setShowForm(true); }
+  function startEdit(t) {
+    setEditingId(t.id);
+    setForm({ name: t.name || "", questions: t.questions?.length ? t.questions : [{ ...BLANK_INCIDENT_QUESTION }], siteIds: t.siteIds || [] });
+    setError("");
+    setShowForm(true);
+  }
+  function cancel() { setShowForm(false); setEditingId(null); setForm(blank); setError(""); }
+
+  async function save() {
+    setError("");
+    const name = form.name.trim();
+    if (!name) { setError("Template name is required."); return; }
+    const questions = form.questions.map((q) => ({ text: q.text.trim(), type: q.type })).filter((q) => q.text);
+    if (!questions.length) { setError("Add at least one question."); return; }
+    const record = { name, questions, siteIds: form.siteIds };
+    if (editingId) {
+      const ok = await persistIncidentTemplates("update", { id: editingId, record });
+      if (ok) { showToast("Template updated."); cancel(); } else showToast("Couldn't save — try again.", "error");
+    } else {
+      const ok = await persistIncidentTemplates("add", { record: { ...record, id: makeIncidentTemplateId(), createdAt: new Date().toISOString() } });
+      if (ok) { showToast(`"${name}" created.`); cancel(); } else showToast("Couldn't create — try again.", "error");
+    }
+  }
+
+  function remove(t) {
+    showConfirm(`Delete "${t.name}"? This can't be undone.`, async () => {
+      const ok = await persistIncidentTemplates("remove", { id: t.id });
+      if (ok) { if (editingId === t.id) cancel(); showToast("Template deleted."); }
+      else showToast("Couldn't delete — try again.", "error");
+    });
+  }
+
+  function siteNames(siteIds) {
+    if (!siteIds?.length) return "Not assigned to any site yet";
+    const names = siteIds.map((id) => permanentPatrolSites.find((s) => s.id === id)?.name).filter(Boolean);
+    return names.length ? `Assigned to ${names.join(", ")}` : "Not assigned to any site yet";
+  }
+
+  return (
+    <div>
+      <div style={{ padding: "10px 14px", borderRadius: 8, background: "#FFFBEB", border: "1px solid var(--warn)", color: "#92400E", fontSize: 12, marginBottom: 18 }}>
+        Templates you create here are stored for real. Patrolmen can't see or submit them yet — that side isn't built, so this is build/management only for now.
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <SectionTitle icon={AlertTriangle} title="Your templates" small />
+        {!showForm && <button style={primaryBtn} onClick={startNew}><FileText size={14} /> New template</button>}
+      </div>
+
+      {incidentTemplates.length === 0 && !showForm && (
+        <div style={{ borderRadius: 10, border: "1px dashed var(--border)", padding: 30, color: "var(--text-dim)", fontSize: 12.5, textAlign: "center", marginBottom: 20 }}>
+          No templates yet — click "New template" to build your first one.
+        </div>
+      )}
+
+      {incidentTemplates.length > 0 && !showForm && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
+          {incidentTemplates.map((t) => (
+            <div key={t.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "12px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel)" }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13.5 }}>{t.name}</div>
+                <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 2 }}>
+                  {t.questions?.length || 0} question{(t.questions?.length || 0) === 1 ? "" : "s"} · {siteNames(t.siteIds)}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                <button style={{ ...secondaryBtn, padding: "7px 12px" }} onClick={() => startEdit(t)}>Edit</button>
+                <button style={{ ...secondaryBtn, padding: "7px 12px", color: "var(--breach)", borderColor: "var(--breach)" }} onClick={() => remove(t)}>Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showForm && (
+        <div style={{ maxWidth: 620 }}>
+          <SectionTitle icon={FileText} title={editingId ? "Edit template" : "New template"} small />
+          <Field label="Template name"><input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Night Lock-up Checklist" style={selectStyle} /></Field>
+
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-dim)", margin: "16px 0 8px" }}>Questions</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+            {form.questions.map((q, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  value={q.text}
+                  onChange={(e) => setQuestion(i, { text: e.target.value })}
+                  placeholder="e.g. Were all external doors locked?"
+                  style={{ ...selectStyle, flex: 1 }}
+                />
+                <select value={q.type} onChange={(e) => setQuestion(i, { type: e.target.value })} style={{ ...selectStyle, width: 150 }}>
+                  {INCIDENT_QUESTION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <button
+                  onClick={() => removeQuestion(i)}
+                  disabled={form.questions.length === 1}
+                  title="Remove question"
+                  style={{ background: "none", border: "none", color: form.questions.length === 1 ? "var(--text-dim)" : "var(--breach)", cursor: form.questions.length === 1 ? "default" : "pointer", padding: 6 }}
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <button style={{ ...secondaryBtn, marginBottom: 18 }} onClick={addQuestion}>+ Add question</button>
+
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-dim)", margin: "0 0 8px" }}>Assign to sites</div>
+          {permanentPatrolSites.length === 0 ? (
+            <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 18 }}>No Permanent Patrol Sites yet — add some first, then come back to assign this template.</div>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+              {permanentPatrolSites.map((s) => (
+                <label key={s.id} style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "6px 12px", borderRadius: 999, border: "1px solid var(--border)", background: form.siteIds.includes(s.id) ? "var(--accent-dim)" : "var(--panel)", fontSize: 12, cursor: "pointer" }}>
+                  <input type="checkbox" checked={form.siteIds.includes(s.id)} onChange={() => toggleSite(s.id)} />
+                  {s.name}
+                </label>
+              ))}
+            </div>
+          )}
+          <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 18 }}>Only patrolmen rostered to these sites will see this template, once that side is built.</div>
+
+          {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 12 }}>{error}</div>}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button style={secondaryBtn} onClick={cancel}>Cancel</button>
+            <button style={primaryBtn} onClick={save}>{editingId ? "Save changes" : "Create template"}</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
