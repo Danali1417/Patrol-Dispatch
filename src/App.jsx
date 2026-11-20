@@ -9192,7 +9192,9 @@ function PlaceSearchInput({ value, onChange, onPlaceSelected, placeholder, style
           border: "1px solid var(--border)",
           borderRadius: 6,
           background: "var(--panel-alt)",
-          overflow: "hidden",
+          // No overflow:hidden here — the suggestions dropdown renders as
+          // an overlay inside this same box, and clipping it was exactly
+          // why suggestions stopped appearing after the last styling pass.
         }}
       />
       {!widgetReady && <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={style} />}
