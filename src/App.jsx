@@ -8805,14 +8805,25 @@ function SiteGeofenceEditor({ initialGeofence, initialAddress, zoneAreas, onAppl
         editable: true, fillOpacity: 0.15, strokeColor: "#B45309", fillColor: "#B45309",
       });
 
+      // Wrapped defensively: a malformed region path here (e.g. from an
+      // old/degenerate drawing) used to throw uncaught and abort this
+      // whole setup before setReady(true) ever ran — leaving "Use this
+      // location" permanently disabled even though the map, pin and
+      // circle all rendered fine. A bad region suggestion should never
+      // be able to block actually using the map.
       function suggestRegionFor(pos) {
-        const point = new maps.LatLng(pos.lat(), pos.lng());
-        for (const za of zoneAreas) {
-          if (!za.path?.length) continue;
-          const polygon = new maps.Polygon({ paths: za.path });
-          if (maps.geometry.poly.containsLocation(point, polygon)) { setSuggestedRegion(za.zoneName); return; }
+        try {
+          const point = new maps.LatLng(pos.lat(), pos.lng());
+          for (const za of zoneAreas) {
+            if (!za.path?.length) continue;
+            const polygon = new maps.Polygon({ paths: za.path });
+            if (maps.geometry.poly.containsLocation(point, polygon)) { setSuggestedRegion(za.zoneName); return; }
+          }
+          setSuggestedRegion(null);
+        } catch (e) {
+          console.error("Region suggestion failed — leaving it unsuggested.", e);
+          setSuggestedRegion(null);
         }
-        setSuggestedRegion(null);
       }
 
       marker.addListener("drag", () => circle.setCenter(marker.getPosition()));
@@ -8821,8 +8832,8 @@ function SiteGeofenceEditor({ initialGeofence, initialAddress, zoneAreas, onAppl
       circle.addListener("radius_changed", () => setRadius(Math.round(circle.getRadius())));
       markerRef.current = marker;
       circleRef.current = circle;
-      suggestRegionFor(center);
       setReady(true);
+      suggestRegionFor(center);
     })();
     return () => { cancelled = true; };
   }, []);
