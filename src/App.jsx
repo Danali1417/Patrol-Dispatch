@@ -8628,7 +8628,8 @@ function RegionsManager({ zones, zoneAreas, persistZoneAreas, permanentPatrolSit
           <div style={{ flex: 1, minWidth: 0 }}>
             {selected ? (
               <>
-                <RegionAreaEditor zoneName={selected} zoneArea={area} persistZoneAreas={persistZoneAreas} />
+                {/* Keyed by region: the map is built once per editor, so each region gets its own fresh map with its own saved shape. */}
+                <RegionAreaEditor key={selected} zoneName={selected} zoneArea={area} persistZoneAreas={persistZoneAreas} />
                 <div style={{ marginTop: 22 }}>
                   <SectionTitle icon={MapPin} title={`Sites in "${selected}"`} small />
                   {sitesInRegion.length === 0 ? (
