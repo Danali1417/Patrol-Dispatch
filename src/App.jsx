@@ -9111,6 +9111,34 @@ function PermanentPatrolSitesImport({ zoneAreas, permanentPatrolSites, persistPe
   );
 }
 
+// Address suggestions as you type, via the Google Maps Places widget —
+// same Google Maps API key/loader as the Regions map and the geofence
+// pin (see googleMaps.js), just attached to a plain text input instead
+// of a map canvas. Falls back to a normal text field with no suggestions
+// if Maps fails to load (missing/invalid key, network issue, etc.) —
+// never blocks typing an address by hand.
+function AddressAutocompleteInput({ value, onChange, placeholder, style }) {
+  const inputRef = useRef(null);
+  const autocompleteRef = useRef(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  useEffect(() => {
+    let cancelled = false;
+    loadGoogleMaps().then((maps) => {
+      if (cancelled || !inputRef.current || !maps.places) return;
+      autocompleteRef.current = new maps.places.Autocomplete(inputRef.current, { fields: ["formatted_address"] });
+      autocompleteRef.current.addListener("place_changed", () => {
+        const place = autocompleteRef.current.getPlace();
+        if (place?.formatted_address) onChangeRef.current(place.formatted_address);
+      });
+    }).catch(() => {}); // no suggestions available — the plain input below still works
+    return () => { cancelled = true; };
+  }, []);
+
+  return <input ref={inputRef} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={style} />;
+}
+
 function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, persistPermanentPatrolSites }) {
   const blank = { customer: "", name: "", address: "", notes: "", region: "", geofence: null, schedule: null };
   const [form, setForm] = useState(blank);
@@ -9171,7 +9199,7 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
           <Field label="Customer" style={{ flex: 1 }}><input value={form.customer} onChange={(e) => set("customer", e.target.value)} style={selectStyle} /></Field>
           <Field label="Site name" style={{ flex: 1 }}><input value={form.name} onChange={(e) => set("name", e.target.value)} style={selectStyle} /></Field>
         </div>
-        <Field label="Address"><input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, suburb, state" style={selectStyle} /></Field>
+        <Field label="Address"><AddressAutocompleteInput value={form.address} onChange={(v) => set("address", v)} placeholder="Street, suburb, state" style={selectStyle} /></Field>
         <Field label="Region">
           <select value={form.region} onChange={(e) => set("region", e.target.value)} style={selectStyle}>
             <option value="">— none —</option>

@@ -29,8 +29,12 @@ export function loadGoogleMaps() {
     // Permanent Patrol Site's pin falls inside. Region polygons are drawn
     // by hand (click-to-place-point — see RegionAreaEditor) rather than
     // via the Drawing library, which Google removed the DrawingManager
-    // from as of Maps JS API v3.65.
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=geometry`;
+    // from as of Maps JS API v3.65. "places" backs the address-autocomplete
+    // suggestions on the Permanent Patrol Site address field (see
+    // AddressAutocompleteInput) — the classic places.Autocomplete widget
+    // is deprecated as of March 2025 but, unlike Drawing, Google says it
+    // keeps receiving bug fixes rather than being removed outright.
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&libraries=geometry,places`;
     script.async = true;
     script.dataset.googleMapsLoader = "1";
     script.onload = () => resolve(window.google.maps);
