@@ -6685,7 +6685,7 @@ function ControlRoomShell(props) {
           </div>
         </div>
 
-        <div style={{ padding: 20, maxWidth: 1180, margin: "0 auto" }}>
+        <div style={{ padding: 20 }}>
           {tab === "dashboard" && <ControlRoomDashboard jobs={jobs} onNavigate={setTab} />}
           {tab === "schedule" && (
             <ControlRoomSchedulePreview
