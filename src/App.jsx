@@ -8857,20 +8857,39 @@ const PATROL_WEEKDAYS = [
   { key: "mon", label: "Mon" }, { key: "tue", label: "Tue" }, { key: "wed", label: "Wed" },
   { key: "thu", label: "Thu" }, { key: "fri", label: "Fri" }, { key: "sat", label: "Sat" }, { key: "sun", label: "Sun" },
 ];
-const BLANK_DAY_SCHEDULE = { enabled: false, patrols: 1, anytime: true, start: "", end: "" };
+// A day's schedule is a list of visits rather than one shared count/window,
+// so a single day can mix types (a lockup and a regular patrol) and so
+// several specific-time patrols each get their own time instead of
+// sharing one window. type is "patrol" | "lockup" | "escort":
+//   - patrol, mode "anytime": count patrols sometime within start–end
+//     (both left blank = no window at all, fully unconstrained)
+//   - patrol, mode "specific": one patrol at the exact time in `time`
+//   - escort: always one exact time in `time` — an escort is a single
+//     moment, never "any time"
+//   - lockup: always both lockTime and unlockTime — one lock/unlock cycle
+const BLANK_VISIT = { type: "patrol", mode: "anytime", count: 1, start: "", end: "", time: "", lockTime: "", unlockTime: "" };
+const BLANK_DAY_SCHEDULE = { enabled: false, visits: [{ ...BLANK_VISIT }] };
+
+function visitSummaryText(v) {
+  if (v.type === "lockup") return `Lock-up ${v.lockTime || "?"}→${v.unlockTime || "?"}`;
+  if (v.type === "escort") return `Escort ${v.time || "?"}`;
+  if (v.mode === "specific") return `Patrol ${v.time || "?"}`;
+  const count = v.count || 1;
+  return v.start && v.end ? `${count} patrol${count > 1 ? "s" : ""} (${v.start}–${v.end})` : `${count} patrol${count > 1 ? "s" : ""}, any time`;
+}
 
 // One line standing in for a site's whole weekly schedule — shows the
-// days it's active and the first active day's pattern as a representative
-// sample; the editor itself (PatrolScheduleEditor) is where every day's
-// own count/window actually shows.
+// days it's active and the first active day's first visit as a
+// representative sample; the editor itself (PatrolScheduleEditor) is
+// where every day's own visits actually show.
 function scheduleSummaryText(record) {
   if (!record?.schedule) return "No schedule set";
   const active = PATROL_WEEKDAYS.filter(({ key }) => record.schedule[key]?.enabled);
   if (!active.length) return "No days scheduled";
   const days = active.map((d) => d.label).join(",");
-  const sample = record.schedule[active[0].key];
-  const timePart = sample.anytime ? "any time" : `${sample.start || "?"}–${sample.end || "?"}`;
-  return `${days} · ${sample.patrols}/day · ${timePart}`;
+  const visits = record.schedule[active[0].key]?.visits || [];
+  const sample = visits.length ? visitSummaryText(visits[0]) : "no visits set";
+  return `${days} · ${sample}${visits.length > 1 ? ` +${visits.length - 1} more` : ""}`;
 }
 
 // Same local/no-persistence contract as SiteGeofenceEditor above — just
@@ -8878,37 +8897,89 @@ function scheduleSummaryText(record) {
 function PatrolScheduleEditor({ initialSchedule, onApply }) {
   const [schedule, setSchedule] = useState(() => {
     const s = {};
-    PATROL_WEEKDAYS.forEach(({ key }) => { s[key] = { ...BLANK_DAY_SCHEDULE, ...(initialSchedule?.[key] || {}) }; });
+    PATROL_WEEKDAYS.forEach(({ key }) => {
+      const existing = initialSchedule?.[key];
+      const visits = existing?.visits?.length ? existing.visits.map((v) => ({ ...BLANK_VISIT, ...v })) : [{ ...BLANK_VISIT }];
+      s[key] = { enabled: !!existing?.enabled, visits };
+    });
     return s;
   });
 
   function setDay(key, patch) { setSchedule((s) => ({ ...s, [key]: { ...s[key], ...patch } })); }
+  function setVisit(key, i, patch) {
+    setSchedule((s) => ({ ...s, [key]: { ...s[key], visits: s[key].visits.map((v, idx) => (idx === i ? { ...v, ...patch } : v)) } }));
+  }
+  function addVisit(key) { setSchedule((s) => ({ ...s, [key]: { ...s[key], visits: [...s[key].visits, { ...BLANK_VISIT }] } })); }
+  function removeVisit(key, i) { setSchedule((s) => ({ ...s, [key]: { ...s[key], visits: s[key].visits.filter((_, idx) => idx !== i) } })); }
+
+  const toggleBtnStyle = (on) => ({
+    padding: "6px 10px", fontSize: 11.5, fontWeight: 600, border: "none", cursor: "pointer",
+    background: on ? "var(--navy)" : "var(--panel)", color: on ? "#fff" : "var(--text)",
+  });
 
   return (
     <div>
       {PATROL_WEEKDAYS.map(({ key, label }) => {
         const d = schedule[key];
         return (
-          <div key={key} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
-            <label style={{ width: 66, display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600 }}>
+          <div key={key} style={{ padding: "9px 0", borderBottom: "1px solid var(--border)" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600, marginBottom: d.enabled ? 8 : 0 }}>
               <input type="checkbox" checked={d.enabled} onChange={(e) => setDay(key, { enabled: e.target.checked })} /> {label}
             </label>
             {d.enabled && (
-              <>
-                <select value={d.patrols} onChange={(e) => setDay(key, { patrols: Number(e.target.value) })} style={{ ...selectStyle, width: 130 }}>
-                  {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n} patrol{n > 1 ? "s" : ""}/day</option>)}
-                </select>
-                <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12 }}>
-                  <input type="checkbox" checked={d.anytime} onChange={(e) => setDay(key, { anytime: e.target.checked })} /> Any time
-                </label>
-                {!d.anytime && (
-                  <>
-                    <input type="time" value={d.start} onChange={(e) => setDay(key, { start: e.target.value })} style={{ ...selectStyle, width: 110 }} />
-                    <span style={{ fontSize: 12, color: "var(--text-dim)" }}>to</span>
-                    <input type="time" value={d.end} onChange={(e) => setDay(key, { end: e.target.value })} style={{ ...selectStyle, width: 110 }} />
-                  </>
-                )}
-              </>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 20 }}>
+                {d.visits.map((v, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <select value={v.type} onChange={(e) => setVisit(key, i, { type: e.target.value })} style={{ ...selectStyle, width: 110 }}>
+                      <option value="patrol">Patrol</option>
+                      <option value="lockup">Lock-up</option>
+                      <option value="escort">Escort</option>
+                    </select>
+
+                    {v.type === "patrol" && (
+                      <>
+                        <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 7, overflow: "hidden" }}>
+                          <button type="button" onClick={() => setVisit(key, i, { mode: "anytime" })} style={toggleBtnStyle(v.mode === "anytime")}>Any time</button>
+                          <button type="button" onClick={() => setVisit(key, i, { mode: "specific" })} style={toggleBtnStyle(v.mode === "specific")}>Specific time</button>
+                        </div>
+                        {v.mode === "anytime" ? (
+                          <>
+                            <select value={v.count} onChange={(e) => setVisit(key, i, { count: Number(e.target.value) })} style={{ ...selectStyle, width: 120 }}>
+                              {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n} patrol{n > 1 ? "s" : ""}</option>)}
+                            </select>
+                            <input type="time" value={v.start} onChange={(e) => setVisit(key, i, { start: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                            <span style={{ fontSize: 12, color: "var(--text-dim)" }}>to</span>
+                            <input type="time" value={v.end} onChange={(e) => setVisit(key, i, { end: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                          </>
+                        ) : (
+                          <input type="time" value={v.time} onChange={(e) => setVisit(key, i, { time: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                        )}
+                      </>
+                    )}
+
+                    {v.type === "lockup" && (
+                      <>
+                        <span style={{ fontSize: 12, color: "var(--text-dim)" }}>Lock</span>
+                        <input type="time" value={v.lockTime} onChange={(e) => setVisit(key, i, { lockTime: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                        <span style={{ fontSize: 12, color: "var(--text-dim)" }}>Unlock</span>
+                        <input type="time" value={v.unlockTime} onChange={(e) => setVisit(key, i, { unlockTime: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                      </>
+                    )}
+
+                    {v.type === "escort" && (
+                      <>
+                        <span style={{ fontSize: 12, color: "var(--text-dim)" }}>Time</span>
+                        <input type="time" value={v.time} onChange={(e) => setVisit(key, i, { time: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                      </>
+                    )}
+
+                    <button type="button" onClick={() => removeVisit(key, i)} disabled={d.visits.length === 1} title="Remove this visit" style={{ background: "none", border: "none", color: d.visits.length === 1 ? "var(--text-dim)" : "var(--breach)", cursor: d.visits.length === 1 ? "default" : "pointer", padding: 4 }}>
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+                <button type="button" onClick={() => addVisit(key)} style={{ ...secondaryBtn, alignSelf: "flex-start", padding: "6px 10px", fontSize: 11.5 }}>+ Add visit</button>
+              </div>
             )}
           </div>
         );
@@ -8976,15 +9047,14 @@ function parseDaysCell(text) {
 function buildScheduleFromRow(get) {
   const days = parseDaysCell(get("days"));
   if (!days.length) return null;
-  const patrols = Math.max(1, Math.min(6, Number(get("patrolsPerDay")) || 1));
+  const count = Math.max(1, Math.min(6, Number(get("patrolsPerDay")) || 1));
   const timeFrom = get("timeFrom");
   const timeTo = get("timeTo");
-  const anytime = !timeFrom || !timeTo;
+  const hasWindow = !!(timeFrom && timeTo);
+  const visit = { ...BLANK_VISIT, type: "patrol", mode: "anytime", count, start: hasWindow ? timeFrom : "", end: hasWindow ? timeTo : "" };
   const schedule = {};
   PATROL_WEEKDAYS.forEach(({ key }) => {
-    schedule[key] = days.includes(key)
-      ? { enabled: true, patrols, anytime, start: anytime ? "" : timeFrom, end: anytime ? "" : timeTo }
-      : { ...BLANK_DAY_SCHEDULE };
+    schedule[key] = days.includes(key) ? { enabled: true, visits: [{ ...visit }] } : { ...BLANK_DAY_SCHEDULE };
   });
   return schedule;
 }
