@@ -8923,6 +8923,30 @@ function PatrolScheduleEditor({ initialSchedule, onApply }) {
   function addVisit(key) { setSchedule((s) => ({ ...s, [key]: { ...s[key], visits: [...s[key].visits, { ...BLANK_VISIT }] } })); }
   function removeVisit(key, i) { setSchedule((s) => ({ ...s, [key]: { ...s[key], visits: s[key].visits.filter((_, idx) => idx !== i) } })); }
 
+  // Most sites run the same pattern every day (or every day except
+  // weekends) — building that out 7 times by hand is exactly the
+  // friction this is for. Build one day, then push its exact visits
+  // onto any other days in one click.
+  const [copyFromKey, setCopyFromKey] = useState(null);
+  const [copyTargets, setCopyTargets] = useState([]);
+  const otherDayKeys = PATROL_WEEKDAYS.map((d) => d.key).filter((k) => k !== copyFromKey);
+
+  function openCopyPanel(key) { setCopyFromKey(key); setCopyTargets([]); }
+  function closeCopyPanel() { setCopyFromKey(null); setCopyTargets([]); }
+  function toggleCopyTarget(key) {
+    setCopyTargets((t) => (t.includes(key) ? t.filter((k) => k !== key) : [...t, key]));
+  }
+  function applyCopy() {
+    setSchedule((s) => {
+      const next = { ...s };
+      copyTargets.forEach((key) => {
+        next[key] = { enabled: true, visits: s[copyFromKey].visits.map((v) => ({ ...v })) };
+      });
+      return next;
+    });
+    closeCopyPanel();
+  }
+
   const toggleBtnStyle = (on) => ({
     padding: "6px 10px", fontSize: 11.5, fontWeight: 600, border: "none", cursor: "pointer",
     background: on ? "var(--navy)" : "var(--panel)", color: on ? "#fff" : "var(--text)",
@@ -8989,7 +9013,34 @@ function PatrolScheduleEditor({ initialSchedule, onApply }) {
                     </button>
                   </div>
                 ))}
-                <button type="button" onClick={() => addVisit(key)} style={{ ...secondaryBtn, alignSelf: "flex-start", padding: "6px 10px", fontSize: 11.5 }}>+ Add visit</button>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button type="button" onClick={() => addVisit(key)} style={{ ...secondaryBtn, padding: "6px 10px", fontSize: 11.5 }}>+ Add visit</button>
+                  <button type="button" onClick={() => (copyFromKey === key ? closeCopyPanel() : openCopyPanel(key))} style={{ ...secondaryBtn, padding: "6px 10px", fontSize: 11.5 }}>
+                    <Copy size={12} /> Copy to other days
+                  </button>
+                </div>
+
+                {copyFromKey === key && (
+                  <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10, background: "var(--panel-alt)", maxWidth: 420 }}>
+                    <div style={{ fontSize: 11.5, fontWeight: 600, marginBottom: 8 }}>Copy {label}'s visits to:</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+                      {otherDayKeys.map((k) => {
+                        const dLabel = PATROL_WEEKDAYS.find((d) => d.key === k)?.label;
+                        const checked = copyTargets.includes(k);
+                        return (
+                          <label key={k} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 9px", borderRadius: 999, border: "1px solid var(--border)", background: checked ? "var(--accent-dim)" : "var(--panel)", fontSize: 11.5, cursor: "pointer" }}>
+                            <input type="checkbox" checked={checked} onChange={() => toggleCopyTarget(k)} /> {dLabel}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button type="button" onClick={() => setCopyTargets(otherDayKeys)} style={{ ...secondaryBtn, padding: "5px 10px", fontSize: 11 }}>Select all</button>
+                      <button type="button" onClick={closeCopyPanel} style={{ ...secondaryBtn, padding: "5px 10px", fontSize: 11 }}>Cancel</button>
+                      <button type="button" onClick={applyCopy} disabled={!copyTargets.length} style={{ ...primaryBtn, padding: "5px 10px", fontSize: 11, opacity: copyTargets.length ? 1 : 0.5 }}>Apply</button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
