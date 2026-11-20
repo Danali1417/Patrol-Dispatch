@@ -9046,9 +9046,12 @@ function PatrolScheduleEditor({ initialSchedule, onApply }) {
                             <select value={v.count} onChange={(e) => setVisit(key, i, { count: Number(e.target.value) })} style={{ ...selectStyle, width: 120 }}>
                               {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n} patrol{n > 1 ? "s" : ""}</option>)}
                             </select>
-                            <input type="time" value={v.start} onChange={(e) => setVisit(key, i, { start: e.target.value })} style={{ ...selectStyle, width: 105 }} />
-                            <span style={{ fontSize: 12, color: "var(--text-dim)" }}>to</span>
-                            <input type="time" value={v.end} onChange={(e) => setVisit(key, i, { end: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                            {/* From and to stay together on one row. */}
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+                              <input type="time" value={v.start} onChange={(e) => setVisit(key, i, { start: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                              <span style={{ fontSize: 12, color: "var(--text-dim)" }}>to</span>
+                              <input type="time" value={v.end} onChange={(e) => setVisit(key, i, { end: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                            </span>
                           </>
                         ) : (
                           <input type="time" value={v.time} onChange={(e) => setVisit(key, i, { time: e.target.value })} style={{ ...selectStyle, width: 105 }} />
@@ -9066,9 +9069,12 @@ function PatrolScheduleEditor({ initialSchedule, onApply }) {
                         </div>
                         {v.mode === "window" ? (
                           <>
-                            <input type="time" value={v.start} onChange={(e) => setVisit(key, i, { start: e.target.value })} style={{ ...selectStyle, width: 105 }} />
-                            <span style={{ fontSize: 12, color: "var(--text-dim)" }}>to</span>
-                            <input type="time" value={v.end} onChange={(e) => setVisit(key, i, { end: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                            {/* From and to stay together on one row. */}
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+                              <input type="time" value={v.start} onChange={(e) => setVisit(key, i, { start: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                              <span style={{ fontSize: 12, color: "var(--text-dim)" }}>to</span>
+                              <input type="time" value={v.end} onChange={(e) => setVisit(key, i, { end: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                            </span>
                           </>
                         ) : (
                           <input type="time" value={v.time} onChange={(e) => setVisit(key, i, { time: e.target.value })} style={{ ...selectStyle, width: 105 }} />
