@@ -77,6 +77,12 @@ const ZONE_AREAS_KEY = "ops:zoneAreas";
 // and writes today. Two different kinds of "site" with different
 // lifecycles, not one list wearing two hats.
 const PERMANENT_PATROL_SITES_KEY = "ops:permanentPatrolSites";
+// Custom incident report templates (Control Room pilot, Dan-only, same
+// reasoning as PERMANENT_PATROL_SITES_KEY above) — each one is a name, a
+// list of questions (text + answer type), and the permanent patrol site
+// ids it's assigned to. Nothing patrolman-facing reads this yet; this is
+// just the build/manage side.
+const INCIDENT_TEMPLATES_KEY = "ops:incidentTemplates";
 const ROSTER_KEY = "ops:roster";
 const LOGO_KEY = "ops:logo";
 const COMPANY_NAME_KEY = "ops:companyName";
@@ -200,6 +206,17 @@ function applyPermanentPatrolSitesOpLocal(current, op, payload) {
   switch (op) {
     case "add": return [...current, payload.record];
     case "addMany": return [...current, ...payload.records];
+    case "update": return current.map((r) => (r.id === payload.id ? { ...payload.record, id: payload.id } : r));
+    case "remove": return current.filter((r) => r.id !== payload.id);
+    default: return current;
+  }
+}
+
+// Same idea again, for Incident Templates — mirrors applyIncidentTemplatesOp
+// in api/kv.js.
+function applyIncidentTemplatesOpLocal(current, op, payload) {
+  switch (op) {
+    case "add": return [...current, payload.record];
     case "update": return current.map((r) => (r.id === payload.id ? { ...payload.record, id: payload.id } : r));
     case "remove": return current.filter((r) => r.id !== payload.id);
     default: return current;
@@ -751,6 +768,7 @@ export default function SentrylinePrototype() {
   const [runSheets, setRunSheets] = useState([]);
   const [zoneAreas, setZoneAreas] = useState([]);
   const [permanentPatrolSites, setPermanentPatrolSites] = useState([]);
+  const [incidentTemplates, setIncidentTemplates] = useState([]);
   const [roster, setRoster] = useState([]);
   const [outcomePhrases, setOutcomePhrases] = useState([]);
   const [monitoringCompanies, setMonitoringCompanies] = useState([]);
@@ -1024,6 +1042,14 @@ export default function SentrylinePrototype() {
         if (!isMissingKeyError(e)) console.error("Failed to load permanent patrol sites.", e);
       }
     })();
+    (async () => {
+      try {
+        const res = await window.storage.get(INCIDENT_TEMPLATES_KEY);
+        setIncidentTemplates(res?.value ? JSON.parse(res.value) : []);
+      } catch (e) {
+        if (!isMissingKeyError(e)) console.error("Failed to load incident templates.", e);
+      }
+    })();
   }, [session]);
 
   // Load or seed public holidays (used by slaWindowMinutes' weekend/
@@ -1276,6 +1302,19 @@ export default function SentrylinePrototype() {
     }
   }, []);
 
+  // Same op-based pattern as persistRunSheets above.
+  const persistIncidentTemplates = useCallback(async (op, payload) => {
+    setIncidentTemplates((prev) => applyIncidentTemplatesOpLocal(prev, op, payload));
+    try {
+      const res = await window.storage.applyOp(INCIDENT_TEMPLATES_KEY, op, payload);
+      setIncidentTemplates(JSON.parse(res.value));
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
+  }, []);
+
   // Same op-based, read-fresh-then-write pattern as persistSites below —
   // this used to be a blind full-array overwrite, the same class of bug
   // fixed there. A patrolman's roster entry for today going missing (only
@@ -1507,7 +1546,7 @@ export default function SentrylinePrototype() {
           {!accountsLoaded || !sitesLoaded ? (
             <div style={{ padding: 40, color: "var(--text-dim)" }}>Loading dispatch board…</div>
           ) : session.role === "manager" ? (
-            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} runSheets={runSheets} persistRunSheets={persistRunSheets} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
+            <ManagerView session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} runSheets={runSheets} persistRunSheets={persistRunSheets} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} incidentTemplates={incidentTemplates} persistIncidentTemplates={persistIncidentTemplates} roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} jobs={jobs} persistJobs={persistJobs} now={now} />
           ) : session.role === "operator" ? (
             <OperatorView session={session} jobs={jobs} accounts={accounts} sites={sites} persistSites={persistSites} zones={zones} roster={roster} persistRoster={persistRoster} persist={persistJobs} now={now} companyName={companyName} logoUrl={logoUrl} monitoringCompanies={monitoringCompanies} bureaus={bureaus} />
           ) : session.role === "provider" ? (
@@ -6449,7 +6488,7 @@ function JobDetailProvider({ job, jobs, session, persist, now, onBack }) {
    MANAGER VIEW — create & manage logins
 ---------------------------------------------------------------- */
 
-function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, responseRate, persistResponseRate, bureauRates, persistBureauRates, monitoringRates, persistMonitoringRates, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
+function ManagerView({ session, accounts, setAccounts, zones, persistZones, sites, persistSites, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, incidentTemplates, persistIncidentTemplates, roster, persistRoster, outcomePhrases, persistOutcomePhrases, monitoringCompanies, persistMonitoringCompanies, bureaus, persistBureaus, responseRate, persistResponseRate, bureauRates, persistBureauRates, monitoringRates, persistMonitoringRates, publicHolidays, persistPublicHolidays, logoUrl, persistLogo, companyName, persistCompanyName, jobs, persistJobs, now }) {
   const showConfirm = useConfirm();
   const showToast = useToast();
 
@@ -6476,6 +6515,7 @@ function ManagerView({ session, accounts, setAccounts, zones, persistZones, site
       session={session} accounts={accounts} setAccounts={setAccounts} zones={zones} persistZones={persistZones}
       sites={sites} persistSites={persistSites} runSheets={runSheets} persistRunSheets={persistRunSheets}
       zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites}
+      incidentTemplates={incidentTemplates} persistIncidentTemplates={persistIncidentTemplates}
       roster={roster} persistRoster={persistRoster} outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases}
       monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus}
       responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates}
@@ -6552,7 +6592,7 @@ function ManagerClassicTools({ session, accounts, setAccounts, zones, persistZon
 // so nothing Dan could do before is unreachable now, it's just not the
 // default view any more.
 function ControlRoomShell(props) {
-  const { session, accounts, setAccounts, zones, sites, persistSites, roster, persistRoster, companyName, logoUrl, now, jobs, persistJobs, onResetJobs, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, runSheets, persistRunSheets, publicHolidays, persistPublicHolidays, monitoringCompanies, bureaus, responseRate, bureauRates, monitoringRates } = props;
+  const { session, accounts, setAccounts, zones, sites, persistSites, roster, persistRoster, companyName, logoUrl, now, jobs, persistJobs, onResetJobs, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, incidentTemplates, persistIncidentTemplates, runSheets, persistRunSheets, publicHolidays, persistPublicHolidays, monitoringCompanies, bureaus, responseRate, bureauRates, monitoringRates } = props;
   const [tab, setTab] = useState("dashboard");
   const patrolmen = accounts.filter((a) => a.role === "patrolman");
   const providers = accounts.filter((a) => a.role === "provider");
@@ -6630,7 +6670,13 @@ function ControlRoomShell(props) {
               responseRate={responseRate} bureauRates={bureauRates} monitoringRates={monitoringRates}
             />
           )}
-          {tab === "incident" && <ControlRoomIncidentPreview />}
+          {tab === "incident" && (
+            <ControlRoomIncidentManager
+              incidentTemplates={incidentTemplates}
+              persistIncidentTemplates={persistIncidentTemplates}
+              permanentPatrolSites={permanentPatrolSites}
+            />
+          )}
           {tab === "staff" && (
             <ControlRoomStaff accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={props.persistLogo} companyName={companyName} persistCompanyName={props.persistCompanyName} />
           )}
@@ -6896,10 +6942,166 @@ function ControlRoomStaff({ accounts, setAccounts, zones, session, logoUrl, pers
   );
 }
 
-function ControlRoomIncidentPreview() {
+function makeIncidentTemplateId() {
+  return `tpl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+const INCIDENT_QUESTION_TYPES = ["Yes / No", "Text answer", "Photo", "Multiple choice"];
+const BLANK_INCIDENT_QUESTION = { text: "", type: INCIDENT_QUESTION_TYPES[0] };
+
+// Build and manage custom incident report templates — real storage (see
+// INCIDENT_TEMPLATES_KEY), Dan-only for now like the rest of this pilot.
+// Nothing patrolman-facing reads these yet: this is the build/manage side
+// only, same deliberate scoping as the rest of this Control Room pilot —
+// no changes to the real patrolman app.
+function ControlRoomIncidentManager({ incidentTemplates, persistIncidentTemplates, permanentPatrolSites }) {
+  const blank = { name: "", questions: [{ ...BLANK_INCIDENT_QUESTION }], siteIds: [] };
+  const [form, setForm] = useState(blank);
+  const [editingId, setEditingId] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [error, setError] = useState("");
+  const showToast = useToast();
+  const showConfirm = useConfirm();
+
+  function set(field, value) { setForm((f) => ({ ...f, [field]: value })); }
+
+  function setQuestion(i, patch) {
+    setForm((f) => ({ ...f, questions: f.questions.map((q, idx) => (idx === i ? { ...q, ...patch } : q)) }));
+  }
+  function addQuestion() { setForm((f) => ({ ...f, questions: [...f.questions, { ...BLANK_INCIDENT_QUESTION }] })); }
+  function removeQuestion(i) { setForm((f) => ({ ...f, questions: f.questions.filter((_, idx) => idx !== i) })); }
+  function toggleSite(id) {
+    setForm((f) => ({ ...f, siteIds: f.siteIds.includes(id) ? f.siteIds.filter((x) => x !== id) : [...f.siteIds, id] }));
+  }
+
+  function startNew() { setEditingId(null); setForm(blank); setError(""); setShowForm(true); }
+  function startEdit(t) {
+    setEditingId(t.id);
+    setForm({ name: t.name || "", questions: t.questions?.length ? t.questions : [{ ...BLANK_INCIDENT_QUESTION }], siteIds: t.siteIds || [] });
+    setError("");
+    setShowForm(true);
+  }
+  function cancel() { setShowForm(false); setEditingId(null); setForm(blank); setError(""); }
+
+  async function save() {
+    setError("");
+    const name = form.name.trim();
+    if (!name) { setError("Template name is required."); return; }
+    const questions = form.questions.map((q) => ({ text: q.text.trim(), type: q.type })).filter((q) => q.text);
+    if (!questions.length) { setError("Add at least one question."); return; }
+    const record = { name, questions, siteIds: form.siteIds };
+    if (editingId) {
+      const ok = await persistIncidentTemplates("update", { id: editingId, record });
+      if (ok) { showToast("Template updated."); cancel(); } else showToast("Couldn't save — try again.", "error");
+    } else {
+      const ok = await persistIncidentTemplates("add", { record: { ...record, id: makeIncidentTemplateId(), createdAt: new Date().toISOString() } });
+      if (ok) { showToast(`"${name}" created.`); cancel(); } else showToast("Couldn't create — try again.", "error");
+    }
+  }
+
+  function remove(t) {
+    showConfirm(`Delete "${t.name}"? This can't be undone.`, async () => {
+      const ok = await persistIncidentTemplates("remove", { id: t.id });
+      if (ok) { if (editingId === t.id) cancel(); showToast("Template deleted."); }
+      else showToast("Couldn't delete — try again.", "error");
+    });
+  }
+
+  function siteNames(siteIds) {
+    if (!siteIds?.length) return "Not assigned to any site yet";
+    const names = siteIds.map((id) => permanentPatrolSites.find((s) => s.id === id)?.name).filter(Boolean);
+    return names.length ? `Assigned to ${names.join(", ")}` : "Not assigned to any site yet";
+  }
+
   return (
-    <div style={{ borderRadius: 10, border: "1px dashed var(--border)", padding: 36, color: "var(--text-dim)", fontSize: 12.5, textAlign: "center" }}>
-      Preview — custom incident report templates (built by you, assigned to specific patrol sites, visible only to the patrolmen on them) aren't built yet. This tab is a placeholder for that.
+    <div>
+      <div style={{ padding: "10px 14px", borderRadius: 8, background: "#FFFBEB", border: "1px solid var(--warn)", color: "#92400E", fontSize: 12, marginBottom: 18 }}>
+        Templates you create here are stored for real. Patrolmen can't see or submit them yet — that side isn't built, so this is build/management only for now.
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <SectionTitle icon={AlertTriangle} title="Your templates" small />
+        {!showForm && <button style={primaryBtn} onClick={startNew}><FileText size={14} /> New template</button>}
+      </div>
+
+      {incidentTemplates.length === 0 && !showForm && (
+        <div style={{ borderRadius: 10, border: "1px dashed var(--border)", padding: 30, color: "var(--text-dim)", fontSize: 12.5, textAlign: "center", marginBottom: 20 }}>
+          No templates yet — click "New template" to build your first one.
+        </div>
+      )}
+
+      {incidentTemplates.length > 0 && !showForm && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
+          {incidentTemplates.map((t) => (
+            <div key={t.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "12px 14px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel)" }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13.5 }}>{t.name}</div>
+                <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 2 }}>
+                  {t.questions?.length || 0} question{(t.questions?.length || 0) === 1 ? "" : "s"} · {siteNames(t.siteIds)}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                <button style={{ ...secondaryBtn, padding: "7px 12px" }} onClick={() => startEdit(t)}>Edit</button>
+                <button style={{ ...secondaryBtn, padding: "7px 12px", color: "var(--breach)", borderColor: "var(--breach)" }} onClick={() => remove(t)}>Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showForm && (
+        <div style={{ maxWidth: 620 }}>
+          <SectionTitle icon={FileText} title={editingId ? "Edit template" : "New template"} small />
+          <Field label="Template name"><input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Night Lock-up Checklist" style={selectStyle} /></Field>
+
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-dim)", margin: "16px 0 8px" }}>Questions</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+            {form.questions.map((q, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  value={q.text}
+                  onChange={(e) => setQuestion(i, { text: e.target.value })}
+                  placeholder="e.g. Were all external doors locked?"
+                  style={{ ...selectStyle, flex: 1 }}
+                />
+                <select value={q.type} onChange={(e) => setQuestion(i, { type: e.target.value })} style={{ ...selectStyle, width: 150 }}>
+                  {INCIDENT_QUESTION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <button
+                  onClick={() => removeQuestion(i)}
+                  disabled={form.questions.length === 1}
+                  title="Remove question"
+                  style={{ background: "none", border: "none", color: form.questions.length === 1 ? "var(--text-dim)" : "var(--breach)", cursor: form.questions.length === 1 ? "default" : "pointer", padding: 6 }}
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
+          <button style={{ ...secondaryBtn, marginBottom: 18 }} onClick={addQuestion}>+ Add question</button>
+
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-dim)", margin: "0 0 8px" }}>Assign to sites</div>
+          {permanentPatrolSites.length === 0 ? (
+            <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 18 }}>No Permanent Patrol Sites yet — add some first, then come back to assign this template.</div>
+          ) : (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+              {permanentPatrolSites.map((s) => (
+                <label key={s.id} style={{ display: "inline-flex", alignItems: "center", gap: 7, padding: "6px 12px", borderRadius: 999, border: "1px solid var(--border)", background: form.siteIds.includes(s.id) ? "var(--accent-dim)" : "var(--panel)", fontSize: 12, cursor: "pointer" }}>
+                  <input type="checkbox" checked={form.siteIds.includes(s.id)} onChange={() => toggleSite(s.id)} />
+                  {s.name}
+                </label>
+              ))}
+            </div>
+          )}
+          <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginBottom: 18 }}>Only patrolmen rostered to these sites will see this template, once that side is built.</div>
+
+          {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 12 }}>{error}</div>}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button style={secondaryBtn} onClick={cancel}>Cancel</button>
+            <button style={primaryBtn} onClick={save}>{editingId ? "Save changes" : "Create template"}</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

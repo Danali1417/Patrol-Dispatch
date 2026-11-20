@@ -20,6 +20,7 @@ import { createUploadUrl, createReadUrl } from "./_lib/storage.js";
 const RUN_SHEETS_KEY = "ops:runSheets";
 const ZONE_AREAS_KEY = "ops:zoneAreas";
 const PERMANENT_PATROL_SITES_KEY = "ops:permanentPatrolSites";
+const INCIDENT_TEMPLATES_KEY = "ops:incidentTemplates";
 
 // Patrol Ops (Regions, Patrol Sites, Run Sheets) is a private pilot for
 // one manager login right now, not every manager — mirrors the client's
@@ -101,14 +102,39 @@ function applyPermanentPatrolSitesOp(current, op, payload) {
   }
 }
 
+// Full records again — an Incident Template (name, questions, the
+// permanent patrol site ids it's assigned to) is its own entity. Nothing
+// patrolman-facing reads this yet; this is the build/manage side only.
+function applyIncidentTemplatesOp(current, op, payload) {
+  switch (op) {
+    case "add": {
+      const record = payload?.record;
+      if (!record || !record.id) throw new Error("record is required");
+      return [...current, record];
+    }
+    case "update": {
+      const { id, record } = payload || {};
+      if (!id || !record) throw new Error("id and record are required");
+      return current.map((r) => (r.id === id ? { ...record, id } : r));
+    }
+    case "remove": {
+      if (!payload?.id) throw new Error("id is required");
+      return current.filter((r) => r.id !== payload.id);
+    }
+    default:
+      throw new Error(`Unknown incident templates op: ${op}`);
+  }
+}
+
 // Every Dan-only pilot key shares the same GET/POST handling (see the
 // dedicated block below) — this is what tells that block which reducer
-// to apply for a given key, so adding a fourth pilot key later is just
+// to apply for a given key, so adding another pilot key later is just
 // one more entry here, not another copy of the block itself.
 const DAN_ONLY_PILOT_KEYS = {
   [RUN_SHEETS_KEY]: applyRunSheetsOp,
   [ZONE_AREAS_KEY]: applyZoneAreasOp,
   [PERMANENT_PATROL_SITES_KEY]: applyPermanentPatrolSitesOp,
+  [INCIDENT_TEMPLATES_KEY]: applyIncidentTemplatesOp,
 };
 
 const PUBLIC_READ_KEYS = new Set(["ops:logo", "ops:companyName"]);
