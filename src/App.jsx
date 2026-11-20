@@ -8869,21 +8869,32 @@ const PATROL_WEEKDAYS = [
   { key: "thu", label: "Thu" }, { key: "fri", label: "Fri" }, { key: "sat", label: "Sat" }, { key: "sun", label: "Sun" },
 ];
 // A day's schedule is a list of visits rather than one shared count/window,
-// so a single day can mix types (a lockup and a regular patrol) and so
-// several specific-time patrols each get their own time instead of
-// sharing one window. type is "patrol" | "lockup" | "escort":
+// so a single day can mix types and so several specific-time patrols each
+// get their own time instead of sharing one window.
+// type is "patrol" | "lockup" | "unlock" | "escort" | "withdrawal":
 //   - patrol, mode "anytime": count patrols sometime within start–end
 //     (both left blank = no window at all, fully unconstrained)
 //   - patrol, mode "specific": one patrol at the exact time in `time`
-//   - escort: always one exact time in `time` — an escort is a single
-//     moment, never "any time"
-//   - lockup: always both lockTime and unlockTime — one lock/unlock cycle
-const BLANK_VISIT = { type: "patrol", mode: "anytime", count: 1, start: "", end: "", time: "", lockTime: "", unlockTime: "" };
+//   - lockup / unlock / escort / withdrawal, mode "specific": one exact
+//     time in `time`
+//   - lockup / unlock / escort / withdrawal, mode "window": sometime
+//     within start–end, exact moment left flexible — same idea as a
+//     patrol's "any time" window, just without a headcount
+const VISIT_TYPES = [
+  { value: "patrol", label: "Patrol" },
+  { value: "lockup", label: "Lock-up" },
+  { value: "unlock", label: "Unlock" },
+  { value: "escort", label: "Escort" },
+  { value: "withdrawal", label: "Withdrawal" },
+];
+const BLANK_VISIT = { type: "patrol", mode: "anytime", count: 1, start: "", end: "", time: "" };
 const BLANK_DAY_SCHEDULE = { enabled: false, visits: [{ ...BLANK_VISIT }] };
 
 function visitSummaryText(v) {
-  if (v.type === "lockup") return `Lock-up ${v.lockTime || "?"}→${v.unlockTime || "?"}`;
-  if (v.type === "escort") return `Escort ${v.time || "?"}`;
+  const typeLabel = VISIT_TYPES.find((t) => t.value === v.type)?.label || v.type;
+  if (v.type !== "patrol") {
+    return v.mode === "window" ? `${typeLabel} (${v.start || "?"}–${v.end || "?"})` : `${typeLabel} ${v.time || "?"}`;
+  }
   if (v.mode === "specific") return `Patrol ${v.time || "?"}`;
   const count = v.count || 1;
   return v.start && v.end ? `${count} patrol${count > 1 ? "s" : ""} (${v.start}–${v.end})` : `${count} patrol${count > 1 ? "s" : ""}, any time`;
@@ -8965,13 +8976,15 @@ function PatrolScheduleEditor({ initialSchedule, onApply }) {
               <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 20 }}>
                 {d.visits.map((v, i) => (
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                    <select value={v.type} onChange={(e) => setVisit(key, i, { type: e.target.value })} style={{ ...selectStyle, width: 110 }}>
-                      <option value="patrol">Patrol</option>
-                      <option value="lockup">Lock-up</option>
-                      <option value="escort">Escort</option>
+                    <select
+                      value={v.type}
+                      onChange={(e) => setVisit(key, i, { type: e.target.value, mode: e.target.value === "patrol" ? "anytime" : "specific" })}
+                      style={{ ...selectStyle, width: 120 }}
+                    >
+                      {VISIT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                     </select>
 
-                    {v.type === "patrol" && (
+                    {v.type === "patrol" ? (
                       <>
                         <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 7, overflow: "hidden" }}>
                           <button type="button" onClick={() => setVisit(key, i, { mode: "anytime" })} style={toggleBtnStyle(v.mode === "anytime")}>Any time</button>
@@ -8990,21 +9003,25 @@ function PatrolScheduleEditor({ initialSchedule, onApply }) {
                           <input type="time" value={v.time} onChange={(e) => setVisit(key, i, { time: e.target.value })} style={{ ...selectStyle, width: 105 }} />
                         )}
                       </>
-                    )}
-
-                    {v.type === "lockup" && (
+                    ) : (
+                      // Lock-up / Unlock / Escort / Withdrawal all share this
+                      // same shape: either one exact time, or a window within
+                      // which it should happen (moment left flexible) —
+                      // no headcount, since each of these is one occurrence.
                       <>
-                        <span style={{ fontSize: 12, color: "var(--text-dim)" }}>Lock</span>
-                        <input type="time" value={v.lockTime} onChange={(e) => setVisit(key, i, { lockTime: e.target.value })} style={{ ...selectStyle, width: 105 }} />
-                        <span style={{ fontSize: 12, color: "var(--text-dim)" }}>Unlock</span>
-                        <input type="time" value={v.unlockTime} onChange={(e) => setVisit(key, i, { unlockTime: e.target.value })} style={{ ...selectStyle, width: 105 }} />
-                      </>
-                    )}
-
-                    {v.type === "escort" && (
-                      <>
-                        <span style={{ fontSize: 12, color: "var(--text-dim)" }}>Time</span>
-                        <input type="time" value={v.time} onChange={(e) => setVisit(key, i, { time: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                        <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 7, overflow: "hidden" }}>
+                          <button type="button" onClick={() => setVisit(key, i, { mode: "specific" })} style={toggleBtnStyle(v.mode === "specific")}>Specific time</button>
+                          <button type="button" onClick={() => setVisit(key, i, { mode: "window" })} style={toggleBtnStyle(v.mode === "window")}>Time window</button>
+                        </div>
+                        {v.mode === "window" ? (
+                          <>
+                            <input type="time" value={v.start} onChange={(e) => setVisit(key, i, { start: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                            <span style={{ fontSize: 12, color: "var(--text-dim)" }}>to</span>
+                            <input type="time" value={v.end} onChange={(e) => setVisit(key, i, { end: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                          </>
+                        ) : (
+                          <input type="time" value={v.time} onChange={(e) => setVisit(key, i, { time: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                        )}
                       </>
                     )}
 
