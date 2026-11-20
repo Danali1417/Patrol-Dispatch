@@ -6619,7 +6619,7 @@ function ManagerClassicTools({ session, accounts, setAccounts, zones, persistZon
         {tab === "accounts" && <AccountsManager accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />}
         {tab === "phrases" && <OutcomePhrasesEditor outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} />}
         {tab === "clients" && <ClientListsManager monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} />}
-        {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} session={session} runSheets={runSheets} persistRunSheets={persistRunSheets} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} />}
+        {tab === "sites" && <SitesManager roster={roster} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} session={session} runSheets={runSheets} persistRunSheets={persistRunSheets} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} />}
         {tab === "logs" && <Logs jobs={jobs.filter((j) => j.status !== "scheduled")} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} roster={roster} responseRate={responseRate} bureauRates={bureauRates} monitoringRates={monitoringRates} />}
       </div>
@@ -6693,7 +6693,7 @@ function ControlRoomShell(props) {
           {tab === "dashboard" && <ControlRoomDashboard jobs={jobs} onNavigate={setTab} />}
           {tab === "schedule" && (
             <ControlRoomSchedulePreview
-              permanentPatrolSites={permanentPatrolSites} roster={roster} accounts={accounts}
+              permanentPatrolSites={permanentPatrolSites} roster={roster} accounts={accounts} zones={zones}
               publishedWeeks={publishedWeeks} persistPublishedWeeks={persistPublishedWeeks}
             />
           )}
@@ -6709,7 +6709,7 @@ function ControlRoomShell(props) {
               zones={zones} accounts={accounts}
               zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas}
               permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites}
-              runSheets={runSheets} persistRunSheets={persistRunSheets}
+              runSheets={runSheets} persistRunSheets={persistRunSheets} roster={roster}
             />
           )}
           {tab === "reports" && (
@@ -6780,7 +6780,7 @@ function ControlRoomDashboard({ jobs, onNavigate }) {
 // a weekly grid instead of one day at a time. Nothing about the real
 // roster or RosterView changes; this only reads `roster`, never writes it.
 const SCHEDULE_DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, publishedWeeks, persistPublishedWeeks }) {
+function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, zones = [], publishedWeeks, persistPublishedWeeks }) {
   const [view, setView] = useState("employee");
   const [weekOffset, setWeekOffset] = useState(0);
   const showToast = useToast();
@@ -6803,9 +6803,9 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, pu
 
   const patrolmen = accounts.filter((a) => a.role === "patrolman");
 
-  const siteNames = permanentPatrolSites && permanentPatrolSites.length
-    ? permanentPatrolSites.slice(0, 6).map((s) => s.name)
-    : ["Riverside Plaza", "Northgate Retail Centre", "Harbour Logistics Yard", "Westline Depot"];
+  // By region: every region, plus any other run name used on this week's roster.
+  const regionRows = Array.from(new Set([...zones, ...roster.filter((r) => weekDates.includes(r.date) && r.run).map((r) => r.run)]));
+  const sitesInRegion = (zone) => (permanentPatrolSites || []).filter((s) => s.region === zone).length;
 
   const segBtn = { padding: "7px 14px", fontSize: 12.5, fontWeight: 600, border: "none", background: "var(--panel)", color: "var(--text)", cursor: "pointer" };
   const thStyle = { textAlign: "left", padding: "9px 12px", fontSize: 11.5, fontWeight: 700, color: "var(--text-dim)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
@@ -6822,8 +6822,8 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, pu
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ padding: "10px 14px", borderRadius: 8, background: "#FFFBEB", border: "1px solid var(--warn)", color: "#92400E", fontSize: 12 }}>
         {view === "employee"
-          ? "\"By employee\" shows your real roster for this week. \"By site\" is still a preview — there's no site-based shift data behind it yet. Publish is just a marker for now — it doesn't change what patrolmen see."
-          : "Preview — \"By site\" isn't wired to real shift data yet. Switch to \"By employee\" to see your real roster, or use Classic Tools → Roster."}
+          ? "\"By employee\" shows your real roster for this week, one row per patrolman. Publish is just a marker for now — it doesn't change what patrolmen see."
+          : "\"By region\" shows the same real roster, one row per region: who is rostered to work each region each day. A region's run sheets go to whoever is rostered there. To change the roster, use Classic Tools → Roster."}
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
@@ -6859,45 +6859,50 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, pu
         </div>
         <button onClick={() => setWeekOffset(0)} style={secondaryBtn}>This week</button>
         <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
-          <button onClick={() => setView("site")} style={{ ...segBtn, ...(view === "site" ? { background: "var(--navy)", color: "#fff" } : {}) }}>By site</button>
+          <button onClick={() => setView("region")} style={{ ...segBtn, ...(view === "region" ? { background: "var(--navy)", color: "#fff" } : {}) }}>By region</button>
           <button onClick={() => setView("employee")} style={{ ...segBtn, ...(view === "employee" ? { background: "var(--navy)", color: "#fff" } : {}) }}>By employee</button>
         </div>
       </div>
 
-      {view === "site" ? (
-        <>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 11.5, color: "var(--text-dim)" }}>
-            <span>○ Draft</span>
-            <span>○ Unassigned</span>
-            <span>◐ Awaiting</span>
-            <span style={{ color: "var(--ok)" }}>● Confirmed</span>
-            <span>◐ Declined</span>
-            <span>◐ Subcontractor</span>
-          </div>
-          <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 640 }}>
-              <thead>
-                <tr>
-                  <th style={thStyle}>Site</th>
-                  {SCHEDULE_DAY_LABELS.map((d) => <th key={d} style={thStyle}>{d}</th>)}
+      {view === "region" ? (
+        <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 640 }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>Region</th>
+                {weekDates.map((date, i) => <th key={date} style={thStyle}>{SCHEDULE_DAY_LABELS[i]} {fmtShort(date)}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {regionRows.length === 0 && (
+                <tr><td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "var(--text-dim)" }}>No regions yet — add runs/zones first.</td></tr>
+              )}
+              {regionRows.map((zone) => (
+                <tr key={zone}>
+                  <td style={tdStyle}>
+                    <div style={{ fontWeight: 700 }}>{zone}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-dim)" }}>{sitesInRegion(zone)} site{sitesInRegion(zone) === 1 ? "" : "s"}</div>
+                  </td>
+                  {weekDates.map((date) => {
+                    const entries = roster.filter((r) => r.date === date && (r.run || "") === zone);
+                    return (
+                      <td key={date} style={{ ...tdStyle, textAlign: "center" }}>
+                        {entries.length === 0
+                          ? <span style={{ color: "var(--warn)", fontSize: 11 }}>No one rostered</span>
+                          : entries.map((e) => (
+                            <div key={e.id} style={{ fontSize: 11.5 }}>
+                              <div style={{ fontWeight: 600 }}>{e.patrolmanName || "Patrolman"}</div>
+                              {e.shift && <div style={{ color: "var(--text-dim)" }}>{e.shift}</div>}
+                            </div>
+                          ))}
+                      </td>
+                    );
+                  })}
                 </tr>
-              </thead>
-              <tbody>
-                {siteNames.map((name) => (
-                  <tr key={name}>
-                    <td style={tdStyle}>
-                      <div style={{ fontWeight: 700 }}>{name}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-dim)" }}>Security Services</div>
-                    </td>
-                    {SCHEDULE_DAY_LABELS.map((d) => (
-                      <td key={d} style={{ ...tdStyle, textAlign: "center", color: "var(--info)", cursor: "pointer" }}>+</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 640 }}>
@@ -8047,7 +8052,7 @@ function AccountRow({ account, setAccounts, zones, isSelf, lastKnownPassword, on
    SITES & RUNS MANAGER
 ---------------------------------------------------------------- */
 
-function SitesManager({ zones, persistZones, sites, persistSites, accounts, setAccounts, session, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites }) {
+function SitesManager({ roster = [], zones, persistZones, sites, persistSites, accounts, setAccounts, session, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites }) {
   return (
     <div>
       <ZonesEditor zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} />
@@ -8060,7 +8065,7 @@ function SitesManager({ zones, persistZones, sites, persistSites, accounts, setA
             zones={zones} accounts={accounts}
             zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas}
             permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites}
-            runSheets={runSheets} persistRunSheets={persistRunSheets}
+            runSheets={runSheets} persistRunSheets={persistRunSheets} roster={roster}
           />
         </>
       )}
@@ -8549,7 +8554,7 @@ function makeRunSheetId() {
 // named, ordered group of sites for one patrol, optionally bulk-loaded
 // from a region). No clock-in gate or patrolman-side execution yet —
 // this is Control Room grouping/scheduling only.
-function PatrolOpsManager({ zones, accounts, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, runSheets, persistRunSheets }) {
+function PatrolOpsManager({ zones, accounts, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, runSheets, persistRunSheets, roster = [] }) {
   const [subTab, setSubTab] = useState("regions");
   const tabs = [["regions", "Regions"], ["sites", "Permanent Patrol Sites"], ["runs", "Run Sheets"]];
 
@@ -8572,7 +8577,7 @@ function PatrolOpsManager({ zones, accounts, zoneAreas, persistZoneAreas, perman
       {subTab === "regions" && <RegionsManager zones={zones} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} />}
       {subTab === "sites" && <PermanentPatrolSitesEditor zones={zones} zoneAreas={zoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} />}
       {subTab === "runs" && (
-        <RunSheetsManager zones={zones} accounts={accounts} zoneAreas={zoneAreas} permanentPatrolSites={permanentPatrolSites} runSheets={runSheets} persistRunSheets={persistRunSheets} />
+        <RunSheetsManager zones={zones} accounts={accounts} zoneAreas={zoneAreas} permanentPatrolSites={permanentPatrolSites} runSheets={runSheets} persistRunSheets={persistRunSheets} roster={roster} />
       )}
     </div>
   );
@@ -9708,8 +9713,11 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
   );
 }
 
-function RunSheetsManager({ zones, accounts, zoneAreas, permanentPatrolSites, runSheets, persistRunSheets }) {
-  const patrolmen = accounts.filter((a) => a.role === "patrolman");
+// A run sheet is assigned to a region, and the region works like a site on
+// the roster: whoever is rostered to that region on a day does its run sheet.
+function RunSheetsManager({ zones, accounts, zoneAreas, permanentPatrolSites, runSheets, persistRunSheets, roster = [] }) {
+  const today = dateOnlyISO(new Date());
+  const rosteredToday = (region) => roster.filter((r) => r.date === today && region && (r.run || "") === region).map((r) => r.patrolmanName || "Patrolman");
   const blank = { name: "", region: "", siteIds: [], assigneeLoginName: "" };
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
@@ -9756,6 +9764,7 @@ function RunSheetsManager({ zones, accounts, zoneAreas, permanentPatrolSites, ru
     setError("");
     const name = form.name.trim();
     if (!name) { setError("Run sheet name is required."); return; }
+    if (!form.region) { setError("Choose the region this run sheet is assigned to."); return; }
     if (!form.siteIds.length) { setError("Add at least one site."); return; }
     if (runSheets.some((r) => r.id !== editingId && r.name.toLowerCase() === name.toLowerCase())) {
       setError("That run sheet name already exists."); return;
@@ -9790,19 +9799,19 @@ function RunSheetsManager({ zones, accounts, zoneAreas, permanentPatrolSites, ru
       <SectionTitle icon={Navigation} title={editingId ? "Edit run sheet" : "New run sheet"} small />
       <div style={{ maxWidth: 580, marginBottom: 24 }}>
         <div style={{ display: "flex", gap: 12 }}>
-          <Field label="Region" style={{ flex: 1 }}>
+          <Field label="Assigned to region" style={{ flex: 1 }}>
             <select value={form.region} onChange={(e) => set("region", e.target.value)} style={selectStyle}>
-              <option value="">— none —</option>
+              <option value="">Choose a region…</option>
               {zones.map((z) => <option key={z} value={z}>{z}</option>)}
             </select>
           </Field>
-          <Field label="Assign to" style={{ width: 220 }}>
-            <select value={form.assigneeLoginName} onChange={(e) => set("assigneeLoginName", e.target.value)} style={selectStyle}>
-              <option value="">Unassigned</option>
-              {patrolmen.map((p) => <option key={p.loginName} value={p.loginName}>{p.displayName}</option>)}
-            </select>
-          </Field>
         </div>
+        {form.region && (
+          <div style={{ fontSize: 11.5, color: "var(--text-dim)", margin: "-4px 0 10px" }}>
+            Goes to whoever is rostered to {form.region}.{" "}
+            {rosteredToday(form.region).length ? `Today: ${rosteredToday(form.region).join(", ")}.` : <span style={{ color: "var(--warn)" }}>No one is rostered there today.</span>}
+          </div>
+        )}
         {form.region && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
             <span style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
@@ -9860,13 +9869,13 @@ function RunSheetsManager({ zones, accounts, zoneAreas, permanentPatrolSites, ru
       <SectionTitle icon={Navigation} title={`Run sheets (${runSheets.length})`} small />
       <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 720 }}>
         {runSheets.map((rs) => {
-          const assignee = patrolmen.find((p) => p.loginName === rs.assigneeLoginName);
+          const today = rosteredToday(rs.region);
           return (
             <div key={rs.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: "var(--panel)", border: "1px solid var(--border)" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>{rs.name}</div>
                 <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
-                  {(rs.siteIds || []).length} site(s){rs.region ? ` · ${rs.region}` : ""} · {assignee ? assignee.displayName : "Unassigned"}
+                  {(rs.siteIds || []).length} site(s) · {rs.region ? <>Region <b>{rs.region}</b> · {today.length ? `today: ${today.join(", ")}` : <span style={{ color: "var(--warn)" }}>no one rostered today</span>}</> : <span style={{ color: "var(--warn)" }}>not assigned to a region</span>}
                 </div>
               </div>
               <button onClick={() => startEdit(rs)} title="Edit" style={iconBtn}><RotateCcw size={13} /></button>
