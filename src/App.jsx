@@ -9139,6 +9139,15 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style }) {
       if (cancelled || !containerRef.current || !maps.places?.PlaceAutocompleteElement) return;
       const el = new maps.places.PlaceAutocompleteElement();
       el.style.width = "100%";
+      // The widget ships borderless/transparent by design (it's meant to
+      // be dropped into a host app's own field styling) — these are its
+      // documented theming hooks, set to match selectStyle so it reads
+      // as one more field in this form, not a foreign component.
+      el.style.setProperty("--gmpx-color-surface", "var(--panel-alt)");
+      el.style.setProperty("--gmpx-color-on-surface", "var(--text)");
+      el.style.setProperty("--gmpx-color-on-surface-variant", "var(--text-dim)");
+      el.style.setProperty("--gmpx-font-family-base", "var(--sans)");
+      el.style.setProperty("--gmpx-font-size-base", "13px");
       el.addEventListener("gmp-select", async (e) => {
         try {
           const prediction = e.placePrediction || e.detail?.placePrediction;
@@ -9170,7 +9179,16 @@ function AddressAutocompleteInput({ value, onChange, placeholder, style }) {
 
   return (
     <div>
-      <div ref={containerRef} style={{ display: widgetReady ? "block" : "none" }} />
+      <div
+        ref={containerRef}
+        style={{
+          display: widgetReady ? "block" : "none",
+          border: "1px solid var(--border)",
+          borderRadius: 6,
+          background: "var(--panel-alt)",
+          overflow: "hidden",
+        }}
+      />
       {!widgetReady && <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={style} />}
     </div>
   );
