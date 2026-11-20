@@ -8966,6 +8966,39 @@ function scheduleSummaryText(record) {
   return `${days} · ${sample}${visits.length > 1 ? ` +${visits.length - 1} more` : ""}`;
 }
 
+// The whole weekly schedule at a glance in the site details (no click
+// needed): one line per active day with every visit. No schedule, or no
+// days ticked, shows a prompt to update it.
+function ScheduleOverview({ schedule, onEdit }) {
+  const active = schedule ? PATROL_WEEKDAYS.filter(({ key }) => schedule[key]?.enabled) : [];
+  if (!active.length) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 12px", marginBottom: 12, borderRadius: 8, border: "1px solid var(--warn)", background: "var(--accent-dim)", fontSize: 12.5 }}>
+        <span style={{ fontWeight: 600, color: "var(--warn)" }}>Schedule needs to be updated: no patrol days set.</span>
+        <button type="button" onClick={onEdit} style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px" }}>Set schedule</button>
+      </div>
+    );
+  }
+  return (
+    <div style={{ padding: "10px 12px", marginBottom: 12, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel-alt)", fontSize: 12.5 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <span style={{ fontWeight: 700 }}>Schedule</span>
+        <button type="button" onClick={onEdit} style={{ background: "none", border: "none", color: "var(--navy)", fontWeight: 600, fontSize: 12, cursor: "pointer", padding: 0 }}>Edit schedule</button>
+      </div>
+      {PATROL_WEEKDAYS.map(({ key, label }) => {
+        const d = schedule[key];
+        const visits = d?.enabled ? d.visits || [] : [];
+        return (
+          <div key={key} style={{ display: "flex", gap: 10, padding: "3px 0", color: d?.enabled ? "var(--text)" : "var(--text-dim)" }}>
+            <span style={{ width: 34, fontWeight: 600 }}>{label}</span>
+            <span>{d?.enabled ? (visits.length ? visits.map(visitSummaryText).join(" · ") : "no visits set") : "—"}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // Same local/no-persistence contract as SiteGeofenceEditor above — just
 // hands the finished weekly schedule to the parent's onApply.
 function PatrolScheduleEditor({ initialSchedule, onApply }) {
@@ -9632,6 +9665,7 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
               <Field label="Key / access code"><input value={form.keyCode} onChange={(e) => set("keyCode", e.target.value)} placeholder="e.g. Key #14, lockbox code 2481" style={selectStyle} /></Field>
               <Field label="Notes (optional)"><textarea rows={2} value={form.notes} onChange={(e) => set("notes", e.target.value)} style={{ ...selectStyle, resize: "vertical" }} /></Field>
 
+              {panel !== "schedule" && <ScheduleOverview schedule={form.schedule} onEdit={() => setPanel("schedule")} />}
               <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
                 <button
                   onClick={() => setPanel(panel === "location" ? null : "location")}
@@ -9643,7 +9677,7 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
                   onClick={() => setPanel(panel === "schedule" ? null : "schedule")}
                   style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px", background: panel === "schedule" ? "var(--navy)" : "var(--panel)", color: panel === "schedule" ? "#fff" : "var(--text)" }}
                 >
-                  {form.schedule ? "Schedule ✓" : "Set schedule"}
+                  {form.schedule && PATROL_WEEKDAYS.some(({ key }) => form.schedule[key]?.enabled) ? "Schedule ✓" : "Set schedule"}
                 </button>
                 {editingId && <button onClick={() => remove(permanentPatrolSites.find((r) => r.id === editingId))} style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px", color: "var(--breach)", borderColor: "var(--breach)" }}>Delete</button>}
               </div>
