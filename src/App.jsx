@@ -2529,13 +2529,13 @@ function Board({ jobs, now, onSelect, lockedStatus, roster }) {
           <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
         </Field>
         <Field label="From time" style={{ marginBottom: 0 }}>
-          <input type="time" value={timeFrom} onChange={(e) => setTimeFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
+          <Time24Input value={timeFrom} onChange={(e) => setTimeFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
         </Field>
         <Field label="Date to" style={{ marginBottom: 0 }}>
           <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
         </Field>
         <Field label="To time" style={{ marginBottom: 0 }}>
-          <input type="time" value={timeTo} onChange={(e) => setTimeTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
+          <Time24Input value={timeTo} onChange={(e) => setTimeTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
         </Field>
         {hasFilter && <button onClick={clearFilters} style={{ ...secondaryBtn, marginBottom: 0 }}><X size={13} /> Clear filters</button>}
       </div>
@@ -3067,7 +3067,7 @@ function NewJobForm({ jobs, sites, persistSites, zones, patrolmen, providers, ro
 
       {(jobType === "keyPickup" || jobType === "keyDropoff") && (
         <Field label={`Due by (${jobType === "keyPickup" ? "pickup" : "drop off"} deadline)`} style={{ maxWidth: 180 }}>
-          <input type="time" value={dueByTime} onChange={(e) => setDueByTime(e.target.value)} style={selectStyle} />
+          <Time24Input value={dueByTime} onChange={(e) => setDueByTime(e.target.value)} style={selectStyle} />
         </Field>
       )}
 
@@ -5516,13 +5516,13 @@ function Reports({ jobs, companyName, logoUrl, roster, responseRate, bureauRates
           <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
         </Field>
         <Field label="From time" style={{ marginBottom: 0 }}>
-          <input type="time" value={timeFrom} onChange={(e) => setTimeFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
+          <Time24Input value={timeFrom} onChange={(e) => setTimeFrom(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
         </Field>
         <Field label="Date to" style={{ marginBottom: 0 }}>
           <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 160 }} />
         </Field>
         <Field label="To time" style={{ marginBottom: 0 }}>
-          <input type="time" value={timeTo} onChange={(e) => setTimeTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
+          <Time24Input value={timeTo} onChange={(e) => setTimeTo(e.target.value)} style={{ ...selectStyle, background: "var(--panel)", width: 120 }} />
         </Field>
         {hasFilter && <button onClick={clearFilters} style={{ ...secondaryBtn, marginBottom: 0 }}><X size={13} /> Clear filters</button>}
         <button
@@ -6619,7 +6619,7 @@ function ManagerClassicTools({ session, accounts, setAccounts, zones, persistZon
         {tab === "accounts" && <AccountsManager accounts={accounts} setAccounts={setAccounts} zones={zones} session={session} logoUrl={logoUrl} persistLogo={persistLogo} companyName={companyName} persistCompanyName={persistCompanyName} />}
         {tab === "phrases" && <OutcomePhrasesEditor outcomePhrases={outcomePhrases} persistOutcomePhrases={persistOutcomePhrases} />}
         {tab === "clients" && <ClientListsManager monitoringCompanies={monitoringCompanies} persistMonitoringCompanies={persistMonitoringCompanies} bureaus={bureaus} persistBureaus={persistBureaus} responseRate={responseRate} persistResponseRate={persistResponseRate} bureauRates={bureauRates} persistBureauRates={persistBureauRates} monitoringRates={monitoringRates} persistMonitoringRates={persistMonitoringRates} />}
-        {tab === "sites" && <SitesManager zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} session={session} runSheets={runSheets} persistRunSheets={persistRunSheets} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} />}
+        {tab === "sites" && <SitesManager roster={roster} zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} session={session} runSheets={runSheets} persistRunSheets={persistRunSheets} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} />}
         {tab === "roster" && <RosterView zones={zones} accounts={accounts} roster={roster} persistRoster={persistRoster} publicHolidays={publicHolidays} persistPublicHolidays={persistPublicHolidays} />}
         {tab === "logs" && <Logs jobs={jobs.filter((j) => j.status !== "scheduled")} now={now} role="manager" companyName={companyName} logoUrl={logoUrl} roster={roster} responseRate={responseRate} bureauRates={bureauRates} monitoringRates={monitoringRates} />}
       </div>
@@ -6693,7 +6693,7 @@ function ControlRoomShell(props) {
           {tab === "dashboard" && <ControlRoomDashboard jobs={jobs} onNavigate={setTab} />}
           {tab === "schedule" && (
             <ControlRoomSchedulePreview
-              permanentPatrolSites={permanentPatrolSites} roster={roster} accounts={accounts}
+              permanentPatrolSites={permanentPatrolSites} roster={roster} persistRoster={persistRoster} accounts={accounts} zones={zones}
               publishedWeeks={publishedWeeks} persistPublishedWeeks={persistPublishedWeeks}
             />
           )}
@@ -6709,7 +6709,7 @@ function ControlRoomShell(props) {
               zones={zones} accounts={accounts}
               zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas}
               permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites}
-              runSheets={runSheets} persistRunSheets={persistRunSheets}
+              runSheets={runSheets} persistRunSheets={persistRunSheets} roster={roster}
             />
           )}
           {tab === "reports" && (
@@ -6780,7 +6780,13 @@ function ControlRoomDashboard({ jobs, onNavigate }) {
 // a weekly grid instead of one day at a time. Nothing about the real
 // roster or RosterView changes; this only reads `roster`, never writes it.
 const SCHEDULE_DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, publishedWeeks, persistPublishedWeeks }) {
+function ControlRoomSchedulePreview({ permanentPatrolSites, roster, persistRoster, accounts, zones = [], publishedWeeks, persistPublishedWeeks }) {
+  const [creating, setCreating] = useState(null); // { date, run } to prefill, or null
+  const [editing, setEditing] = useState(null); // a roster entry being edited
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState([]); // roster entry ids ticked in Select shifts
+  const [copyOpen, setCopyOpen] = useState(false);
+  const showConfirm = useConfirm();
   const [view, setView] = useState("employee");
   const [weekOffset, setWeekOffset] = useState(0);
   const showToast = useToast();
@@ -6803,13 +6809,35 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, pu
 
   const patrolmen = accounts.filter((a) => a.role === "patrolman");
 
-  const siteNames = permanentPatrolSites && permanentPatrolSites.length
-    ? permanentPatrolSites.slice(0, 6).map((s) => s.name)
-    : ["Riverside Plaza", "Northgate Retail Centre", "Harbour Logistics Yard", "Westline Depot"];
+  // By region: every region, plus any other run name used on this week's roster.
+  const regionRows = Array.from(new Set([...zones, ...roster.filter((r) => weekDates.includes(r.date) && r.run).map((r) => r.run)]));
+  const sitesInRegion = (zone) => (permanentPatrolSites || []).filter((s) => s.region === zone).length;
 
   const segBtn = { padding: "7px 14px", fontSize: 12.5, fontWeight: 600, border: "none", background: "var(--panel)", color: "var(--text)", cursor: "pointer" };
   const thStyle = { textAlign: "left", padding: "9px 12px", fontSize: 11.5, fontWeight: 700, color: "var(--text-dim)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
   const tdStyle = { padding: "12px", borderBottom: "1px solid var(--panel-alt)", verticalAlign: "middle" };
+
+  // A roster entry in a grid cell: click to edit it, or (Select shifts) tick it.
+  function EntryChip({ e, top, sub }) {
+    const on = picked.includes(e.id);
+    const box = { display: "block", width: "100%", textAlign: "center", fontSize: 11.5, padding: "3px 4px", borderRadius: 6, border: `1px solid ${on ? "var(--navy)" : "transparent"}`, background: on ? "var(--accent-dim)" : "none", cursor: "pointer", marginBottom: 2 };
+    if (selecting) {
+      return (
+        <label style={box}>
+          <input type="checkbox" checked={on} onChange={(ev) => setPicked((x) => (ev.target.checked ? [...x, e.id] : x.filter((id) => id !== e.id)))} style={{ marginRight: 4 }} />
+          <span style={{ fontWeight: 600 }}>{top}</span>
+          {sub && <div style={{ color: "var(--text-dim)" }}>{sub}</div>}
+        </label>
+      );
+    }
+    return (
+      <button type="button" onClick={() => { setCreating(null); setEditing(e); }} title="Edit this roster entry" style={box}>
+        <div style={{ fontWeight: 600 }}>{top}</div>
+        {sub && <div style={{ color: "var(--text-dim)" }}>{sub}</div>}
+      </button>
+    );
+  }
+  const weekEntries = roster.filter((r) => weekDates.includes(r.date));
 
   function entriesFor(patrolman, date) {
     return roster.filter((r) => r.date === date && (
@@ -6822,8 +6850,8 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, pu
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={{ padding: "10px 14px", borderRadius: 8, background: "#FFFBEB", border: "1px solid var(--warn)", color: "#92400E", fontSize: 12 }}>
         {view === "employee"
-          ? "\"By employee\" shows your real roster for this week. \"By site\" is still a preview — there's no site-based shift data behind it yet. Publish is just a marker for now — it doesn't change what patrolmen see."
-          : "Preview — \"By site\" isn't wired to real shift data yet. Switch to \"By employee\" to see your real roster, or use Classic Tools → Roster."}
+          ? "\"By employee\" shows your real roster for this week, one row per patrolman. Publish is just a marker for now — it doesn't change what patrolmen see."
+          : "\"By region\" shows the same real roster, one row per region: who is rostered to work each region each day. A region's run sheets go to whoever is rostered there. Use + Create shift (or click an empty day) to roster someone; edit or remove entries in Classic Tools → Roster."}
       </div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
         <div>
@@ -6840,15 +6868,15 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, pu
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <button style={secondaryBtn}>Select shifts</button>
-          <button style={secondaryBtn}>Copy week</button>
+          <button style={selecting ? { ...secondaryBtn, borderColor: "var(--navy)" } : secondaryBtn} onClick={() => { setSelecting((v) => !v); setPicked([]); setEditing(null); setCreating(null); }}>{selecting ? "Done selecting" : "Select shifts"}</button>
+          <button style={secondaryBtn} onClick={() => setCopyOpen((v) => !v)}>Copy week</button>
           <button
             onClick={togglePublish}
             style={isPublished ? { ...secondaryBtn, color: "var(--ok)", borderColor: "var(--ok)" } : primaryBtn}
           >
             {isPublished ? "✓ Published — unpublish" : "Publish this week"}
           </button>
-          <button style={primaryBtn}>+ Create shift</button>
+          <button style={primaryBtn} onClick={() => { setEditing(null); setSelecting(false); setPicked([]); setCreating({ date: weekDates.includes(todayISO()) ? todayISO() : weekDates[0], run: zones[0] || "" }); }}>+ Create shift</button>
         </div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -6859,45 +6887,77 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, pu
         </div>
         <button onClick={() => setWeekOffset(0)} style={secondaryBtn}>This week</button>
         <div style={{ display: "inline-flex", border: "1px solid var(--border)", borderRadius: 8, overflow: "hidden" }}>
-          <button onClick={() => setView("site")} style={{ ...segBtn, ...(view === "site" ? { background: "var(--navy)", color: "#fff" } : {}) }}>By site</button>
+          <button onClick={() => setView("region")} style={{ ...segBtn, ...(view === "region" ? { background: "var(--navy)", color: "#fff" } : {}) }}>By region</button>
           <button onClick={() => setView("employee")} style={{ ...segBtn, ...(view === "employee" ? { background: "var(--navy)", color: "#fff" } : {}) }}>By employee</button>
         </div>
       </div>
 
-      {view === "site" ? (
-        <>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: 11.5, color: "var(--text-dim)" }}>
-            <span>○ Draft</span>
-            <span>○ Unassigned</span>
-            <span>◐ Awaiting</span>
-            <span style={{ color: "var(--ok)" }}>● Confirmed</span>
-            <span>◐ Declined</span>
-            <span>◐ Subcontractor</span>
-          </div>
-          <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 640 }}>
-              <thead>
-                <tr>
-                  <th style={thStyle}>Site</th>
-                  {SCHEDULE_DAY_LABELS.map((d) => <th key={d} style={thStyle}>{d}</th>)}
+      {selecting && (
+        <RosterBulkBar
+          picked={picked} setPicked={setPicked} weekEntries={weekEntries} zones={zones} patrolmen={patrolmen}
+          persistRoster={persistRoster} showConfirm={showConfirm} onDone={() => { setSelecting(false); setPicked([]); }}
+        />
+      )}
+      {copyOpen && <CopyRosterWeek weekDates={weekDates} weekEntries={weekEntries} roster={roster} persistRoster={persistRoster} onClose={() => setCopyOpen(false)} />}
+      {editing && (
+        <CreateRosterShift
+          key={`edit-${editing.id}`}
+          editing={editing}
+          initial={{ date: editing.date, run: editing.run }}
+          weekDates={weekDates}
+          zones={zones}
+          patrolmen={patrolmen}
+          roster={roster}
+          persistRoster={persistRoster}
+          onClose={() => setEditing(null)}
+        />
+      )}
+      {creating && !editing && (
+        <CreateRosterShift
+          key={`${creating.date}|${creating.run}`}
+          initial={creating}
+          weekDates={weekDates}
+          zones={zones}
+          patrolmen={patrolmen}
+          roster={roster}
+          persistRoster={persistRoster}
+          onClose={() => setCreating(null)}
+        />
+      )}
+      {view === "region" ? (
+        <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10 }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 640 }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>Region</th>
+                {weekDates.map((date, i) => <th key={date} style={thStyle}>{SCHEDULE_DAY_LABELS[i]} {fmtShort(date)}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {regionRows.length === 0 && (
+                <tr><td colSpan={8} style={{ ...tdStyle, textAlign: "center", color: "var(--text-dim)" }}>No regions yet — add runs/zones first.</td></tr>
+              )}
+              {regionRows.map((zone) => (
+                <tr key={zone}>
+                  <td style={tdStyle}>
+                    <div style={{ fontWeight: 700 }}>{zone}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-dim)" }}>{sitesInRegion(zone)} site{sitesInRegion(zone) === 1 ? "" : "s"}</div>
+                  </td>
+                  {weekDates.map((date) => {
+                    const entries = roster.filter((r) => r.date === date && (r.run || "") === zone);
+                    return (
+                      <td key={date} style={{ ...tdStyle, textAlign: "center" }}>
+                        {entries.length === 0
+                          ? <button type="button" onClick={() => { setEditing(null); setCreating({ date, run: zone }); }} title={`Roster someone to ${zone} on this day`} style={{ background: "none", border: "none", color: "var(--warn)", fontSize: 11, cursor: "pointer", padding: 0 }}>No one rostered · +</button>
+                          : entries.map((e) => <EntryChip key={e.id} e={e} top={e.patrolmanName || "Patrolman"} sub={e.shift} />)}
+                      </td>
+                    );
+                  })}
                 </tr>
-              </thead>
-              <tbody>
-                {siteNames.map((name) => (
-                  <tr key={name}>
-                    <td style={tdStyle}>
-                      <div style={{ fontWeight: 700 }}>{name}</div>
-                      <div style={{ fontSize: 11, color: "var(--text-dim)" }}>Security Services</div>
-                    </td>
-                    {SCHEDULE_DAY_LABELS.map((d) => (
-                      <td key={d} style={{ ...tdStyle, textAlign: "center", color: "var(--info)", cursor: "pointer" }}>+</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: 10 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 640 }}>
@@ -6920,12 +6980,7 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, pu
                       <td key={date} style={{ ...tdStyle, textAlign: "center" }}>
                         {entries.length === 0
                           ? <span style={{ color: "var(--text-dim)" }}>—</span>
-                          : entries.map((e) => (
-                            <div key={e.id} style={{ fontSize: 11.5 }}>
-                              <div style={{ fontWeight: 600 }}>{e.shift || "Rostered"}</div>
-                              <div style={{ color: "var(--text-dim)" }}>{e.run}</div>
-                            </div>
-                          ))}
+                          : entries.map((e) => <EntryChip key={e.id} e={e} top={e.shift || "Rostered"} sub={e.run} />)}
                       </td>
                     );
                   })}
@@ -6935,6 +6990,244 @@ function ControlRoomSchedulePreview({ permanentPatrolSites, roster, accounts, pu
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+// "+ Create shift" on the Control Room Schedule: adds real roster entries
+// (the same records Classic Tools -> Roster edits) — a patrolman on a
+// region for a day, optionally repeated on other days of the shown week.
+function CreateRosterShift({ initial, editing = null, weekDates, zones, patrolmen, roster, persistRoster, onClose }) {
+  const showToast = useToast();
+  const showConfirm = useConfirm();
+  const knownLogin = editing && patrolmen.some((p) => p.loginName === editing.patrolmanLoginName) ? editing.patrolmanLoginName : "";
+  const [date, setDate] = useState(initial.date);
+  const [run, setRun] = useState(initial.run || zones[0] || "");
+  const [loginName, setLoginName] = useState(editing ? knownLogin || "__custom__" : "");
+  const [customName, setCustomName] = useState(editing && !knownLogin ? editing.patrolmanName || "" : "");
+  const [shift, setShift] = useState(editing?.shift || "");
+  const [alsoDays, setAlsoDays] = useState([]);
+  const [error, setError] = useState("");
+  const account = patrolmen.find((p) => p.loginName === loginName);
+  const name = loginName === "__custom__" ? customName.trim() : account?.displayName || "";
+
+  function pick(v) {
+    setLoginName(v);
+    const a = patrolmen.find((p) => p.loginName === v);
+    if (a?.shift && !shift) setShift(a.shift);
+  }
+
+  const [saving, setSaving] = useState(false);
+  async function save() {
+    setError("");
+    if (!date || !run || !name) { setError("Choose the date, region and patrolman."); return; }
+    if (editing) {
+      setSaving(true);
+      const r = await persistRoster("update", {
+        id: editing.id,
+        entry: {
+          ...editing,
+          date,
+          run,
+          patrolmanLoginName: account ? account.loginName : loginName === "__custom__" ? "" : editing.patrolmanLoginName || "",
+          patrolmanName: name,
+          shift: shift.trim(),
+          contactNumber: account?.contactNumber || (account ? "" : editing.contactNumber || ""),
+          securityLicenceNumber: account?.securityLicenceNumber || (account ? "" : editing.securityLicenceNumber || ""),
+        },
+      });
+      setSaving(false);
+      if (!r?.ok) { setError("Couldn't save — try again."); return; }
+      showToast("Roster entry updated.");
+      onClose();
+      return;
+    }
+    const dates = Array.from(new Set([date, ...alsoDays])).sort();
+    const already = dates.filter((d) => roster.some((r) => r.date === d && r.run === run && ((account && r.patrolmanLoginName === account.loginName) || r.patrolmanName === name)));
+    const todo = dates.filter((d) => !already.includes(d));
+    if (!todo.length) { setError(`${name} is already rostered to ${run} on ${dates.length === 1 ? "that day" : "those days"}.`); return; }
+    setSaving(true);
+    let failed = 0;
+    // One at a time: each save reads the latest roster on the server, so they can't overwrite each other.
+    for (const [i, d] of todo.entries()) {
+      const r = await persistRoster("add", {
+        entry: {
+          id: `roster_${Date.now()}_${i}`,
+          date: d,
+          run,
+          patrolmanLoginName: account ? account.loginName : "",
+          patrolmanName: name,
+          shift: shift.trim(),
+          contactNumber: account?.contactNumber || "",
+          securityLicenceNumber: account?.securityLicenceNumber || "",
+        },
+      });
+      if (!r?.ok) failed++;
+    }
+    setSaving(false);
+    if (failed) { setError(`${failed} day${failed === 1 ? "" : "s"} couldn't be saved — try again.`); return; }
+    showToast(`${name} rostered to ${run} on ${todo.length} day${todo.length === 1 ? "" : "s"}.${already.length ? ` (${already.length} already there, skipped.)` : ""}`);
+    onClose();
+  }
+
+  const label = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 16, background: "var(--panel)", maxWidth: 640 }}>
+      <SectionTitle icon={UserPlus} title={editing ? "Edit roster entry" : "Create shift"} small />
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <Field label="Date" style={{ width: 170 }}>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={selectStyle} />
+        </Field>
+        <Field label="Region" style={{ flex: 1, minWidth: 160 }}>
+          <select value={run} onChange={(e) => setRun(e.target.value)} style={selectStyle}>
+            <option value="">Choose a region…</option>
+            {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+          </select>
+        </Field>
+      </div>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <Field label="Patrolman" style={{ flex: 1, minWidth: 200 }}>
+          <select value={loginName} onChange={(e) => pick(e.target.value)} style={selectStyle}>
+            <option value="">Choose a patrolman…</option>
+            {patrolmen.map((p) => <option key={p.loginName} value={p.loginName}>{p.displayName}</option>)}
+            <option value="__custom__">Someone else (type a name)</option>
+          </select>
+        </Field>
+        <Field label="Shift" style={{ flex: 1, minWidth: 160 }}>
+          <input value={shift} onChange={(e) => setShift(e.target.value)} placeholder="e.g. Night 22:00–06:00" style={selectStyle} />
+        </Field>
+      </div>
+      {loginName === "__custom__" && (
+        <Field label="Name"><input value={customName} onChange={(e) => setCustomName(e.target.value)} placeholder="Patrolman's name" style={selectStyle} /></Field>
+      )}
+      {!editing && <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-dim)", margin: "4px 0 6px" }}>Also on (this week)</div>}
+      <div style={{ display: editing ? "none" : "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+        {weekDates.filter((d) => d !== date).map((d) => (
+          <label key={d} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 999, border: "1px solid var(--border)", background: alsoDays.includes(d) ? "var(--accent-dim)" : "var(--panel)", fontSize: 12, cursor: "pointer" }}>
+            <input type="checkbox" checked={alsoDays.includes(d)} onChange={(e) => setAlsoDays((a) => (e.target.checked ? [...a, d] : a.filter((x) => x !== d)))} />
+            {label(d)}
+          </label>
+        ))}
+      </div>
+      {error && <div style={{ color: "var(--breach)", fontSize: 12, marginBottom: 10 }}>{error}</div>}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button style={primaryBtn} onClick={save} disabled={saving}>{saving ? "Saving…" : editing ? "Save changes" : "Add to roster"}</button>
+        <button style={secondaryBtn} onClick={onClose}>Cancel</button>
+        {editing && (
+          <button
+            style={{ ...secondaryBtn, color: "var(--breach)", borderColor: "var(--breach)", marginLeft: "auto" }}
+            onClick={() => showConfirm(`Remove ${editing.patrolmanName || "this patrolman"} from ${editing.run} on ${editing.date}?`, async () => {
+              const r = await persistRoster("remove", { id: editing.id });
+              if (r?.ok) { showToast("Roster entry removed."); onClose(); } else setError("Couldn't remove — try again.");
+            })}
+          >
+            Remove
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Select shifts on the Control Room Schedule: tick roster entries, then
+// give them to another patrolman, move them to another region, or remove
+// them. Saved one at a time (each reads the latest roster on the server).
+function RosterBulkBar({ picked, setPicked, weekEntries, zones, patrolmen, persistRoster, showConfirm, onDone }) {
+  const showToast = useToast();
+  const [who, setWho] = useState("");
+  const [region, setRegion] = useState("");
+  const [busy, setBusy] = useState(false);
+  const chosen = weekEntries.filter((e) => picked.includes(e.id));
+
+  async function apply(label, change) {
+    setBusy(true);
+    let failed = 0;
+    for (const e of chosen) {
+      const r = change === "remove" ? await persistRoster("remove", { id: e.id }) : await persistRoster("update", { id: e.id, entry: { ...e, ...change } });
+      if (!r?.ok) failed++;
+    }
+    setBusy(false);
+    setPicked([]);
+    showToast(failed ? `${chosen.length - failed} done, ${failed} couldn't be saved — try again.` : `${label} ${chosen.length} roster entr${chosen.length === 1 ? "y" : "ies"}.`, failed ? "error" : undefined);
+  }
+
+  const small = { ...secondaryBtn, padding: "6px 10px", fontSize: 12 };
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: 12, border: "2px solid var(--navy)", borderRadius: 10, background: "var(--panel)" }}>
+      <b style={{ fontSize: 13 }}>{chosen.length} selected</b>
+      <button style={small} onClick={() => setPicked(weekEntries.map((e) => e.id))}>Select all this week</button>
+      <button style={small} onClick={() => setPicked([])}>Clear</button>
+      <span style={{ flex: 1 }} />
+      <select value={who} onChange={(e) => setWho(e.target.value)} style={{ ...selectStyle, width: 190 }}>
+        <option value="">Give to patrolman…</option>
+        {patrolmen.map((p) => <option key={p.loginName} value={p.loginName}>{p.displayName}</option>)}
+      </select>
+      <button
+        style={small}
+        disabled={busy || !who || !chosen.length}
+        onClick={() => {
+          const a = patrolmen.find((p) => p.loginName === who);
+          if (a) apply(`Gave ${a.displayName}`, { patrolmanLoginName: a.loginName, patrolmanName: a.displayName, contactNumber: a.contactNumber || "", securityLicenceNumber: a.securityLicenceNumber || "" });
+        }}
+      >
+        Reassign
+      </button>
+      <select value={region} onChange={(e) => setRegion(e.target.value)} style={{ ...selectStyle, width: 150 }}>
+        <option value="">Move to region…</option>
+        {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+      </select>
+      <button style={small} disabled={busy || !region || !chosen.length} onClick={() => apply(`Moved to ${region}:`, { run: region })}>Move</button>
+      <button
+        style={{ ...small, color: "var(--breach)", borderColor: "var(--breach)" }}
+        disabled={busy || !chosen.length}
+        onClick={() => showConfirm(`Remove ${chosen.length} roster entr${chosen.length === 1 ? "y" : "ies"}?`, () => apply("Removed", "remove"))}
+      >
+        Remove
+      </button>
+      <button style={small} onClick={onDone}>Done</button>
+      {busy && <span style={{ fontSize: 12, color: "var(--text-dim)" }}>Saving…</span>}
+    </div>
+  );
+}
+
+// Copy week on the Control Room Schedule: this week's roster entries to the
+// same days of the next 1–4 weeks, in one save. Entries already there (same
+// day, region and patrolman) aren't doubled up.
+function CopyRosterWeek({ weekDates, weekEntries, roster, persistRoster, onClose }) {
+  const showToast = useToast();
+  const [weeks, setWeeks] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const keyOf = (r) => `${r.date}|${String(r.run || "").toLowerCase()}|${String(r.patrolmanName || "").toLowerCase()}`;
+
+  async function copy() {
+    const existing = new Set(roster.map(keyOf));
+    const rows = [];
+    for (let w = 1; w <= weeks; w++) {
+      for (const e of weekEntries) {
+        const { id, ...rest } = e;
+        const row = { ...rest, date: dateOnlyISO(addDays(new Date(`${e.date}T00:00:00`), 7 * w)) };
+        if (!existing.has(keyOf(row))) rows.push(row);
+      }
+    }
+    if (!rows.length) { showToast("Nothing to copy — those weeks already have these entries."); onClose(); return; }
+    setBusy(true);
+    const r = await persistRoster("importRows", { rows });
+    setBusy(false);
+    if (!r?.ok) { showToast("Couldn't copy — try again.", "error"); return; }
+    showToast(`Copied ${rows.length} roster entr${rows.length === 1 ? "y" : "ies"} to the next ${weeks === 1 ? "week" : `${weeks} weeks`}.`);
+    onClose();
+  }
+
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: 12, border: "1px solid var(--border)", borderRadius: 10, background: "var(--panel)" }}>
+      <span style={{ fontSize: 13 }}>
+        Copy this week&rsquo;s <b>{weekEntries.length}</b> roster entr{weekEntries.length === 1 ? "y" : "ies"} ({weekDates[0]} – {weekDates[6]}) to the next
+      </span>
+      <select value={weeks} onChange={(e) => setWeeks(Number(e.target.value))} style={{ ...selectStyle, width: 110 }}>
+        {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n} week{n > 1 ? "s" : ""}</option>)}
+      </select>
+      <button style={primaryBtn} disabled={busy || !weekEntries.length} onClick={copy}>{busy ? "Copying…" : "Copy"}</button>
+      <button style={secondaryBtn} onClick={onClose}>Cancel</button>
     </div>
   );
 }
@@ -8047,7 +8340,7 @@ function AccountRow({ account, setAccounts, zones, isSelf, lastKnownPassword, on
    SITES & RUNS MANAGER
 ---------------------------------------------------------------- */
 
-function SitesManager({ zones, persistZones, sites, persistSites, accounts, setAccounts, session, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites }) {
+function SitesManager({ roster = [], zones, persistZones, sites, persistSites, accounts, setAccounts, session, runSheets, persistRunSheets, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites }) {
   return (
     <div>
       <ZonesEditor zones={zones} persistZones={persistZones} sites={sites} persistSites={persistSites} accounts={accounts} setAccounts={setAccounts} />
@@ -8060,7 +8353,7 @@ function SitesManager({ zones, persistZones, sites, persistSites, accounts, setA
             zones={zones} accounts={accounts}
             zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas}
             permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites}
-            runSheets={runSheets} persistRunSheets={persistRunSheets}
+            runSheets={runSheets} persistRunSheets={persistRunSheets} roster={roster}
           />
         </>
       )}
@@ -8549,7 +8842,7 @@ function makeRunSheetId() {
 // named, ordered group of sites for one patrol, optionally bulk-loaded
 // from a region). No clock-in gate or patrolman-side execution yet —
 // this is Control Room grouping/scheduling only.
-function PatrolOpsManager({ zones, accounts, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, runSheets, persistRunSheets }) {
+function PatrolOpsManager({ zones, accounts, zoneAreas, persistZoneAreas, permanentPatrolSites, persistPermanentPatrolSites, runSheets, persistRunSheets, roster = [] }) {
   const [subTab, setSubTab] = useState("regions");
   const tabs = [["regions", "Regions"], ["sites", "Permanent Patrol Sites"], ["runs", "Run Sheets"]];
 
@@ -8572,7 +8865,7 @@ function PatrolOpsManager({ zones, accounts, zoneAreas, persistZoneAreas, perman
       {subTab === "regions" && <RegionsManager zones={zones} zoneAreas={zoneAreas} persistZoneAreas={persistZoneAreas} permanentPatrolSites={permanentPatrolSites} />}
       {subTab === "sites" && <PermanentPatrolSitesEditor zones={zones} zoneAreas={zoneAreas} permanentPatrolSites={permanentPatrolSites} persistPermanentPatrolSites={persistPermanentPatrolSites} />}
       {subTab === "runs" && (
-        <RunSheetsManager zones={zones} accounts={accounts} zoneAreas={zoneAreas} permanentPatrolSites={permanentPatrolSites} runSheets={runSheets} persistRunSheets={persistRunSheets} />
+        <RunSheetsManager zones={zones} accounts={accounts} zoneAreas={zoneAreas} permanentPatrolSites={permanentPatrolSites} runSheets={runSheets} persistRunSheets={persistRunSheets} roster={roster} />
       )}
     </div>
   );
@@ -8628,7 +8921,8 @@ function RegionsManager({ zones, zoneAreas, persistZoneAreas, permanentPatrolSit
           <div style={{ flex: 1, minWidth: 0 }}>
             {selected ? (
               <>
-                <RegionAreaEditor zoneName={selected} zoneArea={area} persistZoneAreas={persistZoneAreas} />
+                {/* Keyed by region: the map is built once per editor, so each region gets its own fresh map with its own saved shape. */}
+                <RegionAreaEditor key={selected} zoneName={selected} zoneArea={area} persistZoneAreas={persistZoneAreas} />
                 <div style={{ marginTop: 22 }}>
                   <SectionTitle icon={MapPin} title={`Sites in "${selected}"`} small />
                   {sitesInRegion.length === 0 ? (
@@ -8965,6 +9259,39 @@ function scheduleSummaryText(record) {
   return `${days} · ${sample}${visits.length > 1 ? ` +${visits.length - 1} more` : ""}`;
 }
 
+// The whole weekly schedule at a glance in the site details (no click
+// needed): one line per active day with every visit. No schedule, or no
+// days ticked, shows a prompt to update it.
+function ScheduleOverview({ schedule, onEdit }) {
+  const active = schedule ? PATROL_WEEKDAYS.filter(({ key }) => schedule[key]?.enabled) : [];
+  if (!active.length) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 12px", marginBottom: 12, borderRadius: 8, border: "1px solid var(--warn)", background: "var(--accent-dim)", fontSize: 12.5 }}>
+        <span style={{ fontWeight: 600, color: "var(--warn)" }}>Schedule needs to be updated: no patrol days set.</span>
+        <button type="button" onClick={onEdit} style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px" }}>Set schedule</button>
+      </div>
+    );
+  }
+  return (
+    <div style={{ padding: "10px 12px", marginBottom: 12, borderRadius: 8, border: "1px solid var(--border)", background: "var(--panel-alt)", fontSize: 12.5 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <span style={{ fontWeight: 700 }}>Schedule</span>
+        <button type="button" onClick={onEdit} style={{ background: "none", border: "none", color: "var(--navy)", fontWeight: 600, fontSize: 12, cursor: "pointer", padding: 0 }}>Edit schedule</button>
+      </div>
+      {PATROL_WEEKDAYS.map(({ key, label }) => {
+        const d = schedule[key];
+        const visits = d?.enabled ? d.visits || [] : [];
+        return (
+          <div key={key} style={{ display: "flex", gap: 10, padding: "3px 0", color: d?.enabled ? "var(--text)" : "var(--text-dim)" }}>
+            <span style={{ width: 34, fontWeight: 600 }}>{label}</span>
+            <span>{d?.enabled ? (visits.length ? visits.map(visitSummaryText).join(" · ") : "no visits set") : "—"}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // Same local/no-persistence contract as SiteGeofenceEditor above — just
 // hands the finished weekly schedule to the parent's onApply.
 function PatrolScheduleEditor({ initialSchedule, onApply }) {
@@ -9046,12 +9373,15 @@ function PatrolScheduleEditor({ initialSchedule, onApply }) {
                             <select value={v.count} onChange={(e) => setVisit(key, i, { count: Number(e.target.value) })} style={{ ...selectStyle, width: 120 }}>
                               {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n} patrol{n > 1 ? "s" : ""}</option>)}
                             </select>
-                            <input type="time" value={v.start} onChange={(e) => setVisit(key, i, { start: e.target.value })} style={{ ...selectStyle, width: 105 }} />
-                            <span style={{ fontSize: 12, color: "var(--text-dim)" }}>to</span>
-                            <input type="time" value={v.end} onChange={(e) => setVisit(key, i, { end: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                            {/* From and to stay together on one row. */}
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+                              <Time24Input value={v.start} onChange={(e) => setVisit(key, i, { start: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                              <span style={{ fontSize: 12, color: "var(--text-dim)" }}>to</span>
+                              <Time24Input value={v.end} onChange={(e) => setVisit(key, i, { end: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                            </span>
                           </>
                         ) : (
-                          <input type="time" value={v.time} onChange={(e) => setVisit(key, i, { time: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                          <Time24Input value={v.time} onChange={(e) => setVisit(key, i, { time: e.target.value })} style={{ ...selectStyle, width: 105 }} />
                         )}
                       </>
                     ) : (
@@ -9066,12 +9396,15 @@ function PatrolScheduleEditor({ initialSchedule, onApply }) {
                         </div>
                         {v.mode === "window" ? (
                           <>
-                            <input type="time" value={v.start} onChange={(e) => setVisit(key, i, { start: e.target.value })} style={{ ...selectStyle, width: 105 }} />
-                            <span style={{ fontSize: 12, color: "var(--text-dim)" }}>to</span>
-                            <input type="time" value={v.end} onChange={(e) => setVisit(key, i, { end: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                            {/* From and to stay together on one row. */}
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+                              <Time24Input value={v.start} onChange={(e) => setVisit(key, i, { start: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                              <span style={{ fontSize: 12, color: "var(--text-dim)" }}>to</span>
+                              <Time24Input value={v.end} onChange={(e) => setVisit(key, i, { end: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                            </span>
                           </>
                         ) : (
-                          <input type="time" value={v.time} onChange={(e) => setVisit(key, i, { time: e.target.value })} style={{ ...selectStyle, width: 105 }} />
+                          <Time24Input value={v.time} onChange={(e) => setVisit(key, i, { time: e.target.value })} style={{ ...selectStyle, width: 105 }} />
                         )}
                       </>
                     )}
@@ -9327,6 +9660,54 @@ function PermanentPatrolSitesImport({ zoneAreas, permanentPatrolSites, persistPe
   );
 }
 
+// A time box that's always 24-hour ("18:30"), whatever the computer's own
+// clock setting — the browser's built-in time picker follows the device's
+// AM/PM preference, which isn't how shifts are worked out. Accepts "1830",
+// "18.30", "6:45", "645" or "18" and tidies it to HH:MM when you leave the
+// box. Calls onChange like a normal input (e.target.value) when you leave
+// the box (or press Enter), with a valid time or "" when cleared.
+function parseTime24(text) {
+  const t = String(text || "").trim().replace(/[.\sh]/gi, ":");
+  if (!t) return "";
+  let h, m;
+  const parts = t.split(":").filter((x) => x !== "");
+  if (parts.length >= 2) { h = Number(parts[0]); m = Number(parts[1]); }
+  else if (/^\d{3,4}$/.test(t)) { h = Number(t.slice(0, t.length - 2)); m = Number(t.slice(-2)); }
+  else if (/^\d{1,2}$/.test(t)) { h = Number(t); m = 0; }
+  else return null;
+  if (!Number.isInteger(h) || !Number.isInteger(m) || h < 0 || h > 23 || m < 0 || m > 59) return null;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function Time24Input({ value, onChange, style, ...rest }) {
+  const [text, setText] = useState(value || "");
+  const [bad, setBad] = useState(false);
+  useEffect(() => { setText(value || ""); setBad(false); }, [value]);
+  const send = (v) => onChange?.({ target: { value: v } });
+  return (
+    <input
+      {...rest}
+      type="text"
+      inputMode="numeric"
+      placeholder="HH:MM"
+      maxLength={5}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+      onBlur={() => {
+        const v = parseTime24(text);
+        if (v === null) { setBad(true); return; }
+        setBad(false);
+        setText(v);
+        if (v !== (value || "")) send(v);
+      }}
+      title={bad ? "Use 24-hour time, e.g. 06:45 or 18:30" : "24-hour time, e.g. 18:30"}
+      style={{ ...style, fontVariantNumeric: "tabular-nums", ...(bad ? { borderColor: "var(--breach)" } : {}) }}
+    />
+  );
+}
+
+
 // Search-as-you-type on the Site Name field — type a business/place name
 // (or an address), pick the right result, and it fills the Address field
 // with the complete formatted address while leaving the name free to
@@ -9359,6 +9740,10 @@ function PlaceSearchInput({ value, onChange, onPlaceSelected, placeholder, style
     loadGoogleMaps().then((maps) => {
       if (cancelled || !containerRef.current || !maps.places?.PlaceAutocompleteElement) return;
       const el = new maps.places.PlaceAutocompleteElement();
+      // Australian places only (searching a business name otherwise matches
+      // places all over the world).
+      try { el.includedRegionCodes = ["au"]; } catch (e) { /* older widget: worldwide */ }
+      if (placeholder) try { el.placeholder = placeholder; } catch (e) {}
       el.style.width = "100%";
       // The widget ships borderless/transparent by design (it's meant to
       // be dropped into a host app's own field styling) — these are its
@@ -9403,7 +9788,7 @@ function PlaceSearchInput({ value, onChange, onPlaceSelected, placeholder, style
   // underlying form state (and the saved record) being correct the
   // whole time.
   useEffect(() => {
-    if (!elementRef.current) return;
+    if (!elementRef.current || value === undefined) return; // search-only: leave the widget's text alone
     try { elementRef.current.value = value || ""; } catch (e) {}
   }, [value, widgetReady]);
 
@@ -9421,7 +9806,8 @@ function PlaceSearchInput({ value, onChange, onPlaceSelected, placeholder, style
           // why suggestions stopped appearing after the last styling pass.
         }}
       />
-      {!widgetReady && <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={style} />}
+      {!widgetReady && onChange && <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={style} />}
+      {!widgetReady && !onChange && <div style={{ fontSize: 12, color: "var(--text-dim)" }}>Address search isn’t available right now — type the address below.</div>}
     </div>
   );
 }
@@ -9542,10 +9928,15 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
               <SectionTitle icon={MapPin} title={editingId ? "Edit permanent patrol site" : "Add a permanent patrol site"} small />
               <div style={{ display: "flex", gap: 12 }}>
                 <Field label="Site name" style={{ flex: 1 }}>
-                  <PlaceSearchInput
-                    value={form.name}
-                    onChange={(v) => set("name", v)}
-                    onPlaceSelected={async ({ address, name, location }) => {
+                  <input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. Riverwood Business Park" style={selectStyle} />
+                </Field>
+                <Field label="Customer" style={{ flex: 1 }}><input value={form.customer} onChange={(e) => set("customer", e.target.value)} style={selectStyle} /></Field>
+              </div>
+              {/* Google search fills in the address (and the site name only if it's blank). Australia only. */}
+              <Field label="Find the address">
+                <PlaceSearchInput
+                  placeholder="Search a street address or place in Australia"
+                  onPlaceSelected={async ({ address, name, location }) => {
                       let region = "";
                       if (location) {
                         try {
@@ -9553,13 +9944,10 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
                           region = suggestRegionForPoint(maps, zoneAreas, location);
                         } catch (e) { /* region suggestion just won't run — address/name still fill in */ }
                       }
-                      setForm((f) => ({ ...f, name: name || f.name, address: address || f.address, region: region || f.region }));
+                      setForm((f) => ({ ...f, name: f.name.trim() ? f.name : name || f.name, address: address || f.address, region: region || f.region }));
                     }}
-                    style={selectStyle}
-                  />
-                </Field>
-                <Field label="Customer" style={{ flex: 1 }}><input value={form.customer} onChange={(e) => set("customer", e.target.value)} style={selectStyle} /></Field>
-              </div>
+                />
+              </Field>
               <Field label="Address"><input value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, suburb, state" style={selectStyle} /></Field>
               <Field label="Region">
                 <select value={form.region} onChange={(e) => set("region", e.target.value)} style={selectStyle}>
@@ -9570,6 +9958,7 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
               <Field label="Key / access code"><input value={form.keyCode} onChange={(e) => set("keyCode", e.target.value)} placeholder="e.g. Key #14, lockbox code 2481" style={selectStyle} /></Field>
               <Field label="Notes (optional)"><textarea rows={2} value={form.notes} onChange={(e) => set("notes", e.target.value)} style={{ ...selectStyle, resize: "vertical" }} /></Field>
 
+              {panel !== "schedule" && <ScheduleOverview schedule={form.schedule} onEdit={() => setPanel("schedule")} />}
               <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
                 <button
                   onClick={() => setPanel(panel === "location" ? null : "location")}
@@ -9581,7 +9970,7 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
                   onClick={() => setPanel(panel === "schedule" ? null : "schedule")}
                   style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px", background: panel === "schedule" ? "var(--navy)" : "var(--panel)", color: panel === "schedule" ? "#fff" : "var(--text)" }}
                 >
-                  {form.schedule ? "Schedule ✓" : "Set schedule"}
+                  {form.schedule && PATROL_WEEKDAYS.some(({ key }) => form.schedule[key]?.enabled) ? "Schedule ✓" : "Set schedule"}
                 </button>
                 {editingId && <button onClick={() => remove(permanentPatrolSites.find((r) => r.id === editingId))} style={{ ...secondaryBtn, fontSize: 11.5, padding: "6px 10px", color: "var(--breach)", borderColor: "var(--breach)" }}>Delete</button>}
               </div>
@@ -9612,8 +10001,11 @@ function PermanentPatrolSitesEditor({ zones, zoneAreas, permanentPatrolSites, pe
   );
 }
 
-function RunSheetsManager({ zones, accounts, zoneAreas, permanentPatrolSites, runSheets, persistRunSheets }) {
-  const patrolmen = accounts.filter((a) => a.role === "patrolman");
+// A run sheet is assigned to a region, and the region works like a site on
+// the roster: whoever is rostered to that region on a day does its run sheet.
+function RunSheetsManager({ zones, accounts, zoneAreas, permanentPatrolSites, runSheets, persistRunSheets, roster = [] }) {
+  const today = dateOnlyISO(new Date());
+  const rosteredToday = (region) => roster.filter((r) => r.date === today && region && (r.run || "") === region).map((r) => r.patrolmanName || "Patrolman");
   const blank = { name: "", region: "", siteIds: [], assigneeLoginName: "" };
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
@@ -9660,6 +10052,7 @@ function RunSheetsManager({ zones, accounts, zoneAreas, permanentPatrolSites, ru
     setError("");
     const name = form.name.trim();
     if (!name) { setError("Run sheet name is required."); return; }
+    if (!form.region) { setError("Choose the region this run sheet is assigned to."); return; }
     if (!form.siteIds.length) { setError("Add at least one site."); return; }
     if (runSheets.some((r) => r.id !== editingId && r.name.toLowerCase() === name.toLowerCase())) {
       setError("That run sheet name already exists."); return;
@@ -9694,19 +10087,19 @@ function RunSheetsManager({ zones, accounts, zoneAreas, permanentPatrolSites, ru
       <SectionTitle icon={Navigation} title={editingId ? "Edit run sheet" : "New run sheet"} small />
       <div style={{ maxWidth: 580, marginBottom: 24 }}>
         <div style={{ display: "flex", gap: 12 }}>
-          <Field label="Region" style={{ flex: 1 }}>
+          <Field label="Assigned to region" style={{ flex: 1 }}>
             <select value={form.region} onChange={(e) => set("region", e.target.value)} style={selectStyle}>
-              <option value="">— none —</option>
+              <option value="">Choose a region…</option>
               {zones.map((z) => <option key={z} value={z}>{z}</option>)}
             </select>
           </Field>
-          <Field label="Assign to" style={{ width: 220 }}>
-            <select value={form.assigneeLoginName} onChange={(e) => set("assigneeLoginName", e.target.value)} style={selectStyle}>
-              <option value="">Unassigned</option>
-              {patrolmen.map((p) => <option key={p.loginName} value={p.loginName}>{p.displayName}</option>)}
-            </select>
-          </Field>
         </div>
+        {form.region && (
+          <div style={{ fontSize: 11.5, color: "var(--text-dim)", margin: "-4px 0 10px" }}>
+            Goes to whoever is rostered to {form.region}.{" "}
+            {rosteredToday(form.region).length ? `Today: ${rosteredToday(form.region).join(", ")}.` : <span style={{ color: "var(--warn)" }}>No one is rostered there today.</span>}
+          </div>
+        )}
         {form.region && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
             <span style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
@@ -9764,13 +10157,13 @@ function RunSheetsManager({ zones, accounts, zoneAreas, permanentPatrolSites, ru
       <SectionTitle icon={Navigation} title={`Run sheets (${runSheets.length})`} small />
       <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 720 }}>
         {runSheets.map((rs) => {
-          const assignee = patrolmen.find((p) => p.loginName === rs.assigneeLoginName);
+          const today = rosteredToday(rs.region);
           return (
             <div key={rs.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 8, background: "var(--panel)", border: "1px solid var(--border)" }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>{rs.name}</div>
                 <div style={{ fontSize: 11.5, color: "var(--text-dim)" }}>
-                  {(rs.siteIds || []).length} site(s){rs.region ? ` · ${rs.region}` : ""} · {assignee ? assignee.displayName : "Unassigned"}
+                  {(rs.siteIds || []).length} site(s) · {rs.region ? <>Region <b>{rs.region}</b> · {today.length ? `today: ${today.join(", ")}` : <span style={{ color: "var(--warn)" }}>no one rostered today</span>}</> : <span style={{ color: "var(--warn)" }}>not assigned to a region</span>}
                 </div>
               </div>
               <button onClick={() => startEdit(rs)} title="Edit" style={iconBtn}><RotateCcw size={13} /></button>
