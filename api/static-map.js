@@ -2,18 +2,50 @@
 // attendance PDF can embed a map image — jsPDF can only embed raster
 // images, not the live iframe embed used on the Control Room screen.
 //
-// Rather than depend on a third-party "static map" generator (tried
-// staticmap.openstreetmap.de first — it wasn't reliably reachable from
-// Vercel's serverless environment), this fetches a single raster tile
-// directly from OpenStreetMap's own official tile server — the same
-// infrastructure that backs the on-screen embedded map — and draws the
-// pin on top of it server-side.
+// Uses Google's Maps Static API when GOOGLE_STATIC_MAPS_API_KEY is set —
+// the same Maps platform the Regions/Permanent Patrol Sites pilot already
+// uses, but a separate server-side key (no VITE_ prefix, so it never ships
+// to the browser): VITE_GOOGLE_MAPS_API_KEY is restricted by HTTP referrer,
+// which a server-to-server call never sends, so it can't be reused here.
+// Falls back to fetching a raster tile straight from OpenStreetMap's own
+// tile server and drawing the pin on top server-side — this app's original
+// approach — if that key isn't set, or if the Google request fails for any
+// reason, so this stays working either way.
 
 import sharp from "sharp";
 import { requireSession } from "./_lib/auth.js";
 
 const ZOOM = 15;
 const TILE_SIZE = 256;
+
+async function fetchGoogleStaticMap(lat, lon, apiKey) {
+  const params = new URLSearchParams({
+    center: `${lat},${lon}`,
+    zoom: String(ZOOM),
+    size: `${TILE_SIZE}x${TILE_SIZE}`,
+    scale: "2",
+    maptype: "roadmap",
+    markers: `color:red|${lat},${lon}`,
+    key: apiKey,
+  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(`https://maps.googleapis.com/maps/api/staticmap?${params}`, {
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    // On a key/auth problem Google returns 200 with a JSON or text error
+    // body instead of an image — treat anything non-image as a failure.
+    if (!response.headers.get("content-type")?.startsWith("image/")) return null;
+    const buf = Buffer.from(await response.arrayBuffer());
+    return `data:image/png;base64,${buf.toString("base64")}`;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 // Standard Web Mercator slippy-map tile math.
 function tileCoords(lat, lon, zoom) {
@@ -49,6 +81,13 @@ export default async function handler(req, res) {
   const lon = Number(req.query?.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
     return res.status(400).json({ error: "lat and lon query params are required." });
+  }
+
+  const googleKey = process.env.GOOGLE_STATIC_MAPS_API_KEY;
+  if (googleKey) {
+    const dataUrl = await fetchGoogleStaticMap(lat, lon, googleKey);
+    if (dataUrl) return res.status(200).json({ dataUrl });
+    // falls through to the OpenStreetMap path below on any Google failure
   }
 
   try {
