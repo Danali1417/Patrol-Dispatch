@@ -7374,8 +7374,22 @@ function makeIncidentTemplateId() {
   return `tpl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-const INCIDENT_QUESTION_TYPES = ["Yes / No", "Text answer", "Photo", "Multiple choice"];
-const BLANK_INCIDENT_QUESTION = { text: "", type: INCIDENT_QUESTION_TYPES[0] };
+const INCIDENT_QUESTION_TYPES = [
+  "Yes / No",
+  "Text answer",
+  "Number",
+  "Date",
+  "Time",
+  "Photo",
+  "Multiple photos",
+  "Multiple choice",
+];
+// Every question gets its own fresh options array — sharing one across
+// questions would mean editing one question's choices silently edits them
+// all. "options" is only shown/used when type is "Multiple choice".
+function makeBlankIncidentQuestion() {
+  return { text: "", type: INCIDENT_QUESTION_TYPES[0], options: ["", ""] };
+}
 
 // Build and manage custom incident report templates — real storage (see
 // INCIDENT_TEMPLATES_KEY), Dan-only for now like the rest of this pilot.
@@ -7383,7 +7397,7 @@ const BLANK_INCIDENT_QUESTION = { text: "", type: INCIDENT_QUESTION_TYPES[0] };
 // only, same deliberate scoping as the rest of this Control Room pilot —
 // no changes to the real patrolman app.
 function ControlRoomIncidentManager({ incidentTemplates, persistIncidentTemplates, permanentPatrolSites }) {
-  const blank = { name: "", questions: [{ ...BLANK_INCIDENT_QUESTION }], siteIds: [] };
+  const blank = { name: "", questions: [makeBlankIncidentQuestion()], siteIds: [] };
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState(null);
   const [showForm, setShowForm] = useState(false);
@@ -7396,8 +7410,20 @@ function ControlRoomIncidentManager({ incidentTemplates, persistIncidentTemplate
   function setQuestion(i, patch) {
     setForm((f) => ({ ...f, questions: f.questions.map((q, idx) => (idx === i ? { ...q, ...patch } : q)) }));
   }
-  function addQuestion() { setForm((f) => ({ ...f, questions: [...f.questions, { ...BLANK_INCIDENT_QUESTION }] })); }
+  function addQuestion() { setForm((f) => ({ ...f, questions: [...f.questions, makeBlankIncidentQuestion()] })); }
   function removeQuestion(i) { setForm((f) => ({ ...f, questions: f.questions.filter((_, idx) => idx !== i) })); }
+  function setQuestionOption(qIndex, optIndex, value) {
+    setForm((f) => ({
+      ...f,
+      questions: f.questions.map((q, idx) => (idx === qIndex ? { ...q, options: q.options.map((o, oi) => (oi === optIndex ? value : o)) } : q)),
+    }));
+  }
+  function addQuestionOption(qIndex) {
+    setForm((f) => ({ ...f, questions: f.questions.map((q, idx) => (idx === qIndex ? { ...q, options: [...q.options, ""] } : q)) }));
+  }
+  function removeQuestionOption(qIndex, optIndex) {
+    setForm((f) => ({ ...f, questions: f.questions.map((q, idx) => (idx === qIndex ? { ...q, options: q.options.filter((_, oi) => oi !== optIndex) } : q)) }));
+  }
   function toggleSite(id) {
     setForm((f) => ({ ...f, siteIds: f.siteIds.includes(id) ? f.siteIds.filter((x) => x !== id) : [...f.siteIds, id] }));
   }
@@ -7405,7 +7431,12 @@ function ControlRoomIncidentManager({ incidentTemplates, persistIncidentTemplate
   function startNew() { setEditingId(null); setForm(blank); setError(""); setShowForm(true); }
   function startEdit(t) {
     setEditingId(t.id);
-    setForm({ name: t.name || "", questions: t.questions?.length ? t.questions : [{ ...BLANK_INCIDENT_QUESTION }], siteIds: t.siteIds || [] });
+    // Templates saved before "Multiple choice" had configurable options
+    // won't have an options array — backfill so editing them doesn't break.
+    const questions = t.questions?.length
+      ? t.questions.map((q) => ({ ...q, options: q.options?.length ? q.options : ["", ""] }))
+      : [makeBlankIncidentQuestion()];
+    setForm({ name: t.name || "", questions, siteIds: t.siteIds || [] });
     setError("");
     setShowForm(true);
   }
@@ -7415,7 +7446,18 @@ function ControlRoomIncidentManager({ incidentTemplates, persistIncidentTemplate
     setError("");
     const name = form.name.trim();
     if (!name) { setError("Template name is required."); return; }
-    const questions = form.questions.map((q) => ({ text: q.text.trim(), type: q.type })).filter((q) => q.text);
+    const questions = [];
+    for (const q of form.questions) {
+      const text = q.text.trim();
+      if (!text) continue;
+      if (q.type === "Multiple choice") {
+        const options = q.options.map((o) => o.trim()).filter(Boolean);
+        if (options.length < 2) { setError(`"${text}" needs at least 2 answer options.`); return; }
+        questions.push({ text, type: q.type, options });
+      } else {
+        questions.push({ text, type: q.type });
+      }
+    }
     if (!questions.length) { setError("Add at least one question."); return; }
     const record = { name, questions, siteIds: form.siteIds };
     if (editingId) {
@@ -7485,24 +7527,50 @@ function ControlRoomIncidentManager({ incidentTemplates, persistIncidentTemplate
           <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-dim)", margin: "16px 0 8px" }}>Questions</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
             {form.questions.map((q, i) => (
-              <div key={i} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input
-                  value={q.text}
-                  onChange={(e) => setQuestion(i, { text: e.target.value })}
-                  placeholder="e.g. Were all external doors locked?"
-                  style={{ ...selectStyle, flex: 1 }}
-                />
-                <select value={q.type} onChange={(e) => setQuestion(i, { type: e.target.value })} style={{ ...selectStyle, width: 150 }}>
-                  {INCIDENT_QUESTION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-                <button
-                  onClick={() => removeQuestion(i)}
-                  disabled={form.questions.length === 1}
-                  title="Remove question"
-                  style={{ background: "none", border: "none", color: form.questions.length === 1 ? "var(--text-dim)" : "var(--breach)", cursor: form.questions.length === 1 ? "default" : "pointer", padding: 6 }}
-                >
-                  <X size={15} />
-                </button>
+              <div key={i} style={{ padding: "8px 10px", borderRadius: 8, border: q.type === "Multiple choice" ? "1px solid var(--border)" : "none" }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    value={q.text}
+                    onChange={(e) => setQuestion(i, { text: e.target.value })}
+                    placeholder="e.g. Were all external doors locked?"
+                    style={{ ...selectStyle, flex: 1 }}
+                  />
+                  <select value={q.type} onChange={(e) => setQuestion(i, { type: e.target.value })} style={{ ...selectStyle, width: 150 }}>
+                    {INCIDENT_QUESTION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <button
+                    onClick={() => removeQuestion(i)}
+                    disabled={form.questions.length === 1}
+                    title="Remove question"
+                    style={{ background: "none", border: "none", color: form.questions.length === 1 ? "var(--text-dim)" : "var(--breach)", cursor: form.questions.length === 1 ? "default" : "pointer", padding: 6 }}
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+                {q.type === "Multiple choice" && (
+                  <div style={{ marginTop: 8, paddingLeft: 4, display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ fontSize: 11, color: "var(--text-dim)" }}>Answer options</div>
+                    {q.options.map((opt, oi) => (
+                      <div key={oi} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        <input
+                          value={opt}
+                          onChange={(e) => setQuestionOption(i, oi, e.target.value)}
+                          placeholder={`Option ${oi + 1}`}
+                          style={{ ...selectStyle, flex: 1 }}
+                        />
+                        <button
+                          onClick={() => removeQuestionOption(i, oi)}
+                          disabled={q.options.length <= 2}
+                          title="Remove option"
+                          style={{ background: "none", border: "none", color: q.options.length <= 2 ? "var(--text-dim)" : "var(--breach)", cursor: q.options.length <= 2 ? "default" : "pointer", padding: 6 }}
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ))}
+                    <button style={{ ...secondaryBtn, alignSelf: "flex-start", padding: "5px 10px", fontSize: 11.5 }} onClick={() => addQuestionOption(i)}>+ Add option</button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
