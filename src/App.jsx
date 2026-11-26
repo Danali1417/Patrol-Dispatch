@@ -2418,7 +2418,7 @@ function OperatorView({ session, jobs, accounts, sites, persistSites, zones, ros
       <div style={{ padding: 20, maxWidth: 1180, margin: "0 auto" }}>
         {tab === "dashboard" && <OperatorDashboard session={session} jobs={jobs} roster={roster} now={now} onOpenJob={(id) => { setTab("board"); selectJob(id); }} onNavigate={goTab} />}
         {tab === "board" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} roster={roster} />}
-        {tab === "scheduled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="scheduled" roster={roster} />}
+        {tab === "scheduled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="scheduled" roster={roster} persist={persist} session={session} />}
         {tab === "cancelled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="cancelled" roster={roster} />}
         {tab === "closed" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="emailed" roster={roster} />}
         {(tab === "board" || tab === "scheduled" || tab === "cancelled" || tab === "closed") && selected && (
@@ -2459,7 +2459,7 @@ const BOARD_STATUS_OPTIONS = [
 // dedicated "Cancelled jobs" / "Closed jobs" tabs. Left unset on the main
 // Dispatch board, which defaults to active jobs only and lets Control
 // Room widen the view (or search for anything by number/site/date).
-function Board({ jobs, now, onSelect, lockedStatus, roster }) {
+function Board({ jobs, now, onSelect, lockedStatus, roster, persist, session }) {
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -2467,6 +2467,60 @@ function Board({ jobs, now, onSelect, lockedStatus, roster }) {
   const [timeTo, setTimeTo] = useState("");
   const [statusFilter, setStatusFilter] = useState(lockedStatus || "active");
   const [archiveMatches, setArchiveMatches] = useState([]);
+  // Bulk-cancel is only offered on the dedicated Scheduled board — these
+  // jobs haven't dispatched yet, so cancelling several at once is exactly
+  // as safe as cancelling one (see ScheduledJobView's own confirmCancel,
+  // which this mirrors). Bulk-cancelling already-active/dispatched jobs is
+  // a materially bigger action (a patrolman may already be en route or
+  // onsite) and deserves its own explicit decision, not a side effect of
+  // this change.
+  const canBulkCancel = lockedStatus === "scheduled" && persist && session;
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [showBulkCancelForm, setShowBulkCancelForm] = useState(false);
+  const [bulkCancelReason, setBulkCancelReason] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const showToast = useToast();
+
+  function toggleSelectMode() {
+    setSelectMode((v) => !v);
+    setSelectedIds(new Set());
+    setShowBulkCancelForm(false);
+    setBulkCancelReason("");
+  }
+  function toggleSelected(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  async function confirmBulkCancel() {
+    if (bulkBusy || selectedIds.size === 0) return;
+    setBulkBusy(true);
+    const reason = bulkCancelReason.trim() || "Cancelled before its scheduled dispatch time";
+    const nowIso = new Date().toISOString();
+    const updated = jobs.map((j) => {
+      if (!selectedIds.has(j.id)) return j;
+      return {
+        ...j,
+        status: "cancelled",
+        cancelReason: reason,
+        cancelledAt: nowIso,
+        cancelledByLoginName: session.loginName,
+        cancelledByName: session.displayName,
+        activityLog: [...(j.activityLog || []), logEntry(session, "Cancelled", reason)],
+      };
+    });
+    const count = selectedIds.size;
+    await persist(updated);
+    setBulkBusy(false);
+    showToast(`${count} scheduled job${count === 1 ? "" : "s"} cancelled.`);
+    setSelectMode(false);
+    setSelectedIds(new Set());
+    setShowBulkCancelForm(false);
+    setBulkCancelReason("");
+  }
 
   const groups = statusFilter === "all"
     ? BOARD_GROUPS
@@ -2540,6 +2594,42 @@ function Board({ jobs, now, onSelect, lockedStatus, roster }) {
         {hasFilter && <button onClick={clearFilters} style={{ ...secondaryBtn, marginBottom: 0 }}><X size={13} /> Clear filters</button>}
       </div>
 
+      {canBulkCancel && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+          <button onClick={toggleSelectMode} style={secondaryBtn}>
+            {selectMode ? <X size={13} /> : <CheckCircle2 size={13} />} {selectMode ? "Cancel selecting" : "Select jobs to cancel"}
+          </button>
+          {selectMode && (
+            <>
+              <span style={{ fontSize: 12.5, color: "var(--text-dim)" }}>{selectedIds.size} selected</span>
+              <button
+                onClick={() => setShowBulkCancelForm(true)}
+                disabled={selectedIds.size === 0}
+                style={{ ...secondaryBtn, color: "var(--breach)", borderColor: "var(--breach)66", opacity: selectedIds.size === 0 ? 0.5 : 1, cursor: selectedIds.size === 0 ? "not-allowed" : "pointer" }}
+              >
+                <Ban size={13} /> Cancel selected
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {showBulkCancelForm && (
+        <div style={{ marginBottom: 14, padding: 14, borderRadius: 8, border: "1px solid var(--breach)", background: "#FEF2F2" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, color: "#B91C1C", fontWeight: 700, fontSize: 12.5, marginBottom: 8 }}>
+            <Ban size={14} /> Cancel {selectedIds.size} scheduled job{selectedIds.size === 1 ? "" : "s"} — none of them go out to the patrolman
+          </div>
+          <UpperTextarea rows={2} value={bulkCancelReason} onChange={setBulkCancelReason} placeholder="e.g. No longer required — client cancelled the booking" style={{ ...selectStyle, resize: "vertical" }} />
+          <div style={{ fontSize: 11.5, color: "var(--text-dim)", marginTop: 6 }}>This comment is saved on every selected job.</div>
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button onClick={confirmBulkCancel} disabled={bulkBusy} style={{ ...primaryBtn, background: "var(--breach)", opacity: bulkBusy ? 0.6 : 1, cursor: bulkBusy ? "not-allowed" : "pointer" }}>
+              <Ban size={14} /> {bulkBusy ? "Cancelling…" : "Confirm cancel"}
+            </button>
+            <button onClick={() => setShowBulkCancelForm(false)} disabled={bulkBusy} style={secondaryBtn}>Never mind</button>
+          </div>
+        </div>
+      )}
+
       {visible.length === 0 && archiveMatches.length === 0 && (
         <Empty text={
           hasFilter ? "No jobs match these filters."
@@ -2567,7 +2657,21 @@ function Board({ jobs, now, onSelect, lockedStatus, roster }) {
               {g.title} ({list.length})
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {list.map((j) => <JobCard key={j.id} job={j} now={now} onClick={() => onSelect(j.id)} roster={roster} />)}
+              {list.map((j) => (
+                <div key={j.id} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                  {selectMode && (
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(j.id)}
+                      onChange={() => toggleSelected(j.id)}
+                      style={{ marginTop: 17, flexShrink: 0, width: 15, height: 15, cursor: "pointer" }}
+                    />
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <JobCard job={j} now={now} onClick={() => (selectMode ? toggleSelected(j.id) : onSelect(j.id))} roster={roster} />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         );
@@ -7267,7 +7371,7 @@ function ControlRoomDispatchBoard({ jobs, persist, roster, sites, persistSites, 
         ))}
       </div>
       {subTab === "board" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} roster={roster} />}
-      {subTab === "scheduled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="scheduled" roster={roster} />}
+      {subTab === "scheduled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="scheduled" roster={roster} persist={persist} session={session} />}
       {subTab === "cancelled" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="cancelled" roster={roster} />}
       {subTab === "closed" && !selected && <Board jobs={jobs} now={now} onSelect={selectJob} lockedStatus="emailed" roster={roster} />}
       {(subTab === "board" || subTab === "scheduled" || subTab === "cancelled" || subTab === "closed") && selected && (
